@@ -118,7 +118,7 @@ cargo test
 - `sdk/js npm test`：4/4 通过（URL/Header/JSON/错误映射）
 - `sdk/python python -m unittest`：4/4 通过（查询构造/请求体/错误映射/环境变量）
 - Python 3.12 `py_compile`：通过
-- `node scripts/verify.mjs`：通过，0 提示（107 个 Tauri 命令注册、107 个前端 IPC 命令覆盖、30 条 API 路由、18 张表、Capability、主题 Token、需求/技术文档能力追踪）
+- `node scripts/verify.mjs`：通过，0 提示（112 个 Tauri 命令注册、112 个前端 IPC 命令覆盖、30 条 API 路由、18 张表、Capability、主题 Token、需求/技术文档能力追踪）
 - `cargo fmt --check`：通过
 - `cargo check`：通过
 - `cargo clippy --all-targets -- -D warnings`：通过（0 warning）
@@ -172,3 +172,12 @@ cargo test
   - 调用 `env_check_ip` 后重写启动页，刷新页面显示 `220.197.77.126 / Beijing / China / Asia/Shanghai`。
   - `open_artifact_dir('screenshots')` 与 `open_artifact_dir('recordings')` 均成功打开目录。
   - 启动页 HTML 转义测试覆盖环境名与备注中的 `<script>` 注入。
+
+## 16. 扩展在线安装与全局管理
+
+- **在线安装**：`extension_install_online` 支持 Chrome 应用商店链接或 32 位扩展 ID；后端下载 CRX2/CRX3，跳过签名头并解压 ZIP 到 `extensions/store/<id>-<suffix>`，校验 `manifest.json` 后加入全局扩展库。
+- **安全**：拒绝非 CRX/ZIP 数据、超过 80MB 的安装包、超过 120MB 的解压总量、超过 6000 个文件；使用 `enclosed_name` 防止 Zip Slip，跳过符号链接。
+- **全局扩展库**：任何环境都可选择同一扩展；列表展示已分配环境数，支持启用/停用、编辑名称/描述、打开扩展目录、删除（在线下载目录一并清理）。
+- **批量与全部应用**：支持批量勾选环境、全选；`extension_assign_all` 一键分配到全部环境。运行中的环境需重启浏览器生效。
+- **品牌版 Chrome 回退**：Chrome 137+ 品牌版移除了 `--load-extension`；在线安装页提供「在浏览器中打开商店」，可在目标环境中通过 Chrome 原生「添加至 Chrome」安装。Chromium / Chrome for Testing 仍可直接加载解压扩展。
+- **验证**：通过本地 CRX3 测试服务完整跑通下载 → 解析 → 解压 → 入库 → 分配到 1 个环境 → 应用到全部 2 个环境 → 停用/改描述 → 第二个环境读取 → 删除并确认扩展目录被清理；UI 截图确认在线安装对话框与扩展库布局。

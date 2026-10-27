@@ -238,6 +238,7 @@ export const auditActionLabels: Record<string, string> = {
   'hosts.update': '更新 Hosts',
   'mock.update': '更新 Mock',
   'extension.add': '安装扩展',
+  'extension.update': '更新扩展',
   'extension.assign': '分配扩展',
   'extension.unassign': '取消扩展',
   'extension.delete': '删除扩展',

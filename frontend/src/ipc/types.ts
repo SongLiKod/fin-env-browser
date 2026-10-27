@@ -553,6 +553,13 @@ export interface Extension {
   enabled: boolean;
   description: string;
   createdAt: string;
+  assignedCount: number;
+}
+
+export interface UpdateExtensionInput {
+  name?: string;
+  description?: string;
+  enabled?: boolean;
 }
 
 export interface HostsEntry {

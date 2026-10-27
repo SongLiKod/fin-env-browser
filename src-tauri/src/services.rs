@@ -1,3 +1,4 @@
+use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
 use crate::{
@@ -1507,6 +1508,7 @@ pub fn add_extension(
             .unwrap_or("")
             .to_string(),
         created_at: now_iso(),
+        assigned_count: 0,
     };
     state.db.insert_extension(&extension)?;
     Audit::global(
@@ -1516,6 +1518,306 @@ pub fn add_extension(
         format!("安装扩展 {} ({})", extension.name, extension.path),
     )?;
     Ok(extension)
+}
+
+pub fn update_extension(
+    state: &SharedState,
+    id: &str,
+    input: crate::models::UpdateExtensionInput,
+    actor: &str,
+) -> Result<Extension> {
+    let mut extension = state.db.get_extension(id)?;
+    if let Some(name) = input.name {
+        if name.trim().is_empty() {
+            return Err(AppError::bad_request("扩展名称不能为空"));
+        }
+        extension.name = name.trim().to_string();
+    }
+    if let Some(description) = input.description {
+        extension.description = description.trim().to_string();
+    }
+    if let Some(enabled) = input.enabled {
+        extension.enabled = enabled;
+    }
+    state.db.update_extension(&extension)?;
+    Audit::global(
+        &state.db,
+        actor,
+        actions::EXTENSION_UPDATE,
+        format!(
+            "更新扩展 {}（{}）",
+            extension.name,
+            if extension.enabled {
+                "启用"
+            } else {
+                "停用"
+            }
+        ),
+    )?;
+    Ok(extension)
+}
+
+pub fn assign_extension_to_all(
+    state: &SharedState,
+    extension_id: &str,
+    actor: &str,
+) -> Result<u32> {
+    let extension = state.db.get_extension(extension_id)?;
+    let env_ids = state
+        .db
+        .list_environments(&Default::default())?
+        .into_iter()
+        .map(|env| env.id)
+        .collect::<Vec<_>>();
+    state.db.assign_extension(extension_id, &env_ids)?;
+    Audit::global(
+        &state.db,
+        actor,
+        actions::EXTENSION_ASSIGN,
+        format!(
+            "扩展 {} 应用到全部 {} 个环境",
+            extension.name,
+            env_ids.len()
+        ),
+    )?;
+    Ok(env_ids.len() as u32)
+}
+
+pub async fn install_extension_online(
+    state: &SharedState,
+    source: &str,
+    env_ids: &[String],
+    actor: &str,
+) -> Result<Extension> {
+    let store_id = parse_store_extension_id(source)?;
+    for env_id in env_ids {
+        state.db.get_environment(env_id)?;
+    }
+    let bytes = download_store_crx(&store_id).await?;
+    let target = paths::extension_store_dir(&state.data_dir).join(format!(
+        "{}-{}",
+        store_id,
+        &new_id()[..8]
+    ));
+    let manifest = match extract_crx(&bytes, &target) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&target);
+            return Err(error);
+        }
+    };
+    let fallback_name = format!("Chrome 扩展 {}", &store_id[..8]);
+    let name = manifest
+        .get("name")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty() && !value.starts_with("__MSG_"))
+        .unwrap_or(&fallback_name)
+        .to_string();
+    let manifest_version = manifest
+        .get("manifest_version")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(3);
+    let mut description = manifest
+        .get("description")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty() && !value.starts_with("__MSG_"))
+        .unwrap_or("Chrome 应用商店在线安装")
+        .to_string();
+    if manifest_version < 3 {
+        description.push_str(" · Manifest V2，Chrome 137+ 可能不再加载");
+    }
+    let extension = Extension {
+        id: new_id(),
+        name,
+        path: target.to_string_lossy().to_string(),
+        enabled: true,
+        description,
+        created_at: now_iso(),
+        assigned_count: env_ids.len() as u32,
+    };
+    if let Err(error) = state.db.insert_extension(&extension) {
+        let _ = std::fs::remove_dir_all(&target);
+        return Err(error);
+    }
+    if let Err(error) = state.db.assign_extension(&extension.id, env_ids) {
+        let _ = state.db.delete_extension(&extension.id);
+        let _ = std::fs::remove_dir_all(&target);
+        return Err(error);
+    }
+    Audit::global(
+        &state.db,
+        actor,
+        actions::EXTENSION_ADD,
+        format!(
+            "在线安装扩展 {}（Chrome 应用商店 {}，分配到 {} 个环境）",
+            extension.name,
+            store_id,
+            env_ids.len()
+        ),
+    )?;
+    Ok(extension)
+}
+
+pub fn parse_store_extension_id(source: &str) -> Result<String> {
+    let value = source.trim();
+    let valid = |candidate: &str| {
+        candidate.len() == 32 && candidate.chars().all(|ch| ('a'..='p').contains(&ch))
+    };
+    if valid(value) {
+        return Ok(value.to_string());
+    }
+    if let Ok(url) = url::Url::parse(value) {
+        if let Some(host) = url.host_str() {
+            let allowed = host == "chromewebstore.google.com"
+                || host == "chrome.google.com"
+                || host.ends_with(".google.com");
+            if allowed {
+                if let Some(segment) = url
+                    .path_segments()
+                    .and_then(|mut segments| segments.find(|segment| valid(segment)))
+                {
+                    return Ok(segment.to_string());
+                }
+            }
+        }
+    }
+    Err(AppError::bad_request(
+        "请输入 Chrome 应用商店链接或 32 位扩展 ID（a-p）",
+    ))
+}
+
+pub fn store_extension_url(source: &str) -> Result<String> {
+    let id = parse_store_extension_id(source)?;
+    Ok(format!("https://chromewebstore.google.com/detail/{id}"))
+}
+
+async fn download_store_crx(store_id: &str) -> Result<Vec<u8>> {
+    const MAX_CRX_BYTES: usize = 80 * 1024 * 1024;
+    // CI and offline installations can point this at a local CRX mirror.
+    let base = std::env::var("FINENV_CRX_BASE_URL")
+        .map(|value| value.trim_end_matches('/').to_string())
+        .unwrap_or_else(|_| "https://clients2.google.com".to_string());
+    let url = format!(
+        "{base}/service/update2/crx?response=redirect&os=win&arch=x86_64&os_arch=x86_64&nacl_arch=x86-64&prod=chromecrx&prodchannel=stable&prodversion=130.0.0.0&lang=zh-CN&acceptformat=crx2,crx3&x=id%3D{store_id}%26uc"
+    );
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) FinEnv/1.0")
+        .build()
+        .map_err(AppError::from)?;
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|error| AppError::bad_request(format!("Chrome 应用商店下载失败: {error}")))?;
+    if !response.status().is_success() {
+        return Err(AppError::bad_request(format!(
+            "Chrome 应用商店下载失败: HTTP {}",
+            response.status()
+        )));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| AppError::bad_request(format!("读取扩展安装包失败: {error}")))?;
+    if bytes.is_empty() || bytes.len() > MAX_CRX_BYTES {
+        return Err(AppError::bad_request("扩展安装包为空或超过 80MB 限制"));
+    }
+    Ok(bytes.to_vec())
+}
+
+fn crx_payload(bytes: &[u8]) -> Result<&[u8]> {
+    if bytes.starts_with(b"PK\x03\x04") {
+        return Ok(bytes);
+    }
+    if bytes.len() < 12 || &bytes[0..4] != b"Cr24" {
+        return Err(AppError::bad_request("应用商店返回的不是有效的 CRX 扩展包"));
+    }
+    let version = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+    let (header_size, prefix) = match version {
+        2 => {
+            if bytes.len() < 16 {
+                return Err(AppError::bad_request("CRX2 扩展包头不完整"));
+            }
+            let public_key =
+                u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize;
+            let signature =
+                u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]) as usize;
+            (public_key.saturating_add(signature), 16usize)
+        }
+        3 => {
+            let size = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize;
+            (size, 12usize)
+        }
+        other => return Err(AppError::bad_request(format!("不支持的 CRX 版本: {other}"))),
+    };
+    let offset = prefix.saturating_add(header_size);
+    if offset >= bytes.len() {
+        return Err(AppError::bad_request("CRX 扩展包数据不完整"));
+    }
+    let payload = &bytes[offset..];
+    if !payload.starts_with(b"PK") {
+        return Err(AppError::bad_request("CRX 中未找到 ZIP 数据"));
+    }
+    Ok(payload)
+}
+
+fn extract_crx(bytes: &[u8], target: &Path) -> Result<serde_json::Value> {
+    const MAX_EXTRACTED_BYTES: u64 = 120 * 1024 * 1024;
+    const MAX_ENTRIES: usize = 6000;
+
+    paths::ensure_dir(target)?;
+    let payload = crx_payload(bytes)?;
+    let mut archive = zip::ZipArchive::new(Cursor::new(payload))
+        .map_err(|error| AppError::bad_request(format!("扩展包解压失败: {error}")))?;
+    if archive.len() > MAX_ENTRIES {
+        return Err(AppError::bad_request("扩展包文件数量过多"));
+    }
+    let mut extracted = 0u64;
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|error| AppError::bad_request(format!("读取扩展文件失败: {error}")))?;
+        let Some(relative) = entry.enclosed_name() else {
+            continue;
+        };
+        if entry.is_dir() {
+            paths::ensure_dir(&target.join(&relative))?;
+            continue;
+        }
+        if entry
+            .unix_mode()
+            .map(|mode| mode & 0o170000 == 0o120000)
+            .unwrap_or(false)
+        {
+            // Skip symlinks; they are not needed by extensions and can escape
+            // the extraction directory on Unix.
+            continue;
+        }
+        extracted = extracted.saturating_add(entry.size());
+        if extracted > MAX_EXTRACTED_BYTES {
+            return Err(AppError::bad_request("扩展解压后超过 120MB 限制"));
+        }
+        let destination = target.join(&relative);
+        if let Some(parent) = destination.parent() {
+            paths::ensure_dir(parent)?;
+        }
+        let mut output = std::fs::File::create(&destination)?;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let read = entry.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            output.write_all(&buffer[..read])?;
+        }
+    }
+    let manifest_path = target.join("manifest.json");
+    if !manifest_path.is_file() {
+        return Err(AppError::bad_request("扩展包缺少 manifest.json"));
+    }
+    serde_json::from_slice(&std::fs::read(manifest_path)?)
+        .map_err(|error| AppError::bad_request(format!("扩展 manifest.json 无效: {error}")))
 }
 
 pub fn set_hosts(

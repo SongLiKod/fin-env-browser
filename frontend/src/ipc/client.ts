@@ -47,6 +47,7 @@ import {
   type ThemeConfig,
   type UpdateAccountInput,
   type UpdateEnvironmentInput,
+  type UpdateExtensionInput,
   type UpdateInfo,
   type UpdateProxyInput,
   type UpdateSettingsInput,
@@ -221,6 +222,14 @@ export const ipc = {
   extensionList: () => call<Extension[]>('extension_list'),
   extensionAdd: (path: string, name?: string) =>
     call<Extension>('extension_add', { path, name }),
+  extensionInstallOnline: (source: string, envIds: string[] = []) =>
+    call<Extension>('extension_install_online', { source, envIds }),
+  extensionUpdate: (id: string, input: UpdateExtensionInput) =>
+    call<Extension>('extension_update', { id, input }),
+  extensionAssignAll: (id: string) => call<number>('extension_assign_all', { id }),
+  extensionOpenFolder: (id: string) => call<void>('extension_open_folder', { id }),
+  extensionOpenStore: (envId: string, source: string) =>
+    call<void>('extension_open_store', { envId, source }),
   extensionDelete: (id: string) => call<void>('extension_delete', { id }),
   extensionAssign: (extensionId: string, envIds: string[]) =>
     call<void>('extension_assign', { extensionId, envIds }),

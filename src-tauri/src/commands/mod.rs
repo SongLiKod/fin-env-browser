@@ -965,6 +965,10 @@ pub fn extension_delete(state: State<'_, SharedState>, id: String) -> Result<()>
     let actor = state.require(Permission::EditEnv)?.username;
     let ext = state.db.get_extension(&id)?;
     state.db.delete_extension(&id)?;
+    let path = PathBuf::from(&ext.path);
+    if path.starts_with(paths::extensions_dir(&state.data_dir)) {
+        let _ = std::fs::remove_dir_all(path);
+    }
     Audit::global(
         &state.db,
         &actor,
@@ -1013,6 +1017,76 @@ pub fn extension_unassign(
         "extension.unassign",
         format!("取消扩展 {} 在 {} 个环境的分配", ext.name, env_ids.len()),
     )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn extension_install_online(
+    state: State<'_, SharedState>,
+    source: String,
+    env_ids: Option<Vec<String>>,
+) -> Result<crate::models::Extension> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::EditEnv)?.username;
+    services::install_extension_online(&state, &source, &env_ids.unwrap_or_default(), &actor).await
+}
+
+#[tauri::command]
+pub fn extension_update(
+    state: State<'_, SharedState>,
+    id: String,
+    input: crate::models::UpdateExtensionInput,
+) -> Result<crate::models::Extension> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::EditEnv)?.username;
+    services::update_extension(&state, &id, input, &actor)
+}
+
+#[tauri::command]
+pub fn extension_assign_all(state: State<'_, SharedState>, id: String) -> Result<u32> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::EditEnv)?.username;
+    services::assign_extension_to_all(&state, &id, &actor)
+}
+
+#[tauri::command]
+pub fn extension_open_folder(state: State<'_, SharedState>, id: String) -> Result<()> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::EditEnv)?.username;
+    let extension = state.db.get_extension(&id)?;
+    let path = std::path::PathBuf::from(&extension.path);
+    if !path.is_dir() {
+        return Err(AppError::not_found("扩展目录不存在"));
+    }
+    open_folder(&path)?;
+    let _ = Audit::global(
+        &state.db,
+        &actor,
+        actions::ARTIFACT_OPEN_DIR,
+        format!("打开扩展目录: {}", path.display()),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn extension_open_store(
+    state: State<'_, SharedState>,
+    env_id: String,
+    source: String,
+) -> Result<()> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::OpenClose)?.username;
+    let url = services::store_extension_url(&source)?;
+    let env = state.db.get_environment(&env_id)?;
+    if state.browsers.is_running(&env_id) {
+        state.browsers.navigate(&env_id, &url).await?;
+    } else {
+        let options = crate::models::OpenOptions {
+            url: Some(url),
+            ..Default::default()
+        };
+        state.browsers.open(&env, &options, &actor).await?;
+    }
     Ok(())
 }
 
@@ -1074,6 +1148,22 @@ pub async fn captcha_capture(
     Ok(path)
 }
 
+fn open_folder(dir: &Path) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    let opened = std::process::Command::new("explorer").arg(dir).spawn();
+    #[cfg(target_os = "macos")]
+    let opened = std::process::Command::new("open").arg(dir).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let opened = std::process::Command::new("xdg-open").arg(dir).spawn();
+    #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
+    let opened: std::io::Result<std::process::Child> = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "当前平台不支持打开目录",
+    ));
+    opened.map_err(|e| AppError::internal(format!("无法打开目录 {}: {e}", dir.display())))?;
+    Ok(())
+}
+
 /// Open one of the application's artifact directories in the OS file manager.
 /// The path is resolved from the data directory, never from the frontend.
 #[tauri::command]
@@ -1090,20 +1180,7 @@ pub fn open_artifact_dir(state: State<'_, SharedState>, kind: String) -> Result<
         other => return Err(AppError::bad_request(format!("不支持的目录类型: {other}"))),
     };
     paths::ensure_dir(&dir)?;
-
-    #[cfg(target_os = "windows")]
-    let opened = std::process::Command::new("explorer").arg(&dir).spawn();
-    #[cfg(target_os = "macos")]
-    let opened = std::process::Command::new("open").arg(&dir).spawn();
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let opened = std::process::Command::new("xdg-open").arg(&dir).spawn();
-    #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
-    let opened: std::io::Result<std::process::Child> = Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "当前平台不支持打开目录",
-    ));
-
-    opened.map_err(|e| AppError::internal(format!("无法打开目录 {}: {e}", dir.display())))?;
+    open_folder(&dir)?;
     let _ = Audit::global(
         &state.db,
         &actor,

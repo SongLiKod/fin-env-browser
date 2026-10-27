@@ -62,6 +62,14 @@ pub fn start_page_path(data_dir: &Path, env_id: &str) -> PathBuf {
     start_pages_dir(data_dir).join(format!("{env_id}.html"))
 }
 
+pub fn extensions_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("extensions")
+}
+
+pub fn extension_store_dir(data_dir: &Path) -> PathBuf {
+    extensions_dir(data_dir).join("store")
+}
+
 pub fn logs_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("logs")
 }
@@ -98,6 +106,7 @@ pub fn init_all(data_dir: &Path) -> Result<()> {
         backups_dir(data_dir),
         reports_dir(data_dir),
         start_pages_dir(data_dir),
+        extensions_dir(data_dir),
         logs_dir(data_dir),
         har_dir(data_dir),
         exports_dir(data_dir),

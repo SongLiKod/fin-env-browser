@@ -103,6 +103,7 @@ pub mod actions {
     pub const HOSTS_UPDATE: &str = "hosts.update";
     pub const MOCK_UPDATE: &str = "mock.update";
     pub const EXTENSION_ADD: &str = "extension.add";
+    pub const EXTENSION_UPDATE: &str = "extension.update";
     pub const EXTENSION_ASSIGN: &str = "extension.assign";
     pub const CAPTCHA_HANDLE: &str = "captcha.handle";
     pub const SETTINGS_UPDATE: &str = "settings.update";

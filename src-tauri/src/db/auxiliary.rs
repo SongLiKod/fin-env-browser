@@ -465,7 +465,9 @@ impl Db {
     pub fn list_extensions(&self) -> Result<Vec<Extension>> {
         self.with(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, path, enabled, description, created_at FROM extensions ORDER BY created_at DESC",
+                "SELECT id, name, path, enabled, description, created_at,
+                        (SELECT COUNT(*) FROM env_extensions ex WHERE ex.extension_id = extensions.id)
+                 FROM extensions ORDER BY created_at DESC",
             )?;
             let rows = stmt.query_map([], |row| {
                 Ok(Extension {
@@ -475,6 +477,7 @@ impl Db {
                     enabled: int_bool(row.get(3)?),
                     description: row.get(4)?,
                     created_at: row.get(5)?,
+                    assigned_count: row.get::<_, i64>(6)? as u32,
                 })
             })?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -484,7 +487,9 @@ impl Db {
     pub fn get_extension(&self, id: &str) -> Result<Extension> {
         self.with(|conn| {
             conn.query_row(
-                "SELECT id, name, path, enabled, description, created_at FROM extensions WHERE id = ?1",
+                "SELECT id, name, path, enabled, description, created_at,
+                        (SELECT COUNT(*) FROM env_extensions ex WHERE ex.extension_id = extensions.id)
+                 FROM extensions WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(Extension {
@@ -494,6 +499,7 @@ impl Db {
                         enabled: int_bool(row.get(3)?),
                         description: row.get(4)?,
                         created_at: row.get(5)?,
+                        assigned_count: row.get::<_, i64>(6)? as u32,
                     })
                 },
             )
@@ -518,6 +524,26 @@ impl Db {
                     ext.created_at
                 ],
             )?;
+            Ok(())
+        })
+    }
+
+    pub fn update_extension(&self, ext: &Extension) -> Result<()> {
+        self.with(|conn| {
+            let changed = conn.execute(
+                "UPDATE extensions SET name = ?2, path = ?3, enabled = ?4, description = ?5
+                 WHERE id = ?1",
+                params![
+                    ext.id,
+                    ext.name,
+                    ext.path,
+                    bool_int(ext.enabled),
+                    ext.description
+                ],
+            )?;
+            if changed == 0 {
+                return Err(AppError::not_found("扩展不存在"));
+            }
             Ok(())
         })
     }
@@ -575,6 +601,7 @@ impl Db {
                     enabled: int_bool(row.get(3)?),
                     description: row.get(4)?,
                     created_at: row.get(5)?,
+                    assigned_count: 0,
                 })
             })?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

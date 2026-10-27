@@ -799,6 +799,19 @@ pub struct Extension {
     pub enabled: bool,
     pub description: String,
     pub created_at: String,
+    #[serde(default)]
+    pub assigned_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateExtensionInput {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
