@@ -7,6 +7,7 @@ import {
   Fingerprint,
   Globe2,
   KeyRound,
+  LayoutTemplate,
   MonitorPlay,
   Network,
   Radar,
@@ -40,6 +41,7 @@ import {
   ExportEnvironmentsDialog,
 } from '@/components/env/EnvironmentDialogs';
 import { OverviewPanel } from '@/components/env/OverviewPanel';
+import { SaveTemplateDialog } from '@/components/env/TemplateManagerDialog';
 import { FingerprintEditor } from '@/components/env/FingerprintEditor';
 import { AccountsPanel } from '@/components/env/AccountsPanel';
 import { SnapshotsPanel } from '@/components/env/SnapshotsPanel';
@@ -66,6 +68,7 @@ export function EnvironmentDetailPage() {
   const [ipChecking, setIpChecking] = React.useState(false);
   const [detecting, setDetecting] = React.useState(false);
   const [showClone, setShowClone] = React.useState(false);
+  const [showTemplate, setShowTemplate] = React.useState(false);
   const [showExport, setShowExport] = React.useState(false);
   const [showDelete, setShowDelete] = React.useState(false);
   const ipAutoChecked = React.useRef<string | null>(null);
@@ -306,6 +309,11 @@ export function EnvironmentDetailPage() {
               <Download className="h-4 w-4" /> 导出包
             </Button>
           ) : null}
+          {can('create_env') ? (
+            <Button variant="secondary" onClick={() => setShowTemplate(true)}>
+              <LayoutTemplate className="h-4 w-4" /> 保存为模板
+            </Button>
+          ) : null}
           {can('clone_env') ? (
             <Button variant="secondary" onClick={() => setShowClone(true)}>
               <Copy className="h-4 w-4" /> 克隆
@@ -409,6 +417,12 @@ export function EnvironmentDetailPage() {
           setShowClone(false);
           navigate(`/envs/${cloned.id}`);
         }}
+      />
+      <SaveTemplateDialog
+        open={showTemplate}
+        onOpenChange={setShowTemplate}
+        env={env}
+        onSaved={() => undefined}
       />
       <ExportEnvironmentsDialog open={showExport} onOpenChange={setShowExport} envs={[env]} />
       <ConfirmDialog

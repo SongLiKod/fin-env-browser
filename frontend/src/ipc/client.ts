@@ -12,16 +12,22 @@ import {
   type AuditLog,
   type AuditVerifyResult,
   type BackupInfo,
+  type BatchCreateResult,
+  type BatchCreateTemplateInput,
+  type BroadcastStartInput,
+  type BroadcastStatus,
   type BrowserRuntime,
   type CaptchaEvent,
   type CdpInfo,
   type ChromiumDetection,
   type CookieRecord,
   type CreateEnvironmentInput,
+  type CreateTemplateFromEnvInput,
   type CreatedApiKey,
   type DashboardStats,
   type EnvironmentFilter,
   type EnvironmentIpInfo,
+  type EnvironmentTemplate,
   type EnvironmentView,
   type Extension,
   type Fingerprint,
@@ -51,6 +57,7 @@ import {
   type UpdateInfo,
   type UpdateProxyInput,
   type UpdateSettingsInput,
+  type UpdateTemplateInput,
   type User,
   type UserInput,
   type UserUpdateInput,
@@ -127,6 +134,17 @@ export const ipc = {
   envProjects: () => call<string[]>('env_projects'),
   envTags: () => call<string[]>('env_tags'),
 
+  // environment templates
+  templateList: () => call<EnvironmentTemplate[]>('template_list'),
+  templateCreateFromEnv: (input: CreateTemplateFromEnvInput) =>
+    call<EnvironmentTemplate>('template_create_from_env', { input }),
+  templateUpdate: (id: string, input: UpdateTemplateInput) =>
+    call<EnvironmentTemplate>('template_update', { id, input }),
+  templateDelete: (id: string, confirm: boolean) =>
+    call<void>('template_delete', { id, confirm }),
+  templateBatchCreate: (input: BatchCreateTemplateInput) =>
+    call<BatchCreateResult>('template_batch_create', { input }),
+
   // groups
   groupList: () => call<Group[]>('group_list'),
   groupCreate: (name: string, color?: string) =>
@@ -200,6 +218,14 @@ export const ipc = {
     call<unknown>('browser_execute', { envId, script }),
   browserNavigate: (envId: string, url: string) =>
     call<string>('browser_navigate', { envId, url }),
+  browserReload: (envId: string) => call<void>('browser_reload', { envId }),
+  broadcastStart: (input: BroadcastStartInput) =>
+    call<BroadcastStatus>('broadcast_start', { input }),
+  broadcastStatus: () => call<BroadcastStatus>('broadcast_status'),
+  broadcastPause: (paused: boolean) =>
+    call<BroadcastStatus>('broadcast_pause', { paused }),
+  broadcastStop: (reason?: string) =>
+    call<BroadcastStatus>('broadcast_stop', { reason }),
   browserCdpInfo: (envId: string) => call<CdpInfo>('browser_cdp_info', { envId }),
   browserRecordingStart: (envId: string, intervalMs = 1000) =>
     call<RecordingResult>('browser_recording_start', { envId, intervalMs }),
@@ -300,6 +326,9 @@ export function onCaptcha(handler: (value: CaptchaEvent) => void): Promise<Unlis
   return listen<CaptchaEvent>('captcha://new', (event) => handler(event.payload));
 }
 
+export function onBroadcastStatus(handler: (value: BroadcastStatus) => void): Promise<UnlistenFn> {
+  return listen<BroadcastStatus>('broadcast://status', (event) => handler(event.payload));
+}
 export function onApiError(handler: (message: string) => void): Promise<UnlistenFn> {
   return listen<{ message: string }>('api://error', (event) => handler(event.payload.message));
 }

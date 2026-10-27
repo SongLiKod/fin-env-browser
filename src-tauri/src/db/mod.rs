@@ -17,6 +17,7 @@ pub mod env;
 pub mod proxy;
 pub mod settings;
 pub mod stats;
+pub mod template;
 
 #[cfg(test)]
 mod tests {
@@ -307,6 +308,10 @@ impl Db {
             (
                 "004_environment_border_width",
                 include_str!("../../migrations/004_environment_border_width.sql"),
+            ),
+            (
+                "005_environment_templates",
+                include_str!("../../migrations/005_environment_templates.sql"),
             ),
         ];
         let current: i64 =

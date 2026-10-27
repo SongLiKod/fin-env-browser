@@ -41,9 +41,14 @@ for (const file of [
   'src-tauri/migrations/002_hardening.sql',
   'src-tauri/migrations/003_environment_identity.sql',
   'src-tauri/migrations/004_environment_border_width.sql',
+  'src-tauri/migrations/005_environment_templates.sql',
   'src-tauri/src/process/mod.rs',
   'src-tauri/src/process/overlay.rs',
+  'src-tauri/src/process/broadcast.rs',
   'src-tauri/src/start_page.rs',
+  'src-tauri/src/db/template.rs',
+  'frontend/src/components/env/BroadcastControlDialog.tsx',
+  'frontend/src/components/layout/BroadcastBar.tsx',
   'src-tauri/src/cdp/mod.rs',
   'src-tauri/src/db/mod.rs',
   'src-tauri/src/crypto/mod.rs',
@@ -91,6 +96,7 @@ const requiredRoutes = [
   '/envs/:id',
   '/envs/:id/open',
   '/envs/:id/close',
+  '/envs/:id/reload',
   '/envs/:id/screenshot',
   '/envs/:id/cookies',
   '/envs/:id/fingerprint',
@@ -99,6 +105,12 @@ const requiredRoutes = [
   '/envs/:id/cdp',
   '/envs/:id/proxy',
   '/envs/:id/detect',
+  '/templates',
+  '/templates/:id',
+  '/templates/:id/create',
+  '/broadcast',
+  '/broadcast/pause',
+  '/broadcast/stop',
   '/proxies',
   '/proxies/:id/check',
   '/audit-logs',
@@ -107,10 +119,10 @@ const requiredRoutes = [
 for (const route of requiredRoutes) if (!routes.includes(route)) fail(`缺少 API 路由 ${route}`);
 ok(`${routes.length} 条 Axum 路由，关键接口齐全`);
 const docs = read('docs/api-docs.md');
-for (const required of ['POST /envs', 'POST /envs/{id}/open', 'GET /envs/{id}/screenshot', 'PUT /envs/{id}/cookies', 'PUT /envs/{id}/fingerprint', 'POST /envs/{id}/restore-snapshot']) {
+for (const required of ['POST /envs', 'POST /envs/{id}/open', 'GET /envs/{id}/screenshot', 'PUT /envs/{id}/cookies', 'PUT /envs/{id}/fingerprint', 'POST /envs/{id}/restore-snapshot', 'POST /templates', 'POST /templates/{id}/create', 'POST /broadcast', 'POST /broadcast/pause', 'POST /broadcast/stop']) {
   if (!docs.includes(required)) fail(`API 文档缺少 ${required}`);
 }
-ok('API 文档覆盖环境 CRUD / 打开关闭 / 截图 / Cookie / 指纹 / 快照');
+ok('API 文档覆盖环境 CRUD / 打开关闭 / 截图 / Cookie / 指纹 / 快照 / 模板批量创建 / 同步控制');
 
 console.log('\n[5] 数据库表与迁移');
 const schema = read('src-tauri/migrations/001_init.sql');
@@ -129,7 +141,12 @@ for (const column of ['border_color', 'ip_address', 'ip_country', 'ip_checked_at
 }
 const borderWidth = read('src-tauri/migrations/004_environment_border_width.sql');
 if (!borderWidth.includes('border_width')) fail('环境标识色粗细迁移缺失');
-ok('全部核心表、审计触发器、环境身份字段存在');
+const templates = read('src-tauri/migrations/005_environment_templates.sql');
+if (!/CREATE TABLE IF NOT EXISTS environment_templates\b/.test(templates)) fail('缺少环境模板数据表');
+for (const column of ['fingerprint_json', 'proxy_mode', 'proxy_id', 'extension_ids', 'border_color', 'border_width']) {
+  if (!templates.includes(column)) fail(`环境模板迁移缺少 ${column}`);
+}
+ok('全部核心表、审计触发器、环境身份字段、环境模板表存在');
 
 console.log('\n[6] 安全与主题令牌');
 const capability = read('src-tauri/capabilities/default.json');
@@ -147,7 +164,7 @@ ok('CSS Token / 暗色 / 密度完整');
 console.log('\n[7] 需求文档关键能力');
 const requirement = read('docs/fin-env-requirement.md');
 const tech = read('docs/fin-env-tech.md');
-for (const phrase of ['指纹快照', '代理池', 'REST API', 'AES256', '审计日志', '主题配置', '资源管控']) {
+for (const phrase of ['指纹快照', '代理池', 'REST API', 'AES256', '审计日志', '主题配置', '资源管控', '环境模板', '多环境批量操作', '同步控制']) {
   if (!requirement.includes(phrase)) fail(`需求文档缺少「${phrase}」`);
 }
 for (const phrase of ['AES256-GCM', '主题自定义', 'CDP', 'Axum', 'rusqlite']) {

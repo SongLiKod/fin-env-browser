@@ -192,6 +192,69 @@ curl -X DELETE -H "Authorization: Bearer $FINENV_API_KEY" \
 
 会先关闭浏览器进程，再删除环境/账号/快照/Hosts/Mock/profile；审计日志保留。
 
+## 4.1 环境模板与批量创建
+
+模板由已有环境保存而来，包含指纹、业务字段、标识色/宽度、分组、代理策略（直连 / 固定代理 / 代理池轮询）、扩展与资源限制。
+
+### GET /templates
+
+返回 `EnvironmentTemplate[]`。字段包括 `fingerprint`、`proxyMode`、`proxyId`、`extensionIds`、`borderColor`、`borderWidth`、`createdAt`、`updatedAt`。
+
+### POST /templates
+
+从已有环境创建模板：
+
+```json
+{
+  "envId": "env-uuid",
+  "name": "订单中心标准模板",
+  "description": "运营账号 + 固定代理"
+}
+```
+
+成功：`201 Created` + `EnvironmentTemplate`。同名模板返回 `409 conflict`。
+
+### PATCH /templates/{id}
+
+```json
+{
+  "name": "订单中心标准模板 V2",
+  "description": "使用代理池轮询",
+  "proxyMode": "pool",
+  "proxyId": null
+}
+```
+
+`proxyMode` 支持 `none` / `fixed` / `pool`；`fixed` 必须提供有效的 `proxyId`，`pool` 要求至少一个启用代理。
+
+### POST /templates/{id}/create
+
+按模板批量创建环境：
+
+```json
+{
+  "templateId": "template-uuid",
+  "count": 5,
+  "namePrefix": "订单中心 CI",
+  "startIndex": 1
+}
+```
+
+`count` 为 1-50。名称形如 `订单中心 CI 01` … `订单中心 CI 05`，冲突时自动追加序号。成功返回：
+
+```json
+{
+  "created": [],
+  "errors": []
+}
+```
+
+`created` 为已创建环境数组；某个环境创建失败不会中断整批，失败原因写入 `errors`。批量创建需要 `CreateEnv` 权限。
+
+### DELETE /templates/{id}
+
+需要 `EditEnv` 权限与 `X-FinEnv-Confirm: true`。仅删除模板，不影响已创建的环境。
+
 ## 5. 浏览器生命周期
 
 ### POST /envs/{id}/open
@@ -250,6 +313,10 @@ const context = browser.contexts()[0];
 
 仅允许 `http://`、`https://`、`about:blank`。
 
+### POST /envs/{id}/reload
+
+刷新当前页面，无请求体，返回 `{ "reloaded": true }`。对应面板批量操作中的「刷新」。
+
 ### POST /envs/{id}/execute
 
 ```json
@@ -257,6 +324,55 @@ const context = browser.contexts()[0];
 ```
 
 返回 `{ "result": <Runtime.evaluate returnByValue> }`。脚本在页面主世界执行，支持异步 Promise。
+
+### GET /broadcast
+
+返回当前同步控制状态：
+
+```json
+{
+  "active": true,
+  "id": "session-uuid",
+  "masterEnvId": "env-uuid",
+  "envIds": ["env-uuid", "env-uuid-2"],
+  "paused": false,
+  "forwarded": 128,
+  "startedAt": "2026-10-27T08:00:00.000Z",
+  "message": "同步控制中",
+  "errors": []
+}
+```
+
+### POST /broadcast
+
+开启持续同步控制。`envIds` 至少 2 个；`masterEnvId` 默认第一个；`url` 可选，开启前统一导航；`openMissing` 默认 `true`，自动打开未运行环境。
+
+```json
+{
+  "envIds": ["env-uuid", "env-uuid-2"],
+  "masterEnvId": "env-uuid",
+  "url": "https://test.example.com/login",
+  "openMissing": true
+}
+```
+
+开启后，在主控浏览器页面中的鼠标点击/移动/滚轮、键盘输入、粘贴与中文输入法上屏文字会实时转发到其他参与环境。地址栏、标签栏与前进/后退按钮不同步。
+
+### POST /broadcast/pause
+
+```json
+{ "paused": true }
+```
+
+暂停后主控窗口仍可操作，但不再向其他窗口转发。改为 `false` 恢复。
+
+### POST /broadcast/stop
+
+```json
+{ "reason": "测试完成" }
+```
+
+停止同步控制，浏览器窗口保持打开。参与窗口关闭时也会自动停止。
 
 ## 6. 截图 / 录屏 / HAR
 

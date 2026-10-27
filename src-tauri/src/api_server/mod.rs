@@ -23,8 +23,9 @@ use crate::{
     capability::{require_role, Permission},
     error::AppError,
     models::{
-        now_iso, AuditFilter, CookieRecord, CreateEnvironmentInput, EnvironmentFilter, OpenOptions,
-        ProxyInput, UpdateEnvironmentInput, UpdateProxyInput,
+        now_iso, AuditFilter, BatchCreateTemplateInput, BroadcastStartInput, CookieRecord,
+        CreateEnvironmentInput, CreateTemplateFromEnvInput, EnvironmentFilter, EnvironmentTemplate,
+        OpenOptions, ProxyInput, UpdateEnvironmentInput, UpdateProxyInput, UpdateTemplateInput,
     },
     services,
     state::SharedState,
@@ -153,6 +154,15 @@ fn build_router(state: SharedState) -> Router {
         .route("/stats", get(stats))
         .route("/envs", get(list_envs).post(create_env))
         .route(
+            "/templates",
+            get(list_templates).post(create_template_from_env),
+        )
+        .route(
+            "/templates/:id",
+            patch(update_template).delete(delete_template),
+        )
+        .route("/templates/:id/create", post(batch_create_template))
+        .route(
             "/envs/:id",
             get(get_env).patch(update_env).delete(delete_env),
         )
@@ -168,7 +178,11 @@ fn build_router(state: SharedState) -> Router {
         .route("/envs/:id/restore-snapshot", post(restore_snapshot))
         .route("/envs/:id/cdp", get(cdp_info))
         .route("/envs/:id/navigate", post(navigate))
+        .route("/envs/:id/reload", post(reload))
         .route("/envs/:id/execute", post(execute))
+        .route("/broadcast", get(broadcast_status).post(broadcast_start))
+        .route("/broadcast/pause", post(broadcast_pause))
+        .route("/broadcast/stop", post(broadcast_stop))
         .route("/envs/:id/recording/start", post(start_recording))
         .route("/envs/:id/recording/stop", post(stop_recording))
         .route("/envs/:id/har", post(start_har).get(export_har))
@@ -298,6 +312,68 @@ async fn create_env(
         StatusCode::CREATED,
         Json(services::environment_view(&state, env)?),
     ))
+}
+
+async fn create_template_from_env(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Json(input): Json<CreateTemplateFromEnvInput>,
+) -> Result<(StatusCode, Json<EnvironmentTemplate>), AppError> {
+    permit(&auth, Permission::CreateEnv)?;
+    let template = services::create_template_from_env(&state, input, &auth.actor)?;
+    Ok((StatusCode::CREATED, Json(template)))
+}
+
+async fn list_templates(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+) -> Result<Json<Vec<EnvironmentTemplate>>, AppError> {
+    permit(&auth, Permission::ViewList)?;
+    Ok(Json(services::list_templates(&state)?))
+}
+
+async fn update_template(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Path(id): Path<String>,
+    Json(input): Json<UpdateTemplateInput>,
+) -> Result<Json<EnvironmentTemplate>, AppError> {
+    permit(&auth, Permission::EditEnv)?;
+    Ok(Json(services::update_template(
+        &state,
+        &id,
+        input,
+        &auth.actor,
+    )?))
+}
+
+async fn delete_template(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    permit(&auth, Permission::EditEnv)?;
+    if !confirmed(&headers) {
+        return Err(AppError::code_with(
+            "confirmation_required",
+            "删除模板需要 X-FinEnv-Confirm: true",
+        ));
+    }
+    services::delete_template(&state, &id, &auth.actor)?;
+    Ok(Json(json!({ "deleted": true, "id": id })))
+}
+
+async fn batch_create_template(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Path(id): Path<String>,
+    Json(mut input): Json<BatchCreateTemplateInput>,
+) -> Result<(StatusCode, Json<crate::models::BatchCreateResult>), AppError> {
+    permit(&auth, Permission::CreateEnv)?;
+    input.template_id = id;
+    let result = services::batch_create_from_template(&state, input, &auth.actor)?;
+    Ok((StatusCode::CREATED, Json(result)))
 }
 
 async fn update_env(
@@ -560,6 +636,66 @@ async fn navigate(
         .ok_or_else(|| AppError::bad_request("缺少 url"))?;
     let current = state.browsers.navigate(&id, url).await?;
     Ok(Json(json!({ "url": current })))
+}
+
+async fn broadcast_start(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Json(input): Json<BroadcastStartInput>,
+) -> Result<Json<crate::models::BroadcastStatus>, AppError> {
+    permit(&auth, Permission::OpenClose)?;
+    Ok(Json(
+        state.browsers.broadcast_start(input, &auth.actor).await?,
+    ))
+}
+
+async fn broadcast_status(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+) -> Result<Json<crate::models::BroadcastStatus>, AppError> {
+    permit(&auth, Permission::OpenClose)?;
+    Ok(Json(state.browsers.broadcast_status().await))
+}
+
+async fn broadcast_pause(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Json(body): Json<Value>,
+) -> Result<Json<crate::models::BroadcastStatus>, AppError> {
+    permit(&auth, Permission::OpenClose)?;
+    let paused = body
+        .get("paused")
+        .and_then(|value| value.as_bool())
+        .ok_or_else(|| AppError::bad_request("缺少 paused"))?;
+    Ok(Json(
+        state.browsers.broadcast_pause(paused, &auth.actor).await?,
+    ))
+}
+
+async fn broadcast_stop(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Json(body): Json<Value>,
+) -> Result<Json<crate::models::BroadcastStatus>, AppError> {
+    permit(&auth, Permission::OpenClose)?;
+    let reason = body
+        .get("reason")
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "API 停止".into());
+    Ok(Json(
+        state.browsers.broadcast_stop(&auth.actor, &reason).await?,
+    ))
+}
+
+async fn reload(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, AppError> {
+    permit(&auth, Permission::OpenClose)?;
+    state.browsers.reload(&id).await?;
+    Ok(Json(json!({ "reloaded": true })))
 }
 
 async fn execute(

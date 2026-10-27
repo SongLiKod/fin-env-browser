@@ -105,6 +105,14 @@ pub mod actions {
     pub const EXTENSION_ADD: &str = "extension.add";
     pub const EXTENSION_UPDATE: &str = "extension.update";
     pub const EXTENSION_ASSIGN: &str = "extension.assign";
+    pub const TEMPLATE_CREATE: &str = "template.create";
+    pub const TEMPLATE_UPDATE: &str = "template.update";
+    pub const TEMPLATE_DELETE: &str = "template.delete";
+    pub const TEMPLATE_BATCH_CREATE: &str = "template.batch_create";
+    pub const BROADCAST_START: &str = "broadcast.start";
+    pub const BROADCAST_STOP: &str = "broadcast.stop";
+    pub const BROADCAST_PAUSE: &str = "broadcast.pause";
+    pub const BROADCAST_RESUME: &str = "broadcast.resume";
     pub const CAPTCHA_HANDLE: &str = "captcha.handle";
     pub const SETTINGS_UPDATE: &str = "settings.update";
     pub const THEME_UPDATE: &str = "theme.update";

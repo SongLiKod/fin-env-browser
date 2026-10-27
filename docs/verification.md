@@ -91,7 +91,7 @@
 - 安全：Capability 白名单（核心 + dialog），无 fs/shell/http 插件权限；CDP 仅 127.0.0.1。
 - 稳定性：SQLite 迁移；升级前自动快照与备份；浏览器进程独立于面板。
 - 兼容：Windows/macOS/Linux Tauri 配置与 CI 矩阵。
-- 性能：进程调度 tokio；前端构建产物 ~455KB JS（gzip ~134KB）；启动目标 ≤2s 依赖本机环境。
+- 性能：进程调度 tokio；前端构建产物 ~503KB JS（gzip ~148KB）；启动目标 ≤2s 依赖本机环境。
 
 ## 12. 可重复校验命令
 
@@ -118,19 +118,20 @@ cargo test
 - `sdk/js npm test`：4/4 通过（URL/Header/JSON/错误映射）
 - `sdk/python python -m unittest`：4/4 通过（查询构造/请求体/错误映射/环境变量）
 - Python 3.12 `py_compile`：通过
-- `node scripts/verify.mjs`：通过，0 提示（112 个 Tauri 命令注册、112 个前端 IPC 命令覆盖、30 条 API 路由、18 张表、Capability、主题 Token、需求/技术文档能力追踪）
+- `node scripts/verify.mjs`：通过，0 提示（122 个 Tauri 命令注册、122 个前端 IPC 命令覆盖、37 条 API 路由、19 张表、Capability、主题 Token、需求/技术文档能力追踪）
 - `cargo fmt --check`：通过
 - `cargo check`：通过
 - `cargo clippy --all-targets -- -D warnings`：通过（0 warning）
-- 核心逻辑测试（独立 harness，无 Tauri 运行时依赖）：15/15 通过
+- 核心逻辑测试（独立 harness，无 Tauri 运行时依赖）：16/16 通过
   - AES-GCM 字段加密/解密、错误口令拒绝
   - 加密包往返、主密钥跨设备导入与本机包裹持久化
   - 指纹模板一致性、冲突拒绝、时区/WebRTC 校验、国家对齐、注入脚本内容
   - 环境/快照指纹落盘密文校验
   - 账号密码、Cookie 缓存密文落盘校验
   - 审计哈希链校验 + 禁止 UPDATE/DELETE
-  - 数据库迁移幂等（001 + 002 + 003 + 004 环境身份迁移）
+  - 数据库迁移幂等（001 + 002 + 003 + 004 + 005 环境身份/模板迁移）
   - 环境标识色、粗细与出口 IP 字段落盘往返
+  - 环境模板 CRUD：指纹、标签、代理策略、扩展 ID、资源限制往返与删除
   - 加密备份跨设备可移植（备份内携带主密钥）并完整恢复账号密码、代理密码、同步密钥与 Cookie 缓存
 - 真实二进制端到端（debug 构建 + 临时数据目录 + 本机 Chromium/Edge）：
   - 健康检查、环境创建/列表、快照、审计链校验、删除二次确认、重启后数据持久化
@@ -157,7 +158,7 @@ cargo test
   - 直连出口检测返回 `220.197.77.126 / China / Beijing / Asia/Shanghai`，并持久化到环境。
   - 非法颜色 `"borderColor": "red"` 返回 400；合法 `#0D9488` 可 PATCH 成功。
   - Chromium 窗口标题为 `FinEnv · <环境名>`；窗口边缘像素为设置的 `#16A34A`；无“不支持的命令行标记”提示；`navigator.webdriver === false`。
-  - 前端 `npm run check` 通过（20 用例 + 构建）；`cargo fmt`/`clippy` 通过；核心 harness 15/15 通过；`scripts/verify.mjs` 0 提示。
+  - 前端 `npm run check` 通过（20 用例 + 构建）；`cargo fmt`/`clippy` 通过；核心 harness 16/16 通过；`scripts/verify.mjs` 0 提示。
 
 ## 15. 内置环境启动页与产物目录
 
@@ -181,3 +182,40 @@ cargo test
 - **批量与全部应用**：支持批量勾选环境、全选；`extension_assign_all` 一键分配到全部环境。运行中的环境需重启浏览器生效。
 - **品牌版 Chrome 回退**：Chrome 137+ 品牌版移除了 `--load-extension`；在线安装页提供「在浏览器中打开商店」，可在目标环境中通过 Chrome 原生「添加至 Chrome」安装。Chromium / Chrome for Testing 仍可直接加载解压扩展。
 - **验证**：通过本地 CRX3 测试服务完整跑通下载 → 解析 → 解压 → 入库 → 分配到 1 个环境 → 应用到全部 2 个环境 → 停用/改描述 → 第二个环境读取 → 删除并确认扩展目录被清理；UI 截图确认在线安装对话框与扩展库布局。
+
+## 17. 环境模板、批量创建与多环境操作
+
+- **环境模板**：迁移 005 新增 `environment_templates` 表，保存名称/说明、业务字段、标签、备注、内核与资源限制、完整指纹 JSON、标识色/宽度、分组、代理策略（`none` / `fixed` / `pool`）、固定代理与扩展 ID 列表。
+- **从环境保存**：环境详情页「保存为模板」调用 `template_create_from_env`，复制当前指纹、业务字段、标识色、分组、固定代理与已分配扩展；模板名称唯一。
+- **模板管理**：环境页「模板」入口支持列表、编辑名称/说明/代理策略、删除（二次确认）；批量创建对话框支持 1-50 个、起始序号、名称前缀与命名预览。
+- **批量创建**：`template_batch_create` 为每个环境生成独立 profile 和唯一名称；固定代理直接复用，代理池按启用代理顺序轮询；创建失败逐条记录，不中断整批；每个环境仍写入创建审计，并额外记录 `template.batch_create`。
+- **多环境批量操作**：环境列表多选后打开「批量操作」，支持打开、关闭、重启、访问 URL、刷新、执行 JavaScript、截图；前端以最多 3 个并发执行，逐环境展示成功/失败与错误原因。新增 `browser_reload` IPC 命令。
+- **REST API**：新增 `GET/POST /templates`、`PATCH/DELETE /templates/{id}`、`POST /templates/{id}/create`，与 IPC 共用服务层、权限与审计。
+- **权限**：模板列表沿用 `ViewList`；从环境创建模板/批量创建需要 `CreateEnv`；编辑/删除模板需要 `EditEnv`；删除模板和删除环境一样要求确认。
+- **验证**：
+  - `template_list` / `template_create_from_env` / `template_update` / `template_delete` / `template_batch_create` 已注册，前端 IPC 覆盖全部命令。
+  - 核心 harness 新增模板 CRUD 往返测试：指纹、标签、代理策略、扩展 ID、资源限制落盘与更新/删除均通过。
+  - `cargo fmt --check`、`cargo clippy --all-targets -- -D warnings` 通过。
+  - 前端 `npm run check` 通过（类型检查、20 个单测、生产构建）。
+  - 真实 API 验证：创建源环境 → 保存模板（验证指纹/标签/标识色复制）→ 改名与代理策略更新 → 批量创建 3 个环境 → 校验 `01/02/03` 命名、独立 profile 目录、指纹/项目/标签/标识色复制 → 搜索到 3 个环境 → 打开浏览器、导航、刷新、执行 JS、PNG 截图、关闭 → 删除模板需确认且删除后列表消失。
+  - 代理池验证：创建 2 个代理并将模板切换为 `pool`，批量创建 4 个环境后按启用代理顺序轮询为 A/B/A/B，固定代理缺失时会拒绝批量创建。
+  - UI 验证（WebView2 CDP 截图）：模板列表、批量创建表单与命名预览、创建结果、多选 2 个环境、批量操作面板、批量打开结果（2/2 成功，显示 PID/端口）、批量刷新（页面已刷新）、批量访问（2/2 成功，显示目标 URL）均正常；浏览器 console 无 error。
+
+## 18. 持续同步控制（多环境实时广播）
+
+- **入口**：环境列表多选至少 2 个环境后点击「同步控制」；选择主控窗口、可选统一打开地址、是否自动打开未运行环境。
+- **后端**：`broadcast_start/status/pause/stop` 四个 IPC 命令与 `GET/POST /broadcast`、`POST /broadcast/pause`、`POST /broadcast/stop` REST 接口；状态包含主控、参与环境、暂停状态、累计转发次数和未加入原因。
+- **输入链路**：主控页面通过 CDP `Runtime.addBinding` + `Page.addScriptToEvaluateOnNewDocument` 注入捕获脚本；Rust 用 mpsc worker 串行转发到其他环境：
+  - 鼠标移动（40ms 节流）、左/中/右键按下/释放、滚轮（按坐标寻找可滚动容器并滚动）；
+  - 键盘按键、可打印字符、粘贴文本、输入法 `compositionend` 文本；
+  - 主控页面导航/刷新后由 `Page.loadEventFired` 重新绑定并安装脚本。
+- **生命周期**：启动时自动打开缺失环境并统一导航；对全部参与窗口开启焦点模拟，主控窗口置前；暂停只丢弃后续事件；停止移除脚本/binding/焦点模拟，保留浏览器窗口；参与窗口关闭自动停止会话；开始/暂停/恢复/停止全部写审计。
+- **UI**：同步对话框展示主控、参与窗口、转发次数、未加入错误与暂停/停止操作；关闭对话框后顶部常驻同步栏仍显示状态，可暂停/恢复/停止。
+- **验证（真实 API + CDP）**：
+  - 选中 2 个环境启动同步，主控点击按钮后主控/从属点击数均为 1；输入 `abc` 后两边输入框均为 `abc`。
+  - 滚轮转发后从属 `scrollY=600`，反向滚回 0。
+  - 暂停后主控点击数 2、从属仍为 1；恢复后主控 3、从属 2。
+  - 主控导航到新 URL 后重新绑定成功，点击后主控 1、从属从 2 增至 3。
+  - 停止后主控点击继续增加、从属保持不变；`GET /broadcast` 返回 `active: false`。
+  - UI WebView2 CDP 截图确认开启对话框、同步进行中面板、顶部状态栏、暂停/恢复/停止流程；console 无 error。
+- **已知限制**：不同步浏览器地址栏、标签栏、前进/后退按钮；跨域 iframe 内的点击不在捕获范围；仅建议用于受信测试站点。

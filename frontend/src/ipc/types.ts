@@ -222,6 +222,77 @@ export interface EnvironmentIpInfo {
   checkedAt: string;
 }
 
+export interface EnvironmentTemplate {
+  id: string;
+  name: string;
+  description: string;
+  project: string;
+  testEnv: string;
+  accountRole: string;
+  version: string;
+  caseId: string;
+  tags: string[];
+  notes: string;
+  kernel: string;
+  chromiumPath: string | null;
+  autoRestart: boolean;
+  memoryLimitMb: number | null;
+  idleTimeoutMin: number | null;
+  fingerprint: Fingerprint;
+  borderColor: string;
+  borderWidth: number;
+  groupId: string | null;
+  proxyMode: 'none' | 'fixed' | 'pool' | string;
+  proxyId: string | null;
+  extensionIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTemplateFromEnvInput {
+  envId: string;
+  name: string;
+  description?: string | null;
+}
+
+export interface UpdateTemplateInput {
+  name?: string;
+  description?: string;
+  proxyMode?: 'none' | 'fixed' | 'pool';
+  proxyId?: string | null;
+}
+
+export interface BatchCreateTemplateInput {
+  templateId: string;
+  count: number;
+  namePrefix?: string | null;
+  startIndex?: number | null;
+}
+
+export interface BatchCreateResult {
+  created: Environment[];
+  errors: string[];
+}
+
+export interface BroadcastStartInput {
+  envIds: string[];
+  masterEnvId?: string | null;
+  url?: string | null;
+  openMissing?: boolean | null;
+}
+
+export interface BroadcastStatus {
+  active: boolean;
+  id: string | null;
+  masterEnvId: string | null;
+  envIds: string[];
+  paused: boolean;
+  forwarded: number;
+  startedAt: string | null;
+  message: string;
+  errors: string[];
+}
+
 export interface Group {
   id: string;
   name: string;

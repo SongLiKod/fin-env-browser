@@ -113,6 +113,59 @@ pub fn env_get(
 }
 
 #[tauri::command]
+pub fn template_list(
+    state: State<'_, SharedState>,
+) -> Result<Vec<crate::models::EnvironmentTemplate>> {
+    let state = state.inner().clone();
+    state.require(Permission::ViewList)?;
+    services::list_templates(&state)
+}
+
+#[tauri::command]
+pub fn template_create_from_env(
+    state: State<'_, SharedState>,
+    input: crate::models::CreateTemplateFromEnvInput,
+) -> Result<crate::models::EnvironmentTemplate> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::CreateEnv)?.username;
+    services::create_template_from_env(&state, input, &actor)
+}
+
+#[tauri::command]
+pub fn template_update(
+    state: State<'_, SharedState>,
+    id: String,
+    input: crate::models::UpdateTemplateInput,
+) -> Result<crate::models::EnvironmentTemplate> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::EditEnv)?.username;
+    services::update_template(&state, &id, input, &actor)
+}
+
+#[tauri::command]
+pub fn template_delete(state: State<'_, SharedState>, id: String, confirm: bool) -> Result<()> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::EditEnv)?.username;
+    if !confirm {
+        return Err(AppError::code_with(
+            "confirmation_required",
+            "删除环境模板需要二次确认",
+        ));
+    }
+    services::delete_template(&state, &id, &actor)
+}
+
+#[tauri::command]
+pub fn template_batch_create(
+    state: State<'_, SharedState>,
+    input: crate::models::BatchCreateTemplateInput,
+) -> Result<crate::models::BatchCreateResult> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::CreateEnv)?.username;
+    services::batch_create_from_template(&state, input, &actor)
+}
+
+#[tauri::command]
 pub async fn env_check_ip(
     state: State<'_, SharedState>,
     id: String,
@@ -798,6 +851,55 @@ pub async fn browser_navigate(
     let state = state.inner().clone();
     state.require(Permission::OpenClose)?;
     state.browsers.navigate(&env_id, &url).await
+}
+
+#[tauri::command]
+pub async fn browser_reload(state: State<'_, SharedState>, env_id: String) -> Result<()> {
+    let state = state.inner().clone();
+    state.require(Permission::OpenClose)?;
+    state.browsers.reload(&env_id).await
+}
+
+#[tauri::command]
+pub async fn broadcast_start(
+    state: State<'_, SharedState>,
+    input: crate::models::BroadcastStartInput,
+) -> Result<crate::models::BroadcastStatus> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::OpenClose)?.username;
+    state.browsers.broadcast_start(input, &actor).await
+}
+
+#[tauri::command]
+pub async fn broadcast_status(
+    state: State<'_, SharedState>,
+) -> Result<crate::models::BroadcastStatus> {
+    let state = state.inner().clone();
+    state.require(Permission::OpenClose)?;
+    Ok(state.browsers.broadcast_status().await)
+}
+
+#[tauri::command]
+pub async fn broadcast_pause(
+    state: State<'_, SharedState>,
+    paused: bool,
+) -> Result<crate::models::BroadcastStatus> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::OpenClose)?.username;
+    state.browsers.broadcast_pause(paused, &actor).await
+}
+
+#[tauri::command]
+pub async fn broadcast_stop(
+    state: State<'_, SharedState>,
+    reason: Option<String>,
+) -> Result<crate::models::BroadcastStatus> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::OpenClose)?.username;
+    state
+        .browsers
+        .broadcast_stop(&actor, reason.as_deref().unwrap_or("用户停止"))
+        .await
 }
 
 #[tauri::command]

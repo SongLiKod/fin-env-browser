@@ -33,6 +33,10 @@ use crate::{
 #[cfg(windows)]
 mod overlay;
 
+mod broadcast;
+
+use broadcast::BroadcastRuntime;
+
 #[derive(Debug, Clone)]
 struct ExitEvent {
     env_id: String,
@@ -78,6 +82,7 @@ pub struct BrowserManager {
     monitor_started: AtomicBool,
     restarts: Mutex<HashMap<String, Vec<Instant>>>,
     launch_lock: tokio::sync::Mutex<()>,
+    broadcast: AsyncRwLock<Option<Arc<BroadcastRuntime>>>,
 }
 
 impl BrowserManager {
@@ -100,6 +105,7 @@ impl BrowserManager {
             monitor_started: AtomicBool::new(false),
             restarts: Mutex::new(HashMap::new()),
             launch_lock: tokio::sync::Mutex::new(()),
+            broadcast: AsyncRwLock::new(None),
         }
     }
 
@@ -521,6 +527,7 @@ impl BrowserManager {
         if let Ok(mut map) = self.instances.write() {
             map.remove(env_id);
         }
+        self.broadcast_on_env_closed(env_id, actor).await;
         let _ = self.db.remove_browser_session(env_id);
         let env = self.db.get_environment(env_id).ok();
         if let Some(env) = &env {
@@ -713,6 +720,7 @@ impl BrowserManager {
         if let Ok(mut map) = self.instances.write() {
             map.remove(&event.env_id);
         }
+        self.broadcast_on_env_closed(&event.env_id, "system").await;
         let _ = self.db.remove_browser_session(&event.env_id);
         let env = match self.db.get_environment(&event.env_id) {
             Ok(env) => env,
@@ -1418,9 +1426,8 @@ impl BrowserManager {
                         }
                         "Runtime.bindingCalled" => {
                             let params = event.params;
-                            if params.get("name").and_then(|v| v.as_str())
-                                == Some("__finEnvCaptcha")
-                            {
+                            let name = params.get("name").and_then(|v| v.as_str());
+                            if name == Some("__finEnvCaptcha") {
                                 let manager = manager.clone();
                                 let instance = instance.clone();
                                 tokio::spawn(async move {
@@ -1429,6 +1436,18 @@ impl BrowserManager {
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("{}");
                                     let _ = manager.handle_captcha(&instance, payload).await;
+                                });
+                            } else if name == Some("__finEnvBroadcast") {
+                                let manager = manager.clone();
+                                let instance = instance.clone();
+                                tokio::spawn(async move {
+                                    let payload = params
+                                        .get("payload")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("{}");
+                                    manager
+                                        .broadcast_handle_payload(&instance.env_id, payload)
+                                        .await;
                                 });
                             }
                         }
@@ -1469,6 +1488,13 @@ impl BrowserManager {
                                     }
                                 }
                             }
+                        }
+                        "Page.loadEventFired" => {
+                            let manager = manager.clone();
+                            let instance = instance.clone();
+                            tokio::spawn(async move {
+                                manager.broadcast_on_master_load(&instance.env_id).await;
+                            });
                         }
                         "Page.javascriptDialogOpening" => {
                             let message = event

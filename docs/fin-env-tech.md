@@ -332,6 +332,8 @@ fin-env-browser/
 
 7\. users 团队用户表（团队版）
 
+8\. environment\_templates 环境模板表：id、name、description、业务字段、fingerprint\_json、标识色/宽度、group\_id、proxy\_mode（none/fixed/pool）、proxy\_id、extension\_ids、资源限制
+
 
 
 所有敏感字段：password\_enc、cookie 等，AES256 加密存储，密钥本地派生，不硬编码。
@@ -453,4 +455,18 @@ Rust 后台线程定时轮询所有子进程 PID，读取 CPU、内存；超过�
 4\. 所有子进程操作、高危接口必须写入审计日志
 
 5\. 禁止在前端存储任何明文敏感信息
+
+
+
+\## 12 实时同步控制
+
+\- 主控绑定：`BrowserManager::broadcast_start` 先启动缺失环境，并将所有参与窗口纳入会话；通过 `Page.bringToFront` 聚焦主控，通过 `Emulation.setFocusEmulationEnabled` 保证后台参与窗口能接收 CDP 输入事件。
+
+\- 输入捕获：主控页面通过 `Runtime.addBinding` + `Page.addScriptToEvaluateOnNewDocument` 注入捕获脚本，监听可信的鼠标、滚轮、键盘、粘贴与 `compositionend` 事件，将结构化 JSON 发送给 Rust；脚本会删除全局 binding 引用，减少页面直接伪造广播的入口。
+
+\- 转发：Rust 使用独立 mpsc worker 串行消费事件，通过 `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent` / `Input.insertText` 发送到其他环境；鼠标坐标按主控/目标视口尺寸缩放，滚轮按坐标寻找可滚动容器并执行滚动。
+
+\- 生命周期：`Page.loadEventFired` 时重新绑定主控并安装捕获脚本；暂停只丢弃后续事件；停止会移除脚本、binding 与焦点模拟。参与窗口关闭时自动停止会话，所有操作写入审计。
+
+\- 限制：仅同步页面内容，不同步地址栏、标签栏、前进/后退按钮；跨域 iframe 内的点击不在捕获范围；恶意页面在极短时间内理论上可尝试伪造 binding 输入，仅建议用于受信测试站点。
 

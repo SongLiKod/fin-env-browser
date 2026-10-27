@@ -95,6 +95,101 @@ pub struct EnvironmentView {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct EnvironmentTemplate {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub project: String,
+    pub test_env: String,
+    pub account_role: String,
+    pub version: String,
+    pub case_id: String,
+    pub tags: Vec<String>,
+    pub notes: String,
+    pub kernel: String,
+    pub chromium_path: Option<String>,
+    pub auto_restart: bool,
+    pub memory_limit_mb: Option<u32>,
+    pub idle_timeout_min: Option<u32>,
+    pub fingerprint: Fingerprint,
+    pub border_color: String,
+    pub border_width: u32,
+    pub group_id: Option<String>,
+    pub proxy_mode: String,
+    pub proxy_id: Option<String>,
+    pub extension_ids: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTemplateFromEnvInput {
+    pub env_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTemplateInput {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub proxy_mode: Option<String>,
+    #[serde(default)]
+    pub proxy_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchCreateTemplateInput {
+    pub template_id: String,
+    pub count: u32,
+    #[serde(default)]
+    pub name_prefix: Option<String>,
+    #[serde(default)]
+    pub start_index: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchCreateResult {
+    pub created: Vec<Environment>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BroadcastStartInput {
+    pub env_ids: Vec<String>,
+    #[serde(default)]
+    pub master_env_id: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub open_missing: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BroadcastStatus {
+    pub active: bool,
+    pub id: Option<String>,
+    pub master_env_id: Option<String>,
+    pub env_ids: Vec<String>,
+    pub paused: bool,
+    pub forwarded: u64,
+    pub started_at: Option<String>,
+    pub message: String,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EnvironmentIpInfo {
     pub env_id: String,
     pub ok: bool,

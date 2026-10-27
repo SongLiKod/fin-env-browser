@@ -9,11 +9,12 @@ use crate::{
     fingerprint,
     models::{
         new_id, now_iso, Account, AccountExportRow, AccountInput, AlignProxyResult, ApiKey,
-        AuditFilter, CreateEnvironmentInput, CreatedApiKey, DashboardStats, Environment,
-        EnvironmentFilter, EnvironmentIpInfo, EnvironmentView, Extension, FingerprintSnapshot,
+        AuditFilter, BatchCreateResult, BatchCreateTemplateInput, CreateEnvironmentInput,
+        CreateTemplateFromEnvInput, CreatedApiKey, DashboardStats, Environment, EnvironmentFilter,
+        EnvironmentIpInfo, EnvironmentTemplate, EnvironmentView, Extension, FingerprintSnapshot,
         Group, GroupInput, HostsEntryInput, MockRuleInput, Proxy, ProxyCheckResult, ProxyInput,
         Settings, ThemeConfig, UpdateAccountInput, UpdateEnvironmentInput, UpdateProxyInput,
-        UpdateSettingsInput, User, UserInput, UserUpdateInput,
+        UpdateSettingsInput, UpdateTemplateInput, User, UserInput, UserUpdateInput,
     },
     package, paths, proxy_check,
     state::SharedState,
@@ -270,6 +271,268 @@ pub async fn update_environment(
     }
     Audit::env(&state.db, actor, actions::ENV_UPDATE, &env, "更新环境信息")?;
     Ok(env)
+}
+
+pub fn list_templates(state: &SharedState) -> Result<Vec<EnvironmentTemplate>> {
+    state.db.list_templates()
+}
+
+pub fn create_template_from_env(
+    state: &SharedState,
+    input: CreateTemplateFromEnvInput,
+    actor: &str,
+) -> Result<EnvironmentTemplate> {
+    let env = state.db.get_environment(&input.env_id)?;
+    let name = input.name.trim();
+    if name.is_empty() {
+        return Err(AppError::bad_request("模板名称不能为空"));
+    }
+    if name.chars().count() > 80 {
+        return Err(AppError::bad_request("模板名称不能超过 80 个字符"));
+    }
+    if state.db.find_template_by_name(name)?.is_some() {
+        return Err(AppError::conflict("已存在同名环境模板"));
+    }
+    let now = now_iso();
+    let template = EnvironmentTemplate {
+        id: new_id(),
+        name: name.to_string(),
+        description: input.description.unwrap_or_default(),
+        project: env.project.clone(),
+        test_env: env.test_env.clone(),
+        account_role: env.account_role.clone(),
+        version: env.version.clone(),
+        case_id: env.case_id.clone(),
+        tags: env.tags.clone(),
+        notes: env.notes.clone(),
+        kernel: env.kernel.clone(),
+        chromium_path: env.chromium_path.clone(),
+        auto_restart: env.auto_restart,
+        memory_limit_mb: env.memory_limit_mb,
+        idle_timeout_min: env.idle_timeout_min,
+        fingerprint: env.fingerprint.clone(),
+        border_color: env.border_color.clone(),
+        border_width: env.border_width,
+        group_id: env.group_id.clone(),
+        proxy_mode: if env.proxy_id.is_some() {
+            "fixed".into()
+        } else {
+            "none".into()
+        },
+        proxy_id: env.proxy_id.clone(),
+        extension_ids: state
+            .db
+            .extensions_for_env(&env.id)?
+            .into_iter()
+            .filter(|extension| extension.enabled)
+            .map(|extension| extension.id)
+            .collect(),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    state.db.insert_template(&template)?;
+    Audit::global(
+        &state.db,
+        actor,
+        actions::TEMPLATE_CREATE,
+        format!("从环境 {} 创建模板 {}", env.name, template.name),
+    )?;
+    Ok(template)
+}
+
+pub fn update_template(
+    state: &SharedState,
+    id: &str,
+    input: UpdateTemplateInput,
+    actor: &str,
+) -> Result<EnvironmentTemplate> {
+    let mut template = state.db.get_template(id)?;
+    if let Some(name) = input.name {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::bad_request("模板名称不能为空"));
+        }
+        if let Some(existing) = state.db.find_template_by_name(name)? {
+            if existing.id != template.id {
+                return Err(AppError::conflict("已存在同名环境模板"));
+            }
+        }
+        template.name = name.to_string();
+    }
+    if let Some(description) = input.description {
+        template.description = description;
+    }
+    if let Some(proxy_mode) = input.proxy_mode.as_deref() {
+        match proxy_mode {
+            "none" => {
+                template.proxy_mode = "none".into();
+                template.proxy_id = None;
+            }
+            "pool" => {
+                if !state.db.list_proxies()?.iter().any(|proxy| proxy.enabled) {
+                    return Err(AppError::bad_request("代理池模式需要至少一个启用代理"));
+                }
+                template.proxy_mode = "pool".into();
+                template.proxy_id = None;
+            }
+            "fixed" => {
+                let proxy_id = input
+                    .proxy_id
+                    .clone()
+                    .or_else(|| template.proxy_id.clone())
+                    .ok_or_else(|| AppError::bad_request("固定代理模式需要选择代理"))?;
+                state.db.get_proxy(&proxy_id)?;
+                template.proxy_mode = "fixed".into();
+                template.proxy_id = Some(proxy_id);
+            }
+            _ => return Err(AppError::bad_request("不支持的代理策略")),
+        }
+    }
+    template.updated_at = now_iso();
+    state.db.update_template(&template)?;
+    Audit::global(
+        &state.db,
+        actor,
+        actions::TEMPLATE_UPDATE,
+        format!("更新环境模板 {}", template.name),
+    )?;
+    Ok(template)
+}
+
+pub fn delete_template(state: &SharedState, id: &str, actor: &str) -> Result<()> {
+    let template = state.db.get_template(id)?;
+    state.db.delete_template(id)?;
+    Audit::global(
+        &state.db,
+        actor,
+        actions::TEMPLATE_DELETE,
+        format!("删除环境模板 {}", template.name),
+    )?;
+    Ok(())
+}
+
+pub fn batch_create_from_template(
+    state: &SharedState,
+    input: BatchCreateTemplateInput,
+    actor: &str,
+) -> Result<BatchCreateResult> {
+    if !(1..=50).contains(&input.count) {
+        return Err(AppError::bad_request("单次批量创建数量需为 1-50"));
+    }
+    let template = state.db.get_template(&input.template_id)?;
+    let prefix = input
+        .name_prefix
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&template.name)
+        .to_string();
+    if prefix.chars().count() > 60 {
+        return Err(AppError::bad_request("环境名前缀不能超过 60 个字符"));
+    }
+    let start_index = input.start_index.unwrap_or(1).max(1);
+    if start_index > 999_999 {
+        return Err(AppError::bad_request("起始序号不能超过 999999"));
+    }
+    if template.proxy_mode == "fixed" && template.proxy_id.is_none() {
+        return Err(AppError::bad_request(
+            "模板的固定代理已被删除，请先编辑模板重新选择代理",
+        ));
+    }
+    let proxy_pool = if template.proxy_mode == "pool" {
+        let proxies = state
+            .db
+            .list_proxies()?
+            .into_iter()
+            .filter(|proxy| proxy.enabled)
+            .collect::<Vec<_>>();
+        if proxies.is_empty() {
+            return Err(AppError::bad_request("模板使用代理池，但没有可用代理"));
+        }
+        proxies
+    } else {
+        Vec::new()
+    };
+    let extension_ids = if template.extension_ids.is_empty() {
+        Vec::new()
+    } else {
+        let existing = state
+            .db
+            .list_extensions()?
+            .into_iter()
+            .filter(|extension| extension.enabled)
+            .map(|extension| extension.id)
+            .collect::<std::collections::HashSet<_>>();
+        template
+            .extension_ids
+            .iter()
+            .filter(|id| existing.contains(*id))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
+    let mut created = Vec::new();
+    let mut errors = Vec::new();
+    for offset in 0..input.count {
+        let index = start_index + offset;
+        let mut candidate = format!("{prefix} {index:02}");
+        let mut suffix = 2;
+        while state.db.find_environment_by_name(&candidate)?.is_some() {
+            candidate = format!("{prefix} {index:02}-{suffix}");
+            suffix += 1;
+        }
+        let proxy_id = match template.proxy_mode.as_str() {
+            "fixed" => template.proxy_id.clone(),
+            "pool" => Some(proxy_pool[(offset as usize) % proxy_pool.len()].id.clone()),
+            _ => None,
+        };
+        let name = candidate.clone();
+        let input = CreateEnvironmentInput {
+            name: candidate,
+            group_id: template.group_id.clone(),
+            proxy_id,
+            project: Some(template.project.clone()),
+            test_env: Some(template.test_env.clone()),
+            account_role: Some(template.account_role.clone()),
+            version: Some(template.version.clone()),
+            case_id: Some(template.case_id.clone()),
+            tags: template.tags.clone(),
+            notes: Some(template.notes.clone()),
+            border_color: Some(template.border_color.clone()),
+            border_width: Some(template.border_width),
+            kernel: Some(template.kernel.clone()),
+            chromium_path: template.chromium_path.clone(),
+            template_os: None,
+            fingerprint: Some(template.fingerprint.clone()),
+            auto_restart: Some(template.auto_restart),
+            memory_limit_mb: template.memory_limit_mb,
+            idle_timeout_min: template.idle_timeout_min,
+        };
+        match create_environment(state, input, actor) {
+            Ok(env) => {
+                if !extension_ids.is_empty() {
+                    if let Err(error) = state.db.assign_extension(&env.id, &extension_ids) {
+                        errors.push(format!("{}: 扩展分配失败: {}", env.name, error.message()));
+                    }
+                }
+                created.push(env);
+            }
+            Err(error) => errors.push(format!("{name}: {}", error.message())),
+        }
+    }
+    Audit::global(
+        &state.db,
+        actor,
+        actions::TEMPLATE_BATCH_CREATE,
+        format!(
+            "使用模板 {} 批量创建 {} 个环境（成功 {}，失败 {}）",
+            template.name,
+            input.count,
+            created.len(),
+            errors.len()
+        ),
+    )?;
+    Ok(BatchCreateResult { created, errors })
 }
 
 pub async fn delete_environment(state: &SharedState, id: &str, actor: &str) -> Result<()> {

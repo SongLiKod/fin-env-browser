@@ -13,9 +13,11 @@ import {
   FolderKanban,
   Globe2,
   Layers,
+  LayoutTemplate,
   MemoryStick,
   MonitorPlay,
   Plus,
+  Radio,
   RefreshCw,
   Search,
   Square,
@@ -24,6 +26,7 @@ import {
   UserRound,
   Users,
   X,
+  Zap,
 } from 'lucide-react';
 import { ipc } from '@/ipc/client';
 import type {
@@ -53,6 +56,9 @@ import {
   GroupManagerDialog,
   ImportEnvironmentsDialog,
 } from '@/components/env/EnvironmentDialogs';
+import { BatchOperationsDialog } from '@/components/env/BatchOperationsDialog';
+import { BroadcastControlDialog } from '@/components/env/BroadcastControlDialog';
+import { TemplateManagerDialog } from '@/components/env/TemplateManagerDialog';
 
 const PAGE_SIZE = 20;
 
@@ -83,6 +89,9 @@ export function EnvironmentsPage() {
   const [showImport, setShowImport] = React.useState(false);
   const [showExport, setShowExport] = React.useState(false);
   const [showGroups, setShowGroups] = React.useState(false);
+  const [showTemplates, setShowTemplates] = React.useState(false);
+  const [showBatchOps, setShowBatchOps] = React.useState(false);
+  const [showBroadcast, setShowBroadcast] = React.useState(false);
   const [showAssignProxy, setShowAssignProxy] = React.useState(false);
   const [cloneTarget, setCloneTarget] = React.useState<EnvironmentView | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<EnvironmentView | null>(null);
@@ -251,6 +260,9 @@ export function EnvironmentsPage() {
             >
               <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} /> 刷新
             </Button>
+            <Button variant="secondary" onClick={() => setShowTemplates(true)}>
+              <LayoutTemplate className="h-4 w-4" /> 模板
+            </Button>
             {can('create_env') ? (
               <>
                 <Button variant="secondary" onClick={() => setShowImport(true)}>
@@ -371,6 +383,22 @@ export function EnvironmentsPage() {
             {selected.size > 0 ? (
               <>
                 <span className="text-xs text-content-weak">已选 {selected.size} 个</span>
+                {can('open_close') ? (
+                  <Button variant="soft" size="sm" onClick={() => setShowBatchOps(true)}>
+                    <Zap className="h-3.5 w-3.5" /> 批量操作
+                  </Button>
+                ) : null}
+                {can('open_close') ? (
+                  <Button
+                    variant="soft"
+                    size="sm"
+                    disabled={selected.size < 2}
+                    title={selected.size < 2 ? '至少选择 2 个环境' : '鼠标/键盘实时同步到多个窗口'}
+                    onClick={() => setShowBroadcast(true)}
+                  >
+                    <Radio className="h-3.5 w-3.5" /> 同步控制
+                  </Button>
+                ) : null}
                 {can('edit_env') ? (
                   <Select
                     className="h-7 w-[140px] text-xs"
@@ -703,6 +731,36 @@ export function EnvironmentsPage() {
       <ExportEnvironmentsDialog open={showExport} onOpenChange={setShowExport} envs={selectedEnvs} />
       <AssignProxyDialog open={showAssignProxy} onOpenChange={setShowAssignProxy} envs={selectedEnvs} proxies={proxies} onDone={() => void refresh(false)} />
       <GroupManagerDialog open={showGroups} onOpenChange={setShowGroups} groups={groups} onChanged={() => void refresh(true)} />
+      <TemplateManagerDialog
+        open={showTemplates}
+        onOpenChange={setShowTemplates}
+        groups={groups}
+        proxies={proxies}
+        onChanged={() => {
+          void refresh(true);
+          void loadStats();
+        }}
+      />
+      <BatchOperationsDialog
+        open={showBatchOps}
+        onOpenChange={setShowBatchOps}
+        envs={selectedEnvs}
+        onCompleted={() => {
+          void refresh(false);
+          void loadStats();
+          void syncRuntimes();
+        }}
+      />
+      <BroadcastControlDialog
+        open={showBroadcast}
+        onOpenChange={setShowBroadcast}
+        envs={selectedEnvs}
+        onChanged={() => {
+          void refresh(false);
+          void loadStats();
+          void syncRuntimes();
+        }}
+      />
       <CloneEnvironmentDialog
         open={!!cloneTarget}
         onOpenChange={(value) => !value && setCloneTarget(null)}
