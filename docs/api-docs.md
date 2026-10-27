@@ -99,7 +99,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "http://127.0.0.1:17321/api/v1/envs?runningOnly=true"
 ```
 
-返回 `EnvironmentView[]`，包含 `fingerprint`、`proxy`、`runtime`、`accountCount`、`snapshotCount`。
+返回 `EnvironmentView[]`，包含 `fingerprint`、`proxy`、`runtime`、`accountCount`、`snapshotCount`，以及最近一次出口 IP 检测字段：`borderColor`、`ipAddress`、`ipCountry`、`ipCountryCode`、`ipCity`、`ipTimezone`、`ipSource`、`ipCheckedAt`。
 
 ### POST /envs
 
@@ -123,6 +123,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "caseId": "CASE-1024",
   "tags": ["回归", "P0"],
   "notes": "仅用于 staging 回归",
+  "borderColor": "#2563EB",
   "templateOs": "win11",
   "autoRestart": false,
   "memoryLimitMb": 1500,
@@ -131,13 +132,34 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
 }
 ```
 
-`templateOs`：`win11` / `win10` / `mac` / `linux`。不传 `fingerprint` 时自动生成自洽模板；传入时按内置规则校验，存在冲突返回 `400 fingerprint_conflict`。
+`templateOs`：`win11` / `win10` / `mac` / `linux`。不传 `fingerprint` 时自动生成自洽模板；传入时按内置规则校验，存在冲突返回 `400 fingerprint_conflict`。`borderColor` 为 6 位十六进制（如 `#2563EB`），留空则按环境 ID 自动生成标识色。
 
 成功：`201 Created` + `EnvironmentView`。
 
 ### GET /envs/{id}
 
 返回 `EnvironmentView`。克隆、快照、指纹报告等子资源通过对应接口读取。
+
+### POST /envs/{id}/check-ip
+
+检测该环境当前的出口 IP。有绑定代理时经代理检测，否则走本机直连；结果写入环境字段并返回：
+
+```json
+{
+  "envId": "env-uuid",
+  "ok": true,
+  "ip": "203.0.113.10",
+  "country": "日本",
+  "countryCode": "JP",
+  "city": "Tokyo",
+  "timezone": "Asia/Tokyo",
+  "source": "proxy",
+  "proxyId": "proxy-uuid",
+  "latencyMs": 420,
+  "message": "出口 IP 解析成功",
+  "checkedAt": "2026-10-27T08:00:00.000Z"
+}
+```
 
 ### PATCH /envs/{id}
 
@@ -149,6 +171,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "proxyId": null,
   "status": "active",
   "tags": ["回归"],
+  "borderColor": "#16A34A",
   "autoRestart": true,
   "memoryLimitMb": null,
   "idleTimeoutMin": 0

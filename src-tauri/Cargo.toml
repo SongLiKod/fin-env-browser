@@ -53,6 +53,13 @@ whoami = "1"
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [profile.release]
 panic = "abort"
 codegen-units = 1

@@ -36,6 +36,7 @@ import { useAuthStore } from '@/store/auth';
 import { useEnvStore } from '@/store/env';
 import { toastError, useToastStore } from '@/store/toast';
 import { cn, envStatusMeta, formatDateShort, relativeTime, testEnvLabels, truncate } from '@/utils';
+import { envBorderColor, envIpSummary, hexToRgba } from '@/utils/environment';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge, StatusDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -76,6 +77,7 @@ export function EnvironmentsPage() {
   const [stats, setStats] = React.useState<DashboardStats | null>(null);
   const [proxies, setProxies] = React.useState<Proxy[]>([]);
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [ipBusyId, setIpBusyId] = React.useState<string | null>(null);
   const [recycleBusy, setRecycleBusy] = React.useState(false);
   const [showCreate, setShowCreate] = React.useState(false);
   const [showImport, setShowImport] = React.useState(false);
@@ -158,6 +160,7 @@ export function EnvironmentsPage() {
       if (runtime.warnings.length > 0) {
         toast.warning('启动时存在告警', runtime.warnings.join('；'));
       }
+      void refreshIp(env);
       await loadStats();
     } catch (error) {
       toastError(error);
@@ -180,8 +183,20 @@ export function EnvironmentsPage() {
     }
   };
 
-  const capture = async (env: EnvironmentView) => {
-    setBusyId(env.id);
+  const refreshIp = async (env: EnvironmentView) => {
+    setIpBusyId(env.id);
+    try {
+      await ipc.envCheckIp(env.id);
+      const next = await ipc.envGet(env.id);
+      useEnvStore.getState().replace(next);
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setIpBusyId(null);
+    }
+  };
+
+  const capture = async (env: EnvironmentView) => {    setBusyId(env.id);
     try {
       const result = await ipc.browserScreenshot(env.id);
       setScreenshot(result);
@@ -259,9 +274,9 @@ export function EnvironmentsPage() {
       </div>
 
       <Card className="overflow-hidden">
-        <div className="space-y-3 border-b border-border p-4">
+        <div className="space-y-2.5 border-b border-border bg-surface-secondary/40 p-4">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-[240px] flex-1">
+            <div className="relative min-w-[260px] flex-[1_1_320px]">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-content-hint" />
               <Input
                 className="pl-9"
@@ -280,7 +295,7 @@ export function EnvironmentsPage() {
               ) : null}
             </div>
             <Select
-              className="w-[130px]"
+              wrapperClassName="w-[130px]"
               value={filter.groupId ?? ''}
               placeholder="全部分组"
               onChange={(event) => setFilter({ groupId: event.target.value || null })}
@@ -292,7 +307,7 @@ export function EnvironmentsPage() {
               ))}
             </Select>
             <Select
-              className="w-[120px]"
+              wrapperClassName="w-[120px]"
               value={filter.status ?? ''}
               placeholder="全部状态"
               onChange={(event) => setFilter({ status: event.target.value || null })}
@@ -302,9 +317,9 @@ export function EnvironmentsPage() {
               <option value="archived">已归档</option>
             </Select>
             <Select
-              className="w-[120px]"
+              wrapperClassName="w-[140px]"
               value={filter.testEnv ?? ''}
-              placeholder="全部环境"
+              placeholder="全部测试环境"
               onChange={(event) => setFilter({ testEnv: event.target.value || null })}
             >
               {Object.entries(testEnvLabels).map(([value, label]) => (
@@ -314,7 +329,7 @@ export function EnvironmentsPage() {
               ))}
             </Select>
             <Select
-              className="w-[130px]"
+              wrapperClassName="w-[130px]"
               value={filter.project ?? ''}
               placeholder="全部项目"
               onChange={(event) => setFilter({ project: event.target.value || null })}
@@ -326,7 +341,7 @@ export function EnvironmentsPage() {
               ))}
             </Select>
             <Select
-              className="w-[120px]"
+              wrapperClassName="w-[120px]"
               value={filter.tag ?? ''}
               placeholder="全部标签"
               onChange={(event) => setFilter({ tag: event.target.value || null })}
@@ -346,14 +361,6 @@ export function EnvironmentsPage() {
               />
               仅运行中
             </label>
-            <Button variant="ghost" size="sm" onClick={() => { resetFilter(); setSearch(''); }}>
-              清除筛选
-            </Button>
-            {can('edit_env') ? (
-              <Button variant="ghost" size="sm" onClick={() => setShowGroups(true)}>
-                <Layers className="h-3.5 w-3.5" /> 分组管理
-              </Button>
-            ) : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -400,6 +407,17 @@ export function EnvironmentsPage() {
             ) : (
               <span className="text-xs text-content-hint">按项目、测试环境、角色、标签与运行状态快速筛选</span>
             )}
+            <div className="ml-auto flex items-center gap-1.5">
+              <span className="text-[11px] text-content-hint">共 {envs.length} 个环境</span>
+              <Button variant="ghost" size="sm" onClick={() => { resetFilter(); setSearch(''); }}>
+                清除筛选
+              </Button>
+              {can('edit_env') ? (
+                <Button variant="ghost" size="sm" onClick={() => setShowGroups(true)}>
+                  <Layers className="h-3.5 w-3.5" /> 分组管理
+                </Button>
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -437,9 +455,9 @@ export function EnvironmentsPage() {
                   <th>环境</th>
                   <th>项目 / 用例</th>
                   <th>指纹</th>
-                  <th>代理</th>
+                  <th>网络 / IP</th>
                   <th className="text-center">账号</th>
-                  <th>运行状态</th>
+                  <th className="min-w-[150px]">运行状态</th>
                   <th>最近打开</th>
                   <th className="w-[170px] text-right">操作</th>
                 </tr>
@@ -448,8 +466,15 @@ export function EnvironmentsPage() {
                 {visible.map((env) => {
                   const isRunning = !!env.runtime;
                   const status = envStatusMeta[env.status];
+                  const accent = envBorderColor(env);
                   return (
-                    <tr key={env.id}>
+                    <tr
+                      key={env.id}
+                      style={{
+                        boxShadow: `inset 3px 0 0 ${accent}`,
+                        backgroundColor: isRunning ? hexToRgba(accent, 0.035) : undefined,
+                      }}
+                    >
                       <td>
                         <input
                           type="checkbox"
@@ -470,9 +495,16 @@ export function EnvironmentsPage() {
                         <div className="flex items-start gap-2">
                           <StatusDot tone={isRunning ? 'success' : status.tone === 'success' ? 'primary' : 'muted'} pulse={isRunning} className="mt-1.5" />
                           <div className="min-w-0">
-                            <Link to={`/envs/${env.id}`} className="block truncate text-sm font-medium text-content-main hover:text-primary">
-                              {env.name}
-                            </Link>
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/10"
+                                style={{ backgroundColor: accent }}
+                                title={env.borderColor || '自动标识色'}
+                              />
+                              <Link to={`/envs/${env.id}`} className="block truncate text-sm font-medium text-content-main hover:text-primary">
+                                {env.name}
+                              </Link>
+                            </div>
                             <div className="mt-1 flex flex-wrap items-center gap-1">
                               <Badge tone={isRunning ? 'success' : status.tone === 'warning' ? 'warning' : status.tone === 'muted' ? 'neutral' : 'primary'}>
                                 {isRunning ? '运行中' : status.label}
@@ -508,19 +540,28 @@ export function EnvironmentsPage() {
                         </div>
                       </td>
                       <td>
-                        {env.proxy ? (
-                          <Tooltip content={`${env.proxy.protocol}://${env.proxy.host}:${env.proxy.port}`}>
-                            <div className="max-w-[140px]">
-                              <p className="truncate text-xs text-content-main">{env.proxy.name}</p>
-                              <p className="truncate text-[10px] text-content-hint">
-                                {env.proxy.exitCountry ?? env.proxy.host}
-                                {env.proxy.latencyMs ? ` · ${env.proxy.latencyMs}ms` : ''}
-                              </p>
-                            </div>
-                          </Tooltip>
-                        ) : (
-                          <span className="text-xs text-content-hint">直连</span>
-                        )}
+                        <div className="group/ip max-w-[170px] space-y-0.5">
+                          <p className="flex items-center gap-1 font-mono text-xs text-content-main" title={envIpSummary(env)}>
+                            <Globe2 className="h-3 w-3 shrink-0 text-primary" />
+                            <span className="truncate">{env.ipAddress ?? 'IP 待检测'}</span>
+                            <button
+                              type="button"
+                              className="text-content-hint opacity-0 transition-opacity hover:text-primary group-hover/ip:opacity-100"
+                              title="刷新出口 IP"
+                              onClick={() => void refreshIp(env)}
+                            >
+                              <RefreshCw className={cn('h-3 w-3', ipBusyId === env.id && 'animate-spin')} />
+                            </button>
+                          </p>
+                          <p className="truncate text-[10px] text-content-hint">
+                            {env.proxy ? env.proxy.name : '直连'}
+                            {env.ipCountry || env.ipCountryCode
+                              ? ` · ${env.ipCountry ?? env.ipCountryCode}`
+                              : env.proxy?.exitCountry
+                                ? ` · ${env.proxy.exitCountry}`
+                                : ''}
+                          </p>
+                        </div>
                       </td>
                       <td className="text-center">
                         <span className="inline-flex items-center gap-1 text-xs text-content-weak">
@@ -533,7 +574,7 @@ export function EnvironmentsPage() {
                             <p className="flex items-center gap-1 text-[var(--success)]">
                               <StatusDot tone="success" pulse /> PID {env.runtime.pid}
                             </p>
-                            <p className="text-content-hint">
+                            <p className="whitespace-nowrap text-content-hint">
                               CPU {env.runtime.cpuPercent.toFixed(1)}% · {env.runtime.memoryMb} MB
                             </p>
                             <p className="max-w-[190px] truncate text-content-hint" title={env.runtime.currentUrl}>

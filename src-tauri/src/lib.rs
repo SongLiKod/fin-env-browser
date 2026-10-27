@@ -200,6 +200,7 @@ pub fn run() {
             commands::permission_matrix,
             commands::env_list,
             commands::env_get,
+            commands::env_check_ip,
             commands::env_create,
             commands::env_update,
             commands::env_delete,

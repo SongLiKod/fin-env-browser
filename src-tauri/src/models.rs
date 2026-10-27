@@ -55,6 +55,22 @@ pub struct Environment {
     pub memory_limit_mb: Option<u32>,
     pub idle_timeout_min: Option<u32>,
     pub fingerprint: Fingerprint,
+    #[serde(default)]
+    pub border_color: String,
+    #[serde(default)]
+    pub ip_address: Option<String>,
+    #[serde(default)]
+    pub ip_country: Option<String>,
+    #[serde(default)]
+    pub ip_country_code: Option<String>,
+    #[serde(default)]
+    pub ip_city: Option<String>,
+    #[serde(default)]
+    pub ip_timezone: Option<String>,
+    #[serde(default)]
+    pub ip_source: Option<String>,
+    #[serde(default)]
+    pub ip_checked_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub last_opened_at: Option<String>,
@@ -69,6 +85,23 @@ pub struct EnvironmentView {
     pub runtime: Option<BrowserRuntime>,
     pub account_count: u32,
     pub snapshot_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentIpInfo {
+    pub env_id: String,
+    pub ok: bool,
+    pub ip: Option<String>,
+    pub country: Option<String>,
+    pub country_code: Option<String>,
+    pub city: Option<String>,
+    pub timezone: Option<String>,
+    pub source: String,
+    pub proxy_id: Option<String>,
+    pub latency_ms: Option<u64>,
+    pub message: String,
+    pub checked_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -105,6 +138,8 @@ pub struct CreateEnvironmentInput {
     pub tags: Vec<String>,
     #[serde(default)]
     pub notes: Option<String>,
+    #[serde(default)]
+    pub border_color: Option<String>,
     #[serde(default)]
     pub kernel: Option<String>,
     #[serde(default)]
@@ -146,6 +181,8 @@ pub struct UpdateEnvironmentInput {
     pub tags: Option<Vec<String>>,
     #[serde(default)]
     pub notes: Option<String>,
+    #[serde(default)]
+    pub border_color: Option<String>,
     #[serde(default)]
     pub kernel: Option<String>,
     #[serde(default, deserialize_with = "double_option")]

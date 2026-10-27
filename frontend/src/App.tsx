@@ -108,6 +108,14 @@ function AppContent() {
 
   React.useEffect(() => {
     if (!authenticated) return;
+    void useEnvStore
+      .getState()
+      .refresh(true)
+      .catch(() => undefined);
+  }, [authenticated]);
+
+  React.useEffect(() => {
+    if (!authenticated) return;
     let disposed = false;
     const unlisteners: Array<() => void> = [];
     const register = (promise: Promise<() => void>) => {

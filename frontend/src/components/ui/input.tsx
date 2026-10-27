@@ -33,11 +33,13 @@ Textarea.displayName = 'Textarea';
 
 export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   placeholder?: string;
+  /** Applied to the positioning wrapper, use this for width constraints in flex rows. */
+  wrapperClassName?: string;
 }
 
 export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
-  ({ className, children, placeholder, ...props }, ref) => (
-    <span className="relative block w-full">
+  ({ className, children, placeholder, wrapperClassName, ...props }, ref) => (
+    <span className={cn('relative block w-full', wrapperClassName)}>
       <select
         ref={ref}
         className={cn(

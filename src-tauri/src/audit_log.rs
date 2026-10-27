@@ -71,6 +71,7 @@ pub mod actions {
     pub const ENV_CLONE: &str = "env.clone";
     pub const ENV_IMPORT: &str = "env.import";
     pub const ENV_EXPORT: &str = "env.export";
+    pub const ENV_IP_CHECK: &str = "env.ip_check";
     pub const ENV_OPEN: &str = "browser.open";
     pub const ENV_CLOSE: &str = "browser.close";
     pub const ENV_CRASH: &str = "browser.crash";

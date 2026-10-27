@@ -253,6 +253,7 @@ impl BrowserManager {
             ));
         }
         let headless = options.headless.unwrap_or(false);
+        let window_name = format!("FinEnv · {}", env.name);
 
         let args = build_chromium_args(
             &env.fingerprint,
@@ -261,6 +262,7 @@ impl BrowserManager {
             proxy_url.as_deref(),
             &hosts,
             &extensions,
+            &window_name,
             "about:blank",
             headless,
         );
@@ -283,6 +285,11 @@ impl BrowserManager {
         if pid == 0 {
             let _ = child.kill().await;
             return Err(AppError::internal("Chromium 进程启动后未返回 PID"));
+        }
+        #[cfg(windows)]
+        {
+            let color = effective_border_color(env);
+            tokio::spawn(async move { apply_window_border(pid, &color).await });
         }
         let tx = self.exit_tx.clone();
         let env_id_for_wait = env.id.clone();
@@ -1577,6 +1584,7 @@ fn build_chromium_args(
     proxy_url: Option<&str>,
     hosts: &[crate::models::HostsEntry],
     extensions: &[String],
+    window_name: &str,
     start_url: &str,
     headless: bool,
 ) -> Vec<String> {
@@ -1599,7 +1607,6 @@ fn build_chromium_args(
         "--disable-prompt-on-repost".into(),
         "--disable-hang-monitor".into(),
         "--disable-dev-shm-usage".into(),
-        "--disable-blink-features=AutomationControlled".into(),
         "--disable-quic".into(),
         "--dns-prefetch-disable".into(),
         "--disable-features=Translate,OptimizationHints,MediaRouter,InterestFeedContentSuggestions,PreconnectToSearch,NetworkPrediction".into(),
@@ -1617,6 +1624,9 @@ fn build_chromium_args(
     ];
     if headless {
         args.push("--headless=new".into());
+    }
+    if !window_name.trim().is_empty() {
+        args.push(format!("--window-name={window_name}"));
     }
     if let Some(proxy) = proxy_url {
         args.push(format!("--proxy-server={proxy}"));
@@ -1916,6 +1926,106 @@ fn free_memory_mb() -> u64 {
     let mut system = sysinfo::System::new_all();
     system.refresh_memory();
     system.available_memory() / 1024 / 1024
+}
+
+#[cfg(windows)]
+const BORDER_PALETTE: [&str; 10] = [
+    "#2563EB", "#7C3AED", "#DB2777", "#DC2626", "#EA580C", "#CA8A04", "#16A34A", "#0D9488",
+    "#0891B2", "#475569",
+];
+
+#[cfg(windows)]
+fn effective_border_color(env: &crate::models::Environment) -> String {
+    let value = env.border_color.trim();
+    let hex = value.trim_start_matches('#');
+    if hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return format!("#{}", hex.to_ascii_uppercase());
+    }
+    let hash = env.id.bytes().fold(0u32, |acc, byte| {
+        acc.wrapping_mul(31).wrapping_add(byte as u32)
+    });
+    BORDER_PALETTE[(hash as usize) % BORDER_PALETTE.len()].to_string()
+}
+
+#[cfg(windows)]
+struct WindowSearch {
+    pid: u32,
+    handles: Vec<windows_sys::Win32::Foundation::HWND>,
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn enum_window(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    lparam: windows_sys::Win32::Foundation::LPARAM,
+) -> windows_sys::Win32::Foundation::BOOL {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, IsWindowVisible};
+
+    let search = unsafe { &mut *(lparam as *mut WindowSearch) };
+    let mut window_pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, &mut window_pid) };
+    if window_pid == search.pid && unsafe { IsWindowVisible(hwnd) } != 0 {
+        search.handles.push(hwnd);
+    }
+    1
+}
+
+#[cfg(windows)]
+fn window_handles(pid: u32) -> Vec<windows_sys::Win32::Foundation::HWND> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::EnumWindows;
+
+    let mut search = WindowSearch {
+        pid,
+        handles: Vec::new(),
+    };
+    unsafe {
+        EnumWindows(
+            Some(enum_window),
+            &mut search as *mut WindowSearch as windows_sys::Win32::Foundation::LPARAM,
+        );
+    }
+    search.handles
+}
+
+#[cfg(windows)]
+fn parse_border_color(value: &str) -> Option<u32> {
+    let hex = value.trim().trim_start_matches('#');
+    if hex.len() != 6 {
+        return None;
+    }
+    let r = u32::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u32::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u32::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(r | (g << 8) | (b << 16))
+}
+
+/// Windows 11 exposes a per-window border color through DWM. Apply it once the
+/// Chromium top-level window exists; unsupported systems silently ignore it.
+#[cfg(windows)]
+async fn apply_window_border(pid: u32, color: &str) {
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR};
+
+    let Some(colorref) = parse_border_color(color) else {
+        return;
+    };
+    for _ in 0..20 {
+        {
+            let handles = window_handles(pid);
+            if !handles.is_empty() {
+                for hwnd in handles {
+                    let _ = unsafe {
+                        DwmSetWindowAttribute(
+                            hwnd,
+                            DWMWA_BORDER_COLOR as u32,
+                            &colorref as *const u32 as *const std::ffi::c_void,
+                            std::mem::size_of::<u32>() as u32,
+                        )
+                    };
+                }
+                return;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
 }
 
 async fn handle_request_paused(instance: &Arc<BrowserInstance>, params: Value) -> Result<()> {

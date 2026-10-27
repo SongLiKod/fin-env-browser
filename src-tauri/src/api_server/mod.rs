@@ -156,6 +156,7 @@ fn build_router(state: SharedState) -> Router {
             "/envs/:id",
             get(get_env).patch(update_env).delete(delete_env),
         )
+        .route("/envs/:id/check-ip", post(check_env_ip))
         .route("/envs/:id/open", post(open_env))
         .route("/envs/:id/close", post(close_env))
         .route("/envs/:id/status", get(env_status))
@@ -338,6 +339,17 @@ async fn open_env(
     let options = body.map(|Json(v)| v).unwrap_or_default();
     let runtime = state.browsers.open(&env, &options, &auth.actor).await?;
     Ok(Json(runtime))
+}
+
+async fn check_env_ip(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Path(id): Path<String>,
+) -> Result<Json<crate::models::EnvironmentIpInfo>, AppError> {
+    permit(&auth, Permission::ViewList)?;
+    Ok(Json(
+        services::check_environment_ip(&state, &id, &auth.actor).await?,
+    ))
 }
 
 async fn close_env(

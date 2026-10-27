@@ -22,7 +22,7 @@ pub mod stats;
 mod tests {
     use super::*;
     use crate::crypto::CryptoManager;
-    use crate::models::{new_id, now_iso, Environment};
+    use crate::models::{new_id, now_iso, Environment, EnvironmentIpInfo};
 
     fn temp_db() -> (Db, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("finenv-db-{}", uuid::Uuid::new_v4()));
@@ -56,6 +56,14 @@ mod tests {
             memory_limit_mb: None,
             idle_timeout_min: None,
             fingerprint: crate::fingerprint::template("win11"),
+            border_color: "#2563EB".into(),
+            ip_address: None,
+            ip_country: None,
+            ip_country_code: None,
+            ip_city: None,
+            ip_timezone: None,
+            ip_source: None,
+            ip_checked_at: None,
             created_at: now.clone(),
             updated_at: now,
             last_opened_at: None,
@@ -176,6 +184,38 @@ mod tests {
         assert_eq!(reopened.environment_count().unwrap(), 0);
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn environment_identity_and_ip_round_trip() {
+        let (db, dir) = temp_db();
+        let env = sample_environment();
+        db.insert_environment(&env).unwrap();
+        let info = EnvironmentIpInfo {
+            env_id: env.id.clone(),
+            ok: true,
+            ip: Some("203.0.113.10".into()),
+            country: Some("Japan".into()),
+            country_code: Some("JP".into()),
+            city: Some("Tokyo".into()),
+            timezone: Some("Asia/Tokyo".into()),
+            source: "proxy".into(),
+            proxy_id: None,
+            latency_ms: Some(320),
+            message: "出口 IP 解析成功".into(),
+            checked_at: now_iso(),
+        };
+        db.save_environment_ip(&info).unwrap();
+        let loaded = db.get_environment(&env.id).unwrap();
+        assert_eq!(loaded.border_color, "#2563EB");
+        assert_eq!(loaded.ip_address.as_deref(), Some("203.0.113.10"));
+        assert_eq!(loaded.ip_country.as_deref(), Some("Japan"));
+        assert_eq!(loaded.ip_country_code.as_deref(), Some("JP"));
+        assert_eq!(loaded.ip_city.as_deref(), Some("Tokyo"));
+        assert_eq!(loaded.ip_timezone.as_deref(), Some("Asia/Tokyo"));
+        assert_eq!(loaded.ip_source.as_deref(), Some("proxy"));
+        assert!(loaded.ip_checked_at.is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 /// Small wrapper around a single SQLite connection.
@@ -253,6 +293,10 @@ impl Db {
             (
                 "002_hardening",
                 include_str!("../../migrations/002_hardening.sql"),
+            ),
+            (
+                "003_environment_identity",
+                include_str!("../../migrations/003_environment_identity.sql"),
             ),
         ];
         let current: i64 =

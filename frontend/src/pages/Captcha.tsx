@@ -132,7 +132,7 @@ export function CaptchaPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Select className="w-[180px]" value={captureEnv} onChange={(event) => setCaptureEnv(event.target.value)} placeholder={running.length ? '选择运行中的环境' : '暂无运行环境'}>
+          <Select wrapperClassName="w-[180px]" value={captureEnv} onChange={(event) => setCaptureEnv(event.target.value)} placeholder={running.length ? '选择运行中的环境' : '暂无运行环境'}>
             {running.map((env) => (
               <option key={env.id} value={env.id}>{env.name}</option>
             ))}
@@ -156,7 +156,7 @@ export function CaptchaPage() {
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border p-4">
           <div className="flex flex-wrap items-center gap-2">
-            <Select className="w-[180px]" value={envFilter} onChange={(event) => setEnvFilter(event.target.value)} placeholder="全部环境">
+            <Select wrapperClassName="w-[180px]" value={envFilter} onChange={(event) => setEnvFilter(event.target.value)} placeholder="全部环境">
               {envs.map((env) => (
                 <option key={env.id} value={env.id}>{env.name}</option>
               ))}

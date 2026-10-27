@@ -10,7 +10,8 @@ use super::{bool_int, int_bool, Db};
 
 const ENV_COLUMNS: &str = "id, name, group_id, status, profile_dir, proxy_id, fingerprint_snapshot_id, \
     project, test_env, account_role, version, case_id, tags, notes, kernel, chromium_path, \
-    auto_restart, memory_limit_mb, idle_timeout_min, fingerprint_json, created_at, updated_at, last_opened_at";
+    auto_restart, memory_limit_mb, idle_timeout_min, fingerprint_json, created_at, updated_at, last_opened_at, \
+    border_color, ip_address, ip_country, ip_country_code, ip_city, ip_timezone, ip_source, ip_checked_at";
 
 fn decrypt_fingerprint(
     stored: &str,
@@ -77,6 +78,14 @@ fn row_to_env(row: &Row<'_>, crypto: Option<&CryptoManager>) -> rusqlite::Result
         idle_timeout_min: row.get::<_, Option<i64>>(18)?.map(|v| v as u32),
         fingerprint: serde_json::from_value(fp)
             .unwrap_or_else(|_| crate::fingerprint::template("win11")),
+        border_color: row.get(23)?,
+        ip_address: row.get(24)?,
+        ip_country: row.get(25)?,
+        ip_country_code: row.get(26)?,
+        ip_city: row.get(27)?,
+        ip_timezone: row.get(28)?,
+        ip_source: row.get(29)?,
+        ip_checked_at: row.get(30)?,
         created_at: row.get(20)?,
         updated_at: row.get(21)?,
         last_opened_at: row.get(22)?,
@@ -174,8 +183,9 @@ impl Db {
                 "INSERT INTO environments (id, name, group_id, status, profile_dir, proxy_id,
                  fingerprint_snapshot_id, project, test_env, account_role, version, case_id, tags,
                  notes, kernel, chromium_path, auto_restart, memory_limit_mb, idle_timeout_min,
-                 fingerprint_json, created_at, updated_at, last_opened_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
+                 fingerprint_json, created_at, updated_at, last_opened_at, border_color, ip_address,
+                 ip_country, ip_country_code, ip_city, ip_timezone, ip_source, ip_checked_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)",
                 params![
                     env.id,
                     env.name,
@@ -200,6 +210,14 @@ impl Db {
                     env.created_at,
                     env.updated_at,
                     env.last_opened_at,
+                    env.border_color,
+                    env.ip_address,
+                    env.ip_country,
+                    env.ip_country_code,
+                    env.ip_city,
+                    env.ip_timezone,
+                    env.ip_source,
+                    env.ip_checked_at,
                 ],
             )?;
             Ok(())
@@ -215,7 +233,9 @@ impl Db {
                  proxy_id=?6, fingerprint_snapshot_id=?7, project=?8, test_env=?9, account_role=?10,
                  version=?11, case_id=?12, tags=?13, notes=?14, kernel=?15, chromium_path=?16,
                  auto_restart=?17, memory_limit_mb=?18, idle_timeout_min=?19, fingerprint_json=?20,
-                 updated_at=?21, last_opened_at=?22 WHERE id=?1",
+                 updated_at=?21, last_opened_at=?22, border_color=?23, ip_address=?24,
+                 ip_country=?25, ip_country_code=?26, ip_city=?27, ip_timezone=?28, ip_source=?29,
+                 ip_checked_at=?30 WHERE id=?1",
                 params![
                     env.id,
                     env.name,
@@ -239,6 +259,14 @@ impl Db {
                     fp,
                     env.updated_at,
                     env.last_opened_at,
+                    env.border_color,
+                    env.ip_address,
+                    env.ip_country,
+                    env.ip_country_code,
+                    env.ip_city,
+                    env.ip_timezone,
+                    env.ip_source,
+                    env.ip_checked_at,
                 ],
             )?;
             if changed == 0 {
@@ -268,12 +296,38 @@ impl Db {
             let mut changed = 0usize;
             for id in env_ids {
                 changed += tx.execute(
-                    "UPDATE environments SET proxy_id = ?2, updated_at = ?3 WHERE id = ?1",
+                    "UPDATE environments SET proxy_id = ?2, updated_at = ?3,
+                     ip_address = NULL, ip_country = NULL, ip_country_code = NULL, ip_city = NULL,
+                     ip_timezone = NULL, ip_source = NULL, ip_checked_at = NULL WHERE id = ?1",
                     params![id, proxy_id, crate::models::now_iso()],
                 )?;
             }
             tx.commit()?;
             Ok(changed)
+        })
+    }
+
+    pub fn save_environment_ip(&self, info: &crate::models::EnvironmentIpInfo) -> Result<()> {
+        self.with(|conn| {
+            let changed = conn.execute(
+                "UPDATE environments SET ip_address=?2, ip_country=?3, ip_country_code=?4,
+                 ip_city=?5, ip_timezone=?6, ip_source=?7, ip_checked_at=?8
+                 WHERE id=?1",
+                params![
+                    info.env_id,
+                    info.ip,
+                    info.country,
+                    info.country_code,
+                    info.city,
+                    info.timezone,
+                    info.source,
+                    info.checked_at,
+                ],
+            )?;
+            if changed == 0 {
+                return Err(AppError::not_found("环境不存在"));
+            }
+            Ok(())
         })
     }
 

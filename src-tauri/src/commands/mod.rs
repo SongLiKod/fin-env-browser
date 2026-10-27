@@ -113,6 +113,16 @@ pub fn env_get(
 }
 
 #[tauri::command]
+pub async fn env_check_ip(
+    state: State<'_, SharedState>,
+    id: String,
+) -> Result<crate::models::EnvironmentIpInfo> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::ViewList)?.username;
+    services::check_environment_ip(&state, &id, &actor).await
+}
+
+#[tauri::command]
 pub fn env_create(
     state: State<'_, SharedState>,
     input: CreateEnvironmentInput,
@@ -687,10 +697,11 @@ pub async fn browser_open(
     let state = state.inner().clone();
     let actor = state.require(Permission::OpenClose)?.username;
     let env = state.db.get_environment(&env_id)?;
-    state
+    let runtime = state
         .browsers
         .open(&env, &options.unwrap_or_default(), &actor)
-        .await
+        .await?;
+    Ok(runtime)
 }
 
 #[tauri::command]

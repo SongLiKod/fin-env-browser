@@ -15,6 +15,7 @@ import {
 } from '@/utils/dialog';
 import { toastError, useToastStore } from '@/store/toast';
 import { Button } from '@/components/ui/button';
+import { ColorPicker } from '@/components/ui/color-picker';
 import { Dialog } from '@/components/ui/dialog';
 import { Field, Input, Select, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -46,6 +47,7 @@ export function CreateEnvironmentDialog({
     caseId: '',
     tags: '',
     notes: '',
+    borderColor: '',
     templateOs: 'win11',
     autoRestart: false,
     memoryLimitMb: '',
@@ -74,6 +76,7 @@ export function CreateEnvironmentDialog({
         caseId: form.caseId,
         tags: parseTags(form.tags),
         notes: form.notes,
+        borderColor: form.borderColor,
         templateOs: form.templateOs,
         autoRestart: form.autoRestart,
         memoryLimitMb: form.memoryLimitMb ? Number(form.memoryLimitMb) : null,
@@ -117,6 +120,9 @@ export function CreateEnvironmentDialog({
             onChange={(event) => update('name', event.target.value)}
             placeholder="例如：订单中心 - 测试账号 A"
           />
+        </Field>
+        <Field label="环境标识色" hint="用于列表、详情和浏览器窗口边框，便于区分多个环境" className="col-span-2">
+          <ColorPicker value={form.borderColor} onChange={(value) => update('borderColor', value)} />
         </Field>
         <Field label="分组">
           <Select value={form.groupId} onChange={(event) => update('groupId', event.target.value)} placeholder="不分组">

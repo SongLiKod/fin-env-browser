@@ -152,6 +152,14 @@ export interface Environment {
   memoryLimitMb: number | null;
   idleTimeoutMin: number | null;
   fingerprint: Fingerprint;
+  borderColor: string;
+  ipAddress: string | null;
+  ipCountry: string | null;
+  ipCountryCode: string | null;
+  ipCity: string | null;
+  ipTimezone: string | null;
+  ipSource: string | null;
+  ipCheckedAt: string | null;
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string | null;
@@ -198,6 +206,21 @@ export interface EnvironmentView extends Environment {
   snapshotCount: number;
 }
 
+export interface EnvironmentIpInfo {
+  envId: string;
+  ok: boolean;
+  ip: string | null;
+  country: string | null;
+  countryCode: string | null;
+  city: string | null;
+  timezone: string | null;
+  source: 'proxy' | 'direct' | string;
+  proxyId: string | null;
+  latencyMs: number | null;
+  message: string;
+  checkedAt: string;
+}
+
 export interface Group {
   id: string;
   name: string;
@@ -226,6 +249,7 @@ export interface CreateEnvironmentInput {
   caseId?: string | null;
   tags?: string[];
   notes?: string | null;
+  borderColor?: string | null;
   kernel?: string | null;
   chromiumPath?: string | null;
   templateOs?: string | null;
@@ -247,6 +271,7 @@ export interface UpdateEnvironmentInput {
   caseId?: string;
   tags?: string[];
   notes?: string;
+  borderColor?: string;
   kernel?: string;
   chromiumPath?: string | null;
   autoRestart?: boolean;

@@ -39,6 +39,7 @@ for (const file of [
   'src-tauri/capabilities/default.json',
   'src-tauri/migrations/001_init.sql',
   'src-tauri/migrations/002_hardening.sql',
+  'src-tauri/migrations/003_environment_identity.sql',
   'src-tauri/src/process/mod.rs',
   'src-tauri/src/cdp/mod.rs',
   'src-tauri/src/db/mod.rs',
@@ -119,7 +120,11 @@ for (const table of [
   if (!new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\b`).test(schema)) fail(`缺少数据表 ${table}`);
 }
 if (!/audit_logs_no_update/.test(schema) || !/audit_logs_no_delete/.test(schema)) fail('审计不可篡改触发器缺失');
-ok('全部核心表、审计触发器存在');
+const identity = read('src-tauri/migrations/003_environment_identity.sql');
+for (const column of ['border_color', 'ip_address', 'ip_country', 'ip_checked_at']) {
+  if (!identity.includes(column)) fail(`环境身份迁移缺少 ${column}`);
+}
+ok('全部核心表、审计触发器、环境身份字段存在');
 
 console.log('\n[6] 安全与主题令牌');
 const capability = read('src-tauri/capabilities/default.json');

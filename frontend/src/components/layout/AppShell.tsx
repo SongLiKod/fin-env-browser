@@ -1,4 +1,5 @@
 import { Outlet } from 'react-router-dom';
+import { RunningEnvironments } from './RunningEnvironments';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 
@@ -8,6 +9,7 @@ export function AppShell() {
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
+        <RunningEnvironments />
         <main className="min-h-0 flex-1 overflow-y-auto">
           <Outlet />
         </main>

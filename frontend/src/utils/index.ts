@@ -203,6 +203,7 @@ export const auditActionLabels: Record<string, string> = {
   'env.clone': '克隆环境',
   'env.import': '导入环境',
   'env.export': '导出环境',
+  'env.ip_check': '检测出口 IP',
   'env.assign_group': '调整分组',
   'browser.open': '打开浏览器',
   'browser.close': '关闭浏览器',

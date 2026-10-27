@@ -8,6 +8,7 @@ import { formatDate, parseTags, testEnvLabels } from '@/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
+import { ColorPicker } from '@/components/ui/color-picker';
 import { CopyButton } from '@/components/ui/misc';
 import { Field, Input, Select, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -35,6 +36,7 @@ export function OverviewPanel({
     caseId: env.caseId,
     tags: env.tags.join(', '),
     notes: env.notes,
+    borderColor: env.borderColor,
     autoRestart: env.autoRestart,
     memoryLimitMb: env.memoryLimitMb?.toString() ?? '',
     idleTimeoutMin: env.idleTimeoutMin?.toString() ?? '',
@@ -53,6 +55,7 @@ export function OverviewPanel({
       caseId: env.caseId,
       tags: env.tags.join(', '),
       notes: env.notes,
+      borderColor: env.borderColor,
       autoRestart: env.autoRestart,
       memoryLimitMb: env.memoryLimitMb?.toString() ?? '',
       idleTimeoutMin: env.idleTimeoutMin?.toString() ?? '',
@@ -81,6 +84,7 @@ export function OverviewPanel({
         caseId: form.caseId,
         tags: parseTags(form.tags),
         notes: form.notes,
+        borderColor: form.borderColor,
         autoRestart: form.autoRestart,
         memoryLimitMb: form.memoryLimitMb ? Number(form.memoryLimitMb) : null,
         idleTimeoutMin: form.idleTimeoutMin ? Number(form.idleTimeoutMin) : null,
@@ -147,8 +151,10 @@ export function OverviewPanel({
             <Field label="测试用例 ID">
               <Input value={form.caseId} onChange={(event) => update('caseId', event.target.value)} disabled={!canEdit} placeholder="CASE-1024" />
             </Field>
-            <Field label="标签" className="col-span-2 md:col-span-3" hint="逗号或空格分隔">
-              <Input value={form.tags} onChange={(event) => update('tags', event.target.value)} disabled={!canEdit} />
+            <Field label="环境标识色" className="col-span-2 md:col-span-3" hint="列表、详情与浏览器窗口边框会使用该颜色">
+              <ColorPicker value={form.borderColor} onChange={(value) => update('borderColor', value)} />
+            </Field>
+            <Field label="标签" className="col-span-2 md:col-span-3" hint="逗号或空格分隔">              <Input value={form.tags} onChange={(event) => update('tags', event.target.value)} disabled={!canEdit} />
             </Field>
             <Field label="备注" className="col-span-2 md:col-span-3">
               <Textarea value={form.notes} onChange={(event) => update('notes', event.target.value)} disabled={!canEdit} />
@@ -194,6 +200,10 @@ export function OverviewPanel({
             <div className="flex items-center justify-between">
               <span className="text-content-weak">代理</span>
               <span className="max-w-[180px] truncate text-content-main">{env.proxy?.name ?? '直连'}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-content-weak">出口 IP</span>
+              <span className="max-w-[180px] truncate font-mono text-content-main">{env.ipAddress ?? '未检测'}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-content-weak">最后打开</span>

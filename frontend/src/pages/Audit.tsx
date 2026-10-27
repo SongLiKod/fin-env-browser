@@ -164,14 +164,14 @@ export function AuditPage() {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-content-hint" />
               <Input className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索操作人、动作、详情、账号、用例…" />
             </div>
-            <Select className="w-[150px]" value={action} placeholder="全部动作" onChange={(event) => setAction(event.target.value)}>
+            <Select wrapperClassName="w-[150px]" value={action} placeholder="全部动作" onChange={(event) => setAction(event.target.value)}>
               {actions.map((key) => (
                 <option key={key} value={key}>
                   {auditActionLabels[key] ?? key}
                 </option>
               ))}
             </Select>
-            <Select className="w-[170px]" value={envId} placeholder="全部环境" onChange={(event) => setEnvId(event.target.value)}>
+            <Select wrapperClassName="w-[170px]" value={envId} placeholder="全部环境" onChange={(event) => setEnvId(event.target.value)}>
               {envs.map((env) => (
                 <option key={env.id} value={env.id}>
                   {env.name}

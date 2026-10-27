@@ -21,6 +21,7 @@ import {
   type CreatedApiKey,
   type DashboardStats,
   type EnvironmentFilter,
+  type EnvironmentIpInfo,
   type EnvironmentView,
   type Extension,
   type Fingerprint,
@@ -103,6 +104,7 @@ export const ipc = {
   envList: (filter: EnvironmentFilter = {}) =>
     call<EnvironmentView[]>('env_list', { filter }),
   envGet: (id: string) => call<EnvironmentView>('env_get', { id }),
+  envCheckIp: (id: string) => call<EnvironmentIpInfo>('env_check_ip', { id }),
   envCreate: (input: CreateEnvironmentInput) => call<EnvironmentView>('env_create', { input }),
   envUpdate: (id: string, input: UpdateEnvironmentInput) =>
     call<EnvironmentView>('env_update', { id, input }),

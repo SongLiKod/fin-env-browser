@@ -9,10 +9,10 @@ use crate::{
     models::{
         new_id, now_iso, Account, AccountExportRow, AccountInput, AlignProxyResult, ApiKey,
         AuditFilter, CreateEnvironmentInput, CreatedApiKey, DashboardStats, Environment,
-        EnvironmentFilter, EnvironmentView, Extension, FingerprintSnapshot, Group, GroupInput,
-        HostsEntryInput, MockRuleInput, Proxy, ProxyCheckResult, ProxyInput, Settings, ThemeConfig,
-        UpdateAccountInput, UpdateEnvironmentInput, UpdateProxyInput, UpdateSettingsInput, User,
-        UserInput, UserUpdateInput,
+        EnvironmentFilter, EnvironmentIpInfo, EnvironmentView, Extension, FingerprintSnapshot,
+        Group, GroupInput, HostsEntryInput, MockRuleInput, Proxy, ProxyCheckResult, ProxyInput,
+        Settings, ThemeConfig, UpdateAccountInput, UpdateEnvironmentInput, UpdateProxyInput,
+        UpdateSettingsInput, User, UserInput, UserUpdateInput,
     },
     package, paths, proxy_check,
     state::SharedState,
@@ -105,12 +105,20 @@ pub fn create_environment(
         case_id: input.case_id.unwrap_or_default().trim().to_string(),
         tags: clean_tags(input.tags),
         notes: input.notes.unwrap_or_default(),
+        border_color: normalize_border_color(input.border_color)?,
         kernel,
         chromium_path: input.chromium_path.filter(|p| !p.trim().is_empty()),
         auto_restart: input.auto_restart.unwrap_or(false),
         memory_limit_mb: valid_memory_limit(input.memory_limit_mb)?,
         idle_timeout_min: valid_idle(input.idle_timeout_min)?,
         fingerprint,
+        ip_address: None,
+        ip_country: None,
+        ip_country_code: None,
+        ip_city: None,
+        ip_timezone: None,
+        ip_source: None,
+        ip_checked_at: None,
         created_at: now.clone(),
         updated_at: now,
         last_opened_at: None,
@@ -168,6 +176,15 @@ pub async fn update_environment(
         if let Some(proxy_id) = &proxy {
             state.db.get_proxy(proxy_id)?;
         }
+        if env.proxy_id != proxy {
+            env.ip_address = None;
+            env.ip_country = None;
+            env.ip_country_code = None;
+            env.ip_city = None;
+            env.ip_timezone = None;
+            env.ip_source = None;
+            env.ip_checked_at = None;
+        }
         env.proxy_id = proxy;
     }
     if let Some(project) = input.project {
@@ -191,6 +208,9 @@ pub async fn update_environment(
     }
     if let Some(notes) = input.notes {
         env.notes = notes;
+    }
+    if let Some(color) = input.border_color {
+        env.border_color = normalize_border_color(Some(color))?;
     }
     if let Some(kernel) = input.kernel {
         if kernel != "chromium" {
@@ -278,6 +298,13 @@ pub fn clone_environment(
     env.created_at = now.clone();
     env.updated_at = now.clone();
     env.last_opened_at = None;
+    env.ip_address = None;
+    env.ip_country = None;
+    env.ip_country_code = None;
+    env.ip_city = None;
+    env.ip_timezone = None;
+    env.ip_source = None;
+    env.ip_checked_at = None;
     state.db.insert_environment(&env)?;
     for account in state.db.list_accounts(id)? {
         let mut copy = account.clone();
@@ -365,6 +392,21 @@ fn validate_test_env(value: &str) -> Result<()> {
     } else {
         Err(AppError::bad_request(
             "测试环境仅支持 dev / test / pre / prod",
+        ))
+    }
+}
+
+fn normalize_border_color(value: Option<String>) -> Result<String> {
+    let raw = value.unwrap_or_default().trim().to_string();
+    if raw.is_empty() {
+        return Ok(String::new());
+    }
+    let hex = raw.trim_start_matches('#');
+    if hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(format!("#{}", hex.to_ascii_uppercase()))
+    } else {
+        Err(AppError::bad_request(
+            "边框颜色需为 6 位十六进制，例如 #2563EB",
         ))
     }
 }
@@ -801,6 +843,87 @@ pub fn delete_proxy(state: &SharedState, id: &str, actor: &str) -> Result<()> {
     )?;
     state.db.delete_proxy(id)?;
     Ok(())
+}
+
+/// Resolve and persist the last observed egress IP for an environment. Uses the
+/// bound proxy when present, otherwise the host's direct connection.
+pub async fn check_environment_ip(
+    state: &SharedState,
+    env_id: &str,
+    actor: &str,
+) -> Result<EnvironmentIpInfo> {
+    let env = state.db.get_environment(env_id)?;
+    let checked_at = now_iso();
+
+    let (source, proxy_id, lookup, latency_ms) = match env.proxy_id.clone() {
+        Some(proxy_id) => {
+            let proxy = state.db.get_proxy(&proxy_id)?;
+            let password = if proxy.password_enc.is_empty() {
+                None
+            } else {
+                Some(state.crypto.decrypt(&proxy.password_enc)?)
+            };
+            let check = proxy_check::check_proxy(&state.db, &proxy, password.as_deref()).await?;
+            let country_code = check
+                .country
+                .as_deref()
+                .filter(|value| value.len() == 2)
+                .map(ToString::to_string);
+            let country = check
+                .country
+                .as_deref()
+                .filter(|value| value.len() > 2)
+                .map(ToString::to_string);
+            (
+                "proxy".to_string(),
+                Some(proxy_id),
+                proxy_check::ExitLookup {
+                    ip: check.exit_ip.clone(),
+                    country,
+                    country_code: country_code.clone(),
+                    city: check.city.clone(),
+                    timezone: check.timezone.clone(),
+                    message: check.message.clone(),
+                },
+                check.latency_ms,
+            )
+        }
+        None => {
+            let (lookup, latency) = proxy_check::check_direct().await?;
+            ("direct".to_string(), None, lookup, Some(latency))
+        }
+    };
+
+    let info = EnvironmentIpInfo {
+        env_id: env_id.to_string(),
+        ok: lookup.ip.is_some(),
+        ip: lookup.ip,
+        country: lookup.country,
+        country_code: lookup.country_code,
+        city: lookup.city,
+        timezone: lookup.timezone,
+        source,
+        proxy_id,
+        latency_ms,
+        message: lookup.message,
+        checked_at,
+    };
+    state.db.save_environment_ip(&info)?;
+
+    Audit::env(
+        &state.db,
+        actor,
+        actions::ENV_IP_CHECK,
+        &env,
+        format!(
+            "检测出口 IP：{}（{}，耗时 {}ms）",
+            info.ip.as_deref().unwrap_or("未获取"),
+            info.message,
+            info.latency_ms.unwrap_or(0)
+        ),
+    )?;
+
+    Ok(info)
 }
 
 pub async fn check_proxy(state: &SharedState, id: &str, actor: &str) -> Result<ProxyCheckResult> {

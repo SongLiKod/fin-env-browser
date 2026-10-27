@@ -271,6 +271,13 @@ fn import_one(
     env.updated_at = now_iso();
     env.last_opened_at = None;
     env.status = "active".into();
+    env.ip_address = None;
+    env.ip_country = None;
+    env.ip_country_code = None;
+    env.ip_city = None;
+    env.ip_timezone = None;
+    env.ip_source = None;
+    env.ip_checked_at = None;
 
     if let Some(proxy) = package.proxy {
         let existing = db.list_proxies()?.into_iter().find(|p| {

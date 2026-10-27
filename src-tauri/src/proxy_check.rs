@@ -89,7 +89,51 @@ pub async fn check_proxy(
         .map_err(AppError::from)?;
 
     let http_start = Instant::now();
-    let mut message = String::from("代理连通");
+    let lookup = lookup_exit(&client).await;
+    let result = ProxyCheckResult {
+        proxy_id: proxy.id.clone(),
+        ok: lookup.ip.is_some(),
+        latency_ms: Some(tcp_latency + http_start.elapsed().as_millis() as u64),
+        exit_ip: lookup.ip,
+        country: lookup.country_code.clone().or(lookup.country),
+        timezone: lookup.timezone.clone().or_else(|| {
+            lookup
+                .country_code
+                .as_deref()
+                .map(crate::fingerprint::timezone_for_country)
+        }),
+        city: lookup.city,
+        message: lookup.message,
+        checked_at,
+    };
+    db.save_proxy_check(&result)?;
+    Ok(result)
+}
+
+pub struct ExitLookup {
+    pub ip: Option<String>,
+    pub country: Option<String>,
+    pub country_code: Option<String>,
+    pub city: Option<String>,
+    pub timezone: Option<String>,
+    pub message: String,
+}
+
+/// Resolve the public egress IP without a proxy. Used for environments that are
+/// not bound to a proxy so the management panel can still show their real IP.
+pub async fn check_direct() -> Result<(ExitLookup, u64)> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) FinEnv/1.0")
+        .build()
+        .map_err(AppError::from)?;
+    let started = Instant::now();
+    let lookup = lookup_exit(&client).await;
+    Ok((lookup, started.elapsed().as_millis() as u64))
+}
+
+async fn lookup_exit(client: &reqwest::Client) -> ExitLookup {
+    let mut message = String::from("正在解析出口 IP");
     let mut exit_ip = None;
     let mut country = None;
     let mut country_code = None;
@@ -133,21 +177,34 @@ pub async fn check_proxy(
                         .get("city")
                         .and_then(|v| v.as_str())
                         .map(ToString::to_string);
+                    if exit_ip.is_some() {
+                        message = "出口 IP 解析成功".into();
+                    }
                 }
             }
             Err(e) => message = format!("出口信息 JSON 解析失败: {e}"),
         },
         Err(e) => {
-            message = format!("代理 HTTP 请求失败: {e}");
+            message = format!("出口 HTTP 请求失败: {e}");
         }
     }
 
     if exit_ip.is_none() {
-        if let Ok(response) = client.get("http://ip-api.com/json/?fields=status,message,country,countryCode,timezone,city,query").send().await {
+        if let Ok(response) = client
+            .get("http://ip-api.com/json/?fields=status,message,country,countryCode,timezone,city,query")
+            .send()
+            .await
+        {
             if let Ok(value) = response.json::<Value>().await {
                 if value.get("status").and_then(|v| v.as_str()) == Some("success") {
-                    exit_ip = value.get("query").and_then(|v| v.as_str()).map(ToString::to_string);
-                    country = value.get("country").and_then(|v| v.as_str()).map(ToString::to_string);
+                    exit_ip = value
+                        .get("query")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string);
+                    country = value
+                        .get("country")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string);
                     country_code = value
                         .get("countryCode")
                         .and_then(|v| v.as_str())
@@ -156,34 +213,28 @@ pub async fn check_proxy(
                         .get("timezone")
                         .and_then(|v| v.as_str())
                         .map(ToString::to_string);
-                    city = value.get("city").and_then(|v| v.as_str()).map(ToString::to_string);
-                    message = "代理连通（备用出口检测）".into();
+                    city = value
+                        .get("city")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string);
+                    message = "备用出口检测成功".into();
                 }
             }
         }
     }
 
-    let ok = exit_ip.is_some();
-    if !ok && message == "代理连通" {
-        message = "代理可连接，但未能解析出口 IP".into();
+    if exit_ip.is_none() && message == "正在解析出口 IP" {
+        message = "无法解析出口 IP".into();
     }
-    let result = ProxyCheckResult {
-        proxy_id: proxy.id.clone(),
-        ok,
-        latency_ms: Some(tcp_latency + http_start.elapsed().as_millis() as u64),
-        exit_ip,
-        country: country_code.clone().or(country),
-        timezone: timezone.clone().or_else(|| {
-            country_code
-                .as_deref()
-                .map(crate::fingerprint::timezone_for_country)
-        }),
+
+    ExitLookup {
+        ip: exit_ip,
+        country,
+        country_code,
         city,
+        timezone,
         message,
-        checked_at,
-    };
-    db.save_proxy_check(&result)?;
-    Ok(result)
+    }
 }
 
 fn build_proxy_url(proxy: &Proxy) -> Result<String> {

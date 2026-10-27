@@ -27,7 +27,8 @@ import { ipc, onBrowserExit, onBrowserRuntime } from '@/ipc/client';
 import { useAuthStore } from '@/store/auth';
 import { useEnvStore } from '@/store/env';
 import { toastError, useToastStore } from '@/store/toast';
-import { envStatusMeta, formatDate, relativeTime, testEnvLabels } from '@/utils';
+import { cn, envStatusMeta, formatDate, relativeTime, testEnvLabels } from '@/utils';
+import { envBorderColor, envIpSummary, hexToRgba } from '@/utils/environment';
 import { Badge, StatusDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, EmptyState, Spinner } from '@/components/ui/card';
@@ -62,10 +63,12 @@ export function EnvironmentDetailPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [tab, setTab] = React.useState<TabId>('overview');
   const [busy, setBusy] = React.useState(false);
+  const [ipChecking, setIpChecking] = React.useState(false);
   const [detecting, setDetecting] = React.useState(false);
   const [showClone, setShowClone] = React.useState(false);
   const [showExport, setShowExport] = React.useState(false);
   const [showDelete, setShowDelete] = React.useState(false);
+  const ipAutoChecked = React.useRef<string | null>(null);
 
   const applyEnv = React.useCallback((next: EnvironmentView) => {
     setEnv((current) => {
@@ -79,6 +82,20 @@ export function EnvironmentDetailPage() {
     if (!id) return;
     const next = await ipc.envGet(id);
     applyEnv(next);
+  }, [id, applyEnv]);
+
+  const refreshIp = React.useCallback(async (silent = false) => {
+    if (!id) return;
+    setIpChecking(true);
+    try {
+      await ipc.envCheckIp(id);
+      const next = await ipc.envGet(id);
+      applyEnv(next);
+    } catch (error) {
+      if (!silent) toastError(error);
+    } finally {
+      setIpChecking(false);
+    }
   }, [id, applyEnv]);
 
   React.useEffect(() => {
@@ -106,6 +123,16 @@ export function EnvironmentDetailPage() {
       active = false;
     };
   }, [id]);
+
+  React.useEffect(() => {
+    if (!env || ipAutoChecked.current === env.id) return;
+    ipAutoChecked.current = env.id;
+    const stale =
+      !env.ipCheckedAt ||
+      Number.isNaN(Date.parse(env.ipCheckedAt)) ||
+      Date.now() - Date.parse(env.ipCheckedAt) > 30 * 60 * 1000;
+    if (stale) void refreshIp(true);
+  }, [env, refreshIp]);
 
   React.useEffect(() => {
     if (!id) return;
@@ -146,6 +173,7 @@ export function EnvironmentDetailPage() {
       setEnv((current) => (current ? { ...current, runtime } : current));
       toast.success('环境已启动', `PID ${runtime.pid} · 端口 ${runtime.debugPort}`);
       if (runtime.warnings.length) toast.warning('启动告警', runtime.warnings.join('；'));
+      void refreshIp(true);
       await refresh();
     } catch (err) {
       toastError(err);
@@ -207,10 +235,14 @@ export function EnvironmentDetailPage() {
 
   const status = envStatusMeta[env.status];
   const running = !!env.runtime;
+  const accent = envBorderColor(env);
 
   return (
     <div className="page-pad space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div
+        className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border bg-surface-base p-4"
+        style={{ borderLeft: `3px solid ${accent}`, backgroundColor: hexToRgba(accent, 0.025) }}
+      >
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="truncate text-xl font-semibold tracking-tight text-content-main">{env.name}</h1>
@@ -238,6 +270,8 @@ export function EnvironmentDetailPage() {
             ) : null}
             <span>·</span>
             <span>{env.proxy?.name ?? '直连'}</span>
+            <span>·</span>
+            <span className="font-mono">{env.ipAddress ?? 'IP 待检测'}</span>
             <span>·</span>
             <span>{env.accountCount} 个账号</span>
             <span>·</span>
@@ -299,9 +333,24 @@ export function EnvironmentDetailPage() {
           <p className="truncate text-[10px] text-content-hint">{env.fingerprint.screen.width}×{env.fingerprint.screen.height} · DPR {env.fingerprint.screen.pixelRatio}</p>
         </Card>
         <Card className="p-3">
-          <p className="flex items-center gap-1 text-[10px] text-content-hint"><Globe2 className="h-3 w-3" /> 代理出口</p>
-          <p className="mt-1 truncate text-xs font-medium text-content-main">{env.proxy?.exitIp ?? env.proxy?.name ?? '直连'}</p>
-          <p className="truncate text-[10px] text-content-hint">{env.proxy ? `${env.proxy.exitCountry ?? '未知国家'} · ${env.proxy.latencyMs ?? '—'}ms` : '未绑定代理'}</p>
+          <div className="flex items-center justify-between">
+            <p className="flex items-center gap-1 text-[10px] text-content-hint"><Globe2 className="h-3 w-3" /> 出口 IP</p>
+            <button
+              type="button"
+              title="刷新出口 IP"
+              className="text-content-hint hover:text-primary"
+              onClick={() => void refreshIp()}
+            >
+              <RefreshCw className={cn('h-3 w-3', ipChecking && 'animate-spin')} />
+            </button>
+          </div>
+          <p className="mt-1 truncate font-mono text-xs font-medium text-content-main" title={envIpSummary(env)}>
+            {env.ipAddress ?? (ipChecking ? '检测中…' : '未检测')}
+          </p>
+          <p className="truncate text-[10px] text-content-hint">
+            {[env.ipCountry ?? env.ipCountryCode, env.ipCity].filter(Boolean).join(' · ') || (env.ipSource === 'proxy' ? '经代理' : env.ipSource === 'direct' ? '直连' : '点击刷新检测')}
+            {env.ipCheckedAt ? ` · ${relativeTime(env.ipCheckedAt)}` : ''}
+          </p>
         </Card>
         <Card className="p-3">
           <p className="flex items-center gap-1 text-[10px] text-content-hint"><ShieldCheck className="h-3 w-3" /> 运行状态</p>
