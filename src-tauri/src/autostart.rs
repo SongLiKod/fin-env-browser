@@ -48,7 +48,7 @@ fn apply_platform(exe: &Path, enabled: bool) -> std::io::Result<()> {
 #[cfg(target_os = "macos")]
 fn apply_platform(exe: &Path, enabled: bool) -> std::io::Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    let path = PathBuf::from(home).join("Library/LaunchAgents/com.finenv.browser.plist");
+    let path = std::path::PathBuf::from(home).join("Library/LaunchAgents/com.finenv.browser.plist");
     if enabled {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -67,7 +67,7 @@ fn apply_platform(exe: &Path, enabled: bool) -> std::io::Result<()> {
 #[cfg(target_os = "linux")]
 fn apply_platform(exe: &Path, enabled: bool) -> std::io::Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    let path = PathBuf::from(home).join(".config/autostart/finenv.desktop");
+    let path = std::path::PathBuf::from(home).join(".config/autostart/finenv.desktop");
     if enabled {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -84,6 +84,6 @@ fn apply_platform(exe: &Path, enabled: bool) -> std::io::Result<()> {
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-fn apply_platform(_exe: &PathBuf, _enabled: bool) -> std::io::Result<()> {
+fn apply_platform(_exe: &Path, _enabled: bool) -> std::io::Result<()> {
     Ok(())
 }
