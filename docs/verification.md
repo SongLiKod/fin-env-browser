@@ -147,7 +147,7 @@ cargo test
 ## 14. 环境身份、标识色与出口 IP（本轮 UI 优化）
 
 - **运行环境常驻栏**：`RunningEnvironments` 位于顶栏下方，实时列出所有运行中的环境，显示标识色、名称、项目、出口 IP、PID，并提供刷新 IP、进入详情、关闭浏览器操作；每 5 秒同步一次，面板重启或 API 打开的环境同样可见。
-- **浏览器窗口身份**：启动参数新增 `--window-name=FinEnv · <环境名>`，Chromium 窗口名称/任务栏标题可区分环境；面板与浏览器窗口使用同一套标识色。
+- **浏览器窗口身份**：启动参数新增 `--window-name=FinEnv · <环境名>`，Chromium 窗口名称/任务栏标题可区分环境；面板与浏览器窗口使用同一套标识色。Windows 下额外在浏览器右下角显示可点击穿透的环境悬浮标牌，随窗口移动，鼠标移入时淡出，避免遮挡 Tab 栏。
 - **环境标识色**：`environments.border_color`（迁移 003）保存 6 位十六进制颜色；`environments.border_width`（迁移 004，1-12px，默认 3px）控制标识色色条粗细。未设置颜色时按环境 ID 生成稳定调色板色。列表行左侧色条、环境名色点、详情页左侧色条、运行栏、创建/编辑对话框色板、取色器与粗细滑杆均使用该配置。
 - **Windows 窗口边框**：Windows 11 下通过 DWM `DWMWA_BORDER_COLOR` 将同一颜色应用到真实 Chromium 窗口边框；其他平台自动忽略，不影响功能。
 - **出口 IP**：新增 `POST /envs/{id}/check-ip` 与 IPC `env_check_ip`。绑定代理时经代理检测，否则直连检测，出口 IP/国家/城市/时区/来源/检测时间写入环境并在列表、详情、运行栏展示；代理变更时自动清空旧 IP。
@@ -168,6 +168,7 @@ cargo test
 - **验证**：
   - 实际打开环境后 `currentUrl` 为 `file:///.../start-pages/<envId>.html`；启动页标题、标识色 `#2563EB`、粗细 `6px` 正确。
   - 启动页显示实时 `navigator.webdriver === false`、UA、平台、语言、时区、屏幕、WebGL。
+  - Windows 环境标牌显示在浏览器右下角（`FinEnv · 环境名`），不占用 Tab 栏，点击穿透并在鼠标悬停时淡出。
   - 调用 `env_check_ip` 后重写启动页，刷新页面显示 `220.197.77.126 / Beijing / China / Asia/Shanghai`。
   - `open_artifact_dir('screenshots')` 与 `open_artifact_dir('recordings')` 均成功打开目录。
   - 启动页 HTML 转义测试覆盖环境名与备注中的 `<script>` 注入。

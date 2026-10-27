@@ -42,6 +42,7 @@ for (const file of [
   'src-tauri/migrations/003_environment_identity.sql',
   'src-tauri/migrations/004_environment_border_width.sql',
   'src-tauri/src/process/mod.rs',
+  'src-tauri/src/process/overlay.rs',
   'src-tauri/src/start_page.rs',
   'src-tauri/src/cdp/mod.rs',
   'src-tauri/src/db/mod.rs',

@@ -30,6 +30,9 @@ use crate::{
     paths,
 };
 
+#[cfg(windows)]
+mod overlay;
+
 #[derive(Debug, Clone)]
 struct ExitEvent {
     env_id: String,
@@ -302,7 +305,9 @@ impl BrowserManager {
         #[cfg(windows)]
         {
             let color = effective_border_color(env);
-            tokio::spawn(async move { apply_window_border(pid, &color).await });
+            let border_color = color.clone();
+            tokio::spawn(async move { apply_window_border(pid, &border_color).await });
+            overlay::spawn(pid, env.name.clone(), color);
         }
         let tx = self.exit_tx.clone();
         let env_id_for_wait = env.id.clone();
@@ -843,6 +848,8 @@ impl BrowserManager {
             if let Ok(mut map) = self.instances.write() {
                 map.insert(env.id.clone(), instance.clone());
             }
+            #[cfg(windows)]
+            overlay::spawn(session.pid, env.name.clone(), effective_border_color(&env));
             self.start_event_handler(instance);
             let _ = Audit::env(
                 &self.db,
