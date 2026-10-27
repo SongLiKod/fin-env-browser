@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "identifier": "com.finenv.browser",
   "build": {
-    "beforeDevCommand": "npm --prefix ../frontend run dev",
+    "beforeDevCommand": "npm --prefix frontend run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm --prefix ../frontend run build",
+    "beforeBuildCommand": "npm --prefix frontend run build",
     "frontendDist": "../frontend/dist"
   },
   "app": {
