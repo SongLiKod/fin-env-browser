@@ -1,0 +1,144 @@
+# 需求对照与校验记录
+
+本文把 `docs/fin-env-requirement.md` / `docs/fin-env-tech.md` 的条目映射到实际代码，并记录可重复执行的校验方式。
+
+## 1. 环境与账号台账（P0）
+
+| 需求 | 实现位置 | 校验 |
+| --- | --- | --- |
+| 新建环境自动生成自洽指纹，支持手动修改 | `fingerprint::template`、`services::create_environment`、`FingerprintEditor` | `cargo test generated_templates_are_consistent`；UI 新建后进入指纹配置 |
+| 分组、项目、测试环境、角色、版本、用例 ID、标签、筛选搜索 | `db/env.rs`、`Environments.tsx` | UI 筛选项；`EnvironmentFilter` SQL |
+| 账号字段、密码加密、四种状态 | `db/account.rs`、`AccountsPanel.tsx` | `crypto` 单测；账号编辑/导出 |
+| 批量导入/导出、克隆、批量删除、加密环境包 | `package.rs`、`EnvironmentDialogs.tsx` | 多选后批量操作；`.finenv` 加密包 |
+| 指纹快照保存/还原 | `services::create_snapshot` / `restore_snapshot`、`SnapshotsPanel.tsx` | UI；运行中立即 apply |
+| 账号批量导入 | CSV 解析 + `bulk_insert_accounts` + 加密账号包 | 账号页「批量导入 / 导入账号包」 |
+
+## 2. 指纹配置（P0）
+
+| 需求 | 实现位置 |
+| --- | --- |
+| UA、屏幕、时区、语言、Canvas、WebGL、Audio、字体、WebRTC、Client Hints、插件 | `Fingerprint`、`FingerprintEditor.tsx` |
+| 参数冲突禁止 | `fingerprint::validate`；保存/新建/还原/导入均强制 |
+| 指纹检测面板 | `fingerprint_report::detect`、`PROBE_SCRIPT`、`DetectionPanel.tsx` |
+| 一键调用检测服务 | 新开 CDP 标签页访问 `detectionServiceUrl`，探针比对并评分 |
+
+## 3. 代理管理（P0）
+
+- 每环境绑定 HTTP/HTTPS/SOCKS5：`environments.proxy_id` + 启动参数 `--proxy-server`。
+- 连通性 + 出口 IP/国家/时区：`proxy_check.rs`、`Proxies.tsx`。
+- IP/时区对齐：`services::align_proxy` + `fingerprint::apply_country_locale`。
+- 代理池批量分配：`proxy_assign` / `AssignEnvsDialog`。
+- 代理密码 AES-256-GCM：`proxies.password_enc`。
+
+## 4. 浏览器内核隔离（P0）
+
+- 独立进程、user-data-dir、随机调试端口：`process::open`、`free_port`。
+- WebRTC/DNS：`--webrtc-ip-handling-policy`、`--force-webrtc-ip-handling-policy`、`--disable-quic`、`--dns-prefetch-disable`、Hosts resolver rules。
+- 扩展单个/批量安装：`extensions`、`env_extensions`、`ExtensionsPanel`。
+- 面板重启自动接管：`restore_sessions` + `browser_sessions` 表。
+- 内核版本锁定：环境级/全局 `chromiumPath` + `chromium-bin/`。
+
+## 5. 自动化与 API（P0）
+
+| 能力 | 位置 |
+| --- | --- |
+| 环境 CRUD | `api_server/mod.rs` `/envs` |
+| 打开/关闭/截图/Cookie 读写/改指纹/切代理/加载快照 | `/open` `/close` `/screenshot` `/cookies` `/fingerprint` `/proxy` `/restore-snapshot` |
+| JS / Python SDK | `sdk/js`、`sdk/python` |
+| 自动访问 URL + 前置脚本 | `OpenOptions.url/preScript` |
+| 截图/录屏/验证码回调 | `BrowserManager::callback`；禅道/Jira 类型 |
+| CI 调用 | API + SDK + `.github/workflows` |
+
+## 6. 存储与同步（P0）
+
+- 密码、代理密码、同步密码、Cookie 缓存：AES-256-GCM 字段级加密。
+- 指纹 JSON（环境/快照/检测报告）：`Db::encrypt_json` 加密落盘；读取时按前缀解密，兼容历史明文。
+- 主密钥：HKDF-SHA256(设备标识 + 随机盐)，并以设备密钥包裹保存至 `master.key.enc`；口令加密包可跨设备携带主密钥。
+- 本地备份/恢复：`backup.rs`，SQLite 一致性备份 + 可选 profile + 可选口令。
+- 零知识云同步：PBKDF2-SHA256(210k) + AES-256-GCM 整体加密，WebDAV/目录。
+- `maintenance::upgrade_backup` 在版本变化后首次启动时自动为全部环境生成升级前指纹快照，并创建数据库备份。
+
+## 7. 资源管控（P1）
+
+- 全局并发：启动前检查 + `capacity_limit`。
+- 内存阈值/自动关闭：5 秒进程树采样、通知、审计。
+- 闲置回收：环境/全局配置。
+- 实时 PID/CPU/内存/状态：`browser://runtime` 事件 + 列表/详情。
+- 崩溃日志 + 可选自动重启：`handle_exit`，10 分钟最多 3 次。
+- 一键强制回收：托盘菜单 + 环境页按钮。
+
+## 8. 团队权限与审计（P1）
+
+- 四种角色 + 12 项细粒度权限：`capability/mod.rs`，Tauri 命令和 API 双重检查。
+- 高危导出全局开关：`Settings.allow_sensitive_export`。
+- 审计字段、哈希链、禁止 UPDATE/DELETE 触发器、JSON/CSV 导出：`db/audit.rs`、`Audit.tsx`。
+- 用户管理与密码修改：`Settings` 团队页 + 侧栏修改密码。
+
+## 9. 辅助测试（P1）
+
+- 独立 Hosts：`hosts_entries` + `--host-resolver-rules`。
+- 独立 Mock：`mock_rules` + CDP Fetch fulfill，运行中即时生效。
+- HAR 导出：`HarState` + `browser_har_start/stop`。
+- 验证码聚合：DOM 监听 + CDP binding + `captcha_events` + 面板截图预览。
+
+## 10. 主题（P1）
+
+- light/dark/auto、主色、密度、导出/导入、持久化：`theme/*`、`store/theme.ts`、`theme_config`。
+- 主题 CSS 仅面板；指纹注入脚本与主题完全分离。
+
+## 11. 非功能
+
+- 安全：Capability 白名单（核心 + dialog），无 fs/shell/http 插件权限；CDP 仅 127.0.0.1。
+- 稳定性：SQLite 迁移；升级前自动快照与备份；浏览器进程独立于面板。
+- 兼容：Windows/macOS/Linux Tauri 配置与 CI 矩阵。
+- 性能：进程调度 tokio；前端构建产物 ~455KB JS（gzip ~134KB）；启动目标 ≤2s 依赖本机环境。
+
+## 12. 可重复校验命令
+
+```bash
+# 前端类型、单测、生产构建
+npm --prefix frontend run check
+
+# JS SDK 构建
+cd sdk/js && npm install && npm run build
+
+# Python 语法
+python -m compileall -q sdk/python/finenv
+
+# Rust 格式、静态检查、单测
+cd src-tauri
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+## 13. 本轮校验记录
+
+- `npm --prefix frontend run check`：通过（`tsc --noEmit` 0 error；Vitest 3 个文件 / 16 用例；Vite 生产构建成功，产物 `frontend/dist`）
+- `sdk/js npm test`：4/4 通过（URL/Header/JSON/错误映射）
+- `sdk/python python -m unittest`：4/4 通过（查询构造/请求体/错误映射/环境变量）
+- Python 3.12 `py_compile`：通过
+- `node scripts/verify.mjs`：通过，0 提示（105 个 Tauri 命令注册、105 个前端 IPC 命令覆盖、29 条 API 路由、18 张表、Capability、主题 Token、需求/技术文档能力追踪）
+- `cargo fmt --check`：通过
+- `cargo check`：通过
+- `cargo clippy --all-targets -- -D warnings`：通过（0 warning）
+- 核心逻辑测试（独立 harness，无 Tauri 运行时依赖）：13/13 通过
+  - AES-GCM 字段加密/解密、错误口令拒绝
+  - 加密包往返、主密钥跨设备导入与本机包裹持久化
+  - 指纹模板一致性、冲突拒绝、时区/WebRTC 校验、国家对齐、注入脚本内容
+  - 环境/快照指纹落盘密文校验
+  - 账号密码、Cookie 缓存密文落盘校验
+  - 审计哈希链校验 + 禁止 UPDATE/DELETE
+  - 数据库迁移幂等（001 + 002 加固迁移）
+  - 加密备份跨设备可移植（备份内携带主密钥）并完整恢复账号密码、代理密码、同步密钥与 Cookie 缓存
+- 真实二进制端到端（debug 构建 + 临时数据目录 + 本机 Chromium/Edge）：
+  - 健康检查、环境创建/列表、快照、审计链校验、删除二次确认、重启后数据持久化
+  - 指纹探针：UA、`navigator.platform`、languages、时区、屏幕分辨率与配置一致，`navigator.webdriver === false`
+  - 浏览器打开/导航/PNG 截图；面板重启后重新附着同一进程（PID 不变、保留当前 URL）
+  - Cookie 写入/读取/加密缓存落盘，应用重启后自动恢复
+  - 连续录制 4 帧并生成 manifest；HAR 1.2 文件导出
+  - 浏览器关闭与进程回收
+- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"1.0.0"}`。
+- Windows GNU 链接阶段会输出 `.rsrc merge failure: multiple non-default manifests` 警告（MinGW 默认清单与 Tauri 资源清单合并提示），构建退出码为 0，产物可正常启动；CI 使用 MSVC 工具链，不涉及该提示。
+- 完整 `cargo test` 的 Tauri 测试二进制在当前 MinGW 沙箱启动阶段报 `STATUS_ENTRYPOINT_NOT_FOUND`（WebView2/工具链运行环境限制）；`cargo check`、`clippy --all-targets` 已完整编译所有测试代码。`.github/workflows/build.yml` 在 Ubuntu 上执行完整单元测试，并在 Windows/macOS/Linux 矩阵中构建安装包。
+- 浏览器预览：登录页亮/暗主题渲染正常，无 console error。

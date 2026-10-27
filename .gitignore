@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+sdk/js/node_modules/
+sdk/js/dist/
+sdk/python/**/__pycache__/
+sdk/python/build/
+sdk/python/*.egg-info/
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Frontend build
+frontend/dist/
+frontend/.vite/
+
+# Local data / bundles
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+master.key.enc
+master.salt
+*.finenv
+*.finenvbackup
+*.log
+backups/
+artifacts/
+
+# OS
+.DS_Store
+Thumbs.db

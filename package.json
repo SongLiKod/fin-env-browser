@@ -1,0 +1,13 @@
+{
+  "name": "finenv-browser",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "check": "npm --prefix frontend run check",
+    "verify": "node scripts/verify.mjs",
+    "icons": "node scripts/generate-icons.mjs",
+    "tauri": "cargo tauri"
+  }
+}

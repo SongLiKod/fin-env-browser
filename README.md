@@ -1,0 +1,223 @@
+# FinEnv 指纹环境
+
+FinEnv 是面向研发测试团队的多账号独立指纹环境管理工具。每个测试账号绑定一套完全隔离的 Chromium 环境，持久保留登录态、Cookie、缓存与指纹配置，同时提供 REST API、JS / Python SDK 与 Playwright CDP 接入。
+
+- 管理面板：Tauri 2.0 + React 18 + TypeScript + Vite + TailwindCSS + Zustand
+- 调度核心：Rust + tokio + rusqlite（SQLite）+ Axum + ring（AES-256-GCM）
+- 浏览器：独立 Chromium 进程，独立 `user-data-dir`，独立随机调试端口
+- 安全：本地加密、追加式哈希链审计、Tauri Capability 白名单、高危操作二次确认
+
+> 管理面板自身不加载任何被测业务页面；被测页面始终运行在外部 Chromium 子进程中。
+
+## 功能
+
+- 环境与账号台账：分组、项目、dev/test/pre/prod、角色、版本、用例 ID、标签、搜索筛选
+- 指纹配置：UA、屏幕、时区、语言、Canvas、WebGL、Audio、字体、WebRTC、Client Hints、插件
+- 内置一致性校验与检测面板：CDP 探针逐项对比实际值，评分 + 修复建议
+- 指纹快照：保存/一键还原全套配置
+- 代理池：HTTP/HTTPS/SOCKS5，TCP 检测、出口 IP/国家/时区、批量分配、时区语言对齐
+- 进程隔离：独立 profile、随机调试端口、WebRTC/DNS 防泄漏参数、崩溃接管
+- 资源管控：全局并发上限、内存告警/自动关闭、闲置回收、崩溃日志、可选自动重启
+- 自动化：REST API、JS/Python SDK、Playwright CDP、前置脚本、截图/录屏/HAR
+- 回调：截图、录屏、验证码事件可推送到通用 Webhook / 禅道 / Jira（JSON）
+- 团队权限：超级管理员、测试负责人、测试工程师、只读查看者；细粒度权限矩阵
+- 审计：操作人、时间、环境、账号、项目/用例、哈希链、禁止修改、JSON/CSV 导出
+- 辅助测试：独立 Hosts、独立 Mock（CDP Fetch）、验证码聚合、HAR
+- 存储：AES-256-GCM 字段加密、本地备份/恢复、可选零知识 WebDAV/目录加密同步
+- 主题：亮色/暗色/跟随系统、主色取色器、紧凑/宽松、导入导出、刷新不丢失
+
+## 仓库结构
+
+```
+fin-env-browser/
+├── frontend/          # React + Vite 管理面板
+├── src-tauri/         # Rust 调度核心、数据库、CDP、Axum API
+├── chromium-bin/      # 可选内置 Chromium（版本锁定）
+├── sdk/               # JS/TS 与 Python SDK
+├── docs/              # 需求、技术设计、API 文档
+├── scripts/           # 图标、CI 校验、备份脚本
+└── README.md
+```
+
+## 快速开始
+
+### 环境要求
+
+- Node.js 18+（推荐 20/22）
+- Rust 1.80+（Windows 推荐 MSVC 工具链）
+- Windows 10/11、macOS 10.15+ 或 Linux
+- Windows 需要 WebView2 Runtime（安装包可引导下载）
+- Chromium/Chrome。可将锁定版本放入 `chromium-bin/`，或在系统设置中指定路径
+
+### 开发
+
+```bash
+cd frontend
+npm install
+npm run check          # tsc + vitest + vite build
+
+cd ../src-tauri
+cargo check
+# 在仓库根目录启动桌面应用（需要 Tauri CLI）
+cargo install tauri-cli --version "^2"
+cargo tauri dev
+```
+
+`cargo tauri dev` 会自动执行 `frontend` 的 Vite dev server 并打开管理面板。
+
+### 构建
+
+```bash
+npm --prefix frontend run build
+cargo tauri build
+```
+
+产物位于 `src-tauri/target/release/bundle/`，包含 Windows NSIS/MSI、macOS dmg、Linux AppImage/deb。CI 工作流会附带 checksum 与 version 文件。
+
+### 首次登录
+
+首次运行自动创建本地超级管理员：
+
+- 用户名：`admin`
+- 密码：`FinEnv@2026`
+
+可通过环境变量覆盖初始值：
+
+```bash
+FIN_ENV_ADMIN_USER=admin
+FIN_ENV_ADMIN_PASSWORD='change-me-now'
+```
+
+登录后请立即在「系统设置 → 团队与权限」修改密码。默认账号会写入审计日志。
+
+### 数据目录
+
+默认：`%LOCALAPPDATA%\FinEnv`（Windows）/ `~/Library/Application Support/FinEnv`（macOS）/ `~/.local/share/FinEnv`（Linux）。
+
+可用 `FIN_ENV_DATA_DIR` 覆盖，CI/测试推荐使用临时目录。
+
+```
+FinEnv/
+├── finenv.sqlite3      # SQLite（敏感字段 AES-256-GCM）
+├── master.salt         # 设备派生主密钥的随机盐（勿外泄）
+├── master.key.enc      # 主密钥密文（设备密钥包裹，勿外泄）
+├── profiles/           # 每环境独立 Chromium profile
+├── screenshots/
+├── recordings/
+├── har/
+├── reports/
+├── backups/
+└── logs/
+```
+
+## 核心实现说明
+
+### 指纹注入
+
+V1 使用 CDP `Emulation.setUserAgentOverride`、`setTimezoneOverride`、`setLocaleOverride` 与 `Page.addScriptToEvaluateOnNewDocument` 注入 JS Hook。Hook 覆盖：
+
+- `navigator.userAgent/platform/vendor/languages/hardwareConcurrency/deviceMemory/plugins/mimeTypes/webdriver`
+- `screen.*`、`window.devicePixelRatio`
+- Canvas `getImageData/toDataURL` 确定性噪声
+- WebGL `getParameter` / `WEBGL_debug_renderer_info`
+- Audio `AnalyserNode` 噪声
+- `FontFaceSet.check` 字体白名单
+- WebRTC ICE candidate / SDP 过滤
+- Client Hints `userAgentData.getHighEntropyValues`
+- 验证码 DOM 监听（`Runtime.addBinding`）
+
+同时使用启动参数关闭 QUIC、限制 WebRTC 非代理 UDP，并根据 Hosts 生成 `--host-resolver-rules`。
+
+### 一致性校验
+
+后端保存前强制执行，冲突直接拒绝：UA 与 Client Hints 版本/平台一致、合法 IANA 时区、屏幕尺寸合理、DPR/色深范围、WebGL 与 OS 匹配、WebRTC 公网 IP、插件与 Flash、字体数量等。前端实时展示错误与提示。
+
+### 进程与资源
+
+- 启动前检查全局并发上限，超限返回 `capacity_limit`
+- 每 5 秒轮询进程树 CPU/内存；超过单环境阈值触发系统通知 + 面板告警
+- `memoryEnforce` 开启时自动关闭超限环境
+- 闲置超时按环境/全局配置回收
+- 崩溃自动记录哈希链审计，可选自动重启（10 分钟最多 3 次）
+- 面板重启后通过保存的 PID/端口/WS 接管仍运行的浏览器
+
+### 安全
+
+- `password_enc`、代理密码、同步密码、Cookie 缓存、指纹配置/报告全部 AES-256-GCM 加密
+- 主密钥 HKDF-SHA256(设备标识 + 随机盐)，主密钥以设备密钥包裹保存在 `master.key.enc`，不硬编码
+- 跨设备：口令加密备份/同步包内携带整体加密的主密钥，恢复后由目标设备密钥重新包裹；未加密备份仅限同机恢复
+- HTTPS/WSS 远程传输使用 rustls
+- Tauri Capability 仅开放窗口核心能力和文件对话框；无 Shell/文件系统/任意 HTTP 权限
+- 高危导出（账号密码、Cookie、环境包）需要权限 + 二次确认 + 全局开关
+- 审计表触发器禁止 UPDATE/DELETE，SHA-256 链可离线复核
+- CDP 只监听 `127.0.0.1`，端口随机
+
+### 备份与同步
+
+- 本地备份：SQLite 一致性快照 + 元数据，可选 profile；支持口令加密
+- 云同步：WebDAV 或本地/挂载目录；同步包整体 PBKDF2-SHA256(210k) + AES-256-GCM，服务端零知识
+- 恢复前强制回收全部浏览器；恢复后退出登录
+
+## API 与 SDK
+
+- API 文档：[docs/api-docs.md](docs/api-docs.md)
+- JS SDK：[sdk/js](sdk/js)（`@finenv/sdk`）
+- Python SDK：[sdk/python](sdk/python)（`finenv-sdk`）
+
+```bash
+curl -H "Authorization: Bearer $FINENV_API_KEY" \
+  http://127.0.0.1:17321/api/v1/envs
+```
+
+```ts
+const client = FinEnvClient.fromEnv();
+const runtime = await client.openEnvironment(env.id, { url: 'https://test.example.com' });
+const { context } = await client.connectPlaywright(env.id);
+```
+
+## 校验与测试
+
+```bash
+npm --prefix frontend run check
+cd sdk/js && npm install && npm run build
+cd ../../src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
+```
+
+前端单元测试覆盖主题 token 派生/持久化、格式化、CSV/标签解析与权限标签。Rust 单元测试覆盖 AES-GCM 字段与加密包往返、错误口令拒绝、审计哈希链核心函数。
+
+CI 配置见 `.github/workflows/build.yml` 与 `.gitea/workflows/ci.yml`。推送 `v*` tag 或在 Actions 中手动填写发布版本时，会构建 Windows/macOS/Linux 安装包并创建 GitHub Release。
+
+## 验收对照
+
+| 验收标准 | 实现 |
+| --- | --- |
+| 多环境登录不同账号，Cookie 不互通 | 独立 `user-data-dir` / profile / 进程 |
+| 关闭程序重启，登录态保留 | profile 持久化；面板重启自动接管进程 |
+| API 拉起/关闭/截图/读写 Cookie | Axum REST + SDK + 二次确认 |
+| 自定义主题刷新不丢失 | 数据库 `theme_config` + localStorage 缓存 |
+| 超资源上限不再新建 | `maxConcurrentBrowsers` 启动前检查 |
+| 密码/Cookie 密文存储 | AES-256-GCM 字段/缓存 + 设备派生密钥 |
+
+## 已知边界
+
+- V1 仅 Chromium；Firefox/Marionette 在 V1.1 规划中
+- V1 指纹为 CDP JS Hook，高保真内核补丁属于后续版本
+- 直连环境仍使用系统 DNS；要获得 DNS 出口隔离请绑定 SOCKS5/HTTP 代理，Hosts 规则仅在本进程内生效
+- WebRTC `public` 模式用于声明公网出口，实际候选地址仍取决于网络/代理；`disable`/`proxy` 模式会注入防泄漏策略
+- 录屏为 PNG 帧序列 + manifest，可用 ffmpeg 合成视频
+- 加密备份/同步包内会携带由口令整体保护的主密钥，可在新设备恢复；未加密本地备份仍依赖本机设备密钥
+- 环境包/备份口令可迁移配置，但登录态建议同时迁移 profile 或使用 Cookie 缓存恢复
+- 内置 Chromium 需自行放入 `chromium-bin/`，仓库不分发二进制
+- 云同步需自备 WebDAV 服务；应用不内置代理售卖或云端浏览器集群
+- 更新采用更新清单检查 + 下载地址交接；自动替换安装包需在发布流水线配置签名更新源
+
+## 文档
+
+- [需求规格说明书](docs/fin-env-requirement.md)
+- [技术设计文档](docs/fin-env-tech.md)
+- [REST API](docs/api-docs.md)
+- [需求对照与校验记录](docs/verification.md)
+
+## License
+
+MIT

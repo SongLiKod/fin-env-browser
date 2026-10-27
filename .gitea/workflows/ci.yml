@@ -1,0 +1,46 @@
+name: Gitea CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run check
+      - name: JS SDK
+        working-directory: sdk/js
+        run: |
+          npm install --no-fund --no-audit
+          npm test
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Rust format and tests
+        working-directory: src-tauri
+        run: |
+          cargo fmt --check
+          cd ../frontend && npm ci && npm run build && cd ../src-tauri
+          cargo test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Python syntax and tests
+        working-directory: sdk/python
+        run: |
+          python -m compileall -q finenv
+          python -m unittest discover -s tests -v

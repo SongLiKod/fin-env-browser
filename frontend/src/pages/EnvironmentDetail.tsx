@@ -1,0 +1,384 @@
+import * as React from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import {
+  Camera,
+  Copy,
+  Download,
+  Fingerprint,
+  Globe2,
+  KeyRound,
+  MonitorPlay,
+  Network,
+  Radar,
+  RefreshCw,
+  ScrollText,
+  Settings2,
+  ShieldCheck,
+  Square,
+  Trash2,
+  Users,
+} from 'lucide-react';
+import type {
+  EnvironmentView,
+  Group,
+  Proxy,
+} from '@/ipc/types';
+import { ipc, onBrowserExit, onBrowserRuntime } from '@/ipc/client';
+import { useAuthStore } from '@/store/auth';
+import { useEnvStore } from '@/store/env';
+import { toastError, useToastStore } from '@/store/toast';
+import { envStatusMeta, formatDate, relativeTime, testEnvLabels } from '@/utils';
+import { Badge, StatusDot } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, EmptyState, Spinner } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Tabs } from '@/components/ui/tabs';
+import { Tooltip } from '@/components/ui/tooltip';
+import {
+  CloneEnvironmentDialog,
+  ExportEnvironmentsDialog,
+} from '@/components/env/EnvironmentDialogs';
+import { OverviewPanel } from '@/components/env/OverviewPanel';
+import { FingerprintEditor } from '@/components/env/FingerprintEditor';
+import { AccountsPanel } from '@/components/env/AccountsPanel';
+import { SnapshotsPanel } from '@/components/env/SnapshotsPanel';
+import { NetworkingPanel } from '@/components/env/NetworkingPanel';
+import { ExtensionsPanel } from '@/components/env/ExtensionsPanel';
+import { DetectionPanel } from '@/components/env/DetectionPanel';
+import { DebugPanel } from '@/components/env/DebugPanel';
+
+const tabIds = ['overview', 'fingerprint', 'accounts', 'snapshots', 'network', 'extensions', 'detect', 'debug'] as const;
+type TabId = (typeof tabIds)[number];
+
+export function EnvironmentDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const toast = useToastStore();
+  const can = useAuthStore((state) => state.can);
+  const [env, setEnv] = React.useState<EnvironmentView | null>(null);
+  const [groups, setGroups] = React.useState<Group[]>([]);
+  const [proxies, setProxies] = React.useState<Proxy[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [tab, setTab] = React.useState<TabId>('overview');
+  const [busy, setBusy] = React.useState(false);
+  const [detecting, setDetecting] = React.useState(false);
+  const [showClone, setShowClone] = React.useState(false);
+  const [showExport, setShowExport] = React.useState(false);
+  const [showDelete, setShowDelete] = React.useState(false);
+
+  const applyEnv = React.useCallback((next: EnvironmentView) => {
+    setEnv((current) => {
+      if (!current) return next;
+      return { ...next, runtime: next.runtime ?? current.runtime };
+    });
+    useEnvStore.getState().replace(next);
+  }, []);
+
+  const refresh = React.useCallback(async () => {
+    if (!id) return;
+    const next = await ipc.envGet(id);
+    applyEnv(next);
+  }, [id, applyEnv]);
+
+  React.useEffect(() => {
+    if (!id) return;
+    let active = true;
+    setLoading(true);
+    void Promise.all([ipc.envGet(id), ipc.groupList(), ipc.proxyList(), ipc.envList()])
+      .then(([environment, groupList, proxyList, envList]) => {
+        if (!active) return;
+        setEnv(environment);
+        setGroups(groupList);
+        setProxies(proxyList);
+        const store = useEnvStore.getState();
+        envList.forEach((item) => store.replace(item));
+        setError(null);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : '环境加载失败');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [id]);
+
+  React.useEffect(() => {
+    if (!id) return;
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
+    const register = (promise: Promise<() => void>) =>
+      promise
+        .then((unlisten) => {
+          if (disposed) unlisten();
+          else unlisteners.push(unlisten);
+        })
+        .catch(() => undefined);
+    register(
+      onBrowserRuntime((runtime) => {
+        if (runtime.envId === id) {
+          setEnv((current) => (current ? { ...current, runtime } : current));
+        }
+      }),
+    );
+    register(
+      onBrowserExit((event) => {
+        if (event.envId === id) {
+          setEnv((current) => (current ? { ...current, runtime: null } : current));
+        }
+      }),
+    );
+    return () => {
+      disposed = true;
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+  }, [id]);
+
+  const open = async () => {
+    if (!env) return;
+    setBusy(true);
+    try {
+      const runtime = await ipc.browserOpen(env.id, {});
+      setEnv((current) => (current ? { ...current, runtime } : current));
+      toast.success('环境已启动', `PID ${runtime.pid} · 端口 ${runtime.debugPort}`);
+      if (runtime.warnings.length) toast.warning('启动告警', runtime.warnings.join('；'));
+      await refresh();
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const close = async () => {
+    if (!env) return;
+    setBusy(true);
+    try {
+      await ipc.browserClose(env.id);
+      setEnv((current) => (current ? { ...current, runtime: null } : current));
+      toast.success('环境已关闭');
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const detect = async () => {
+    if (!env) return;
+    setDetecting(true);
+    try {
+      const report = await ipc.fingerprintDetect(env.id);
+      toast.success('指纹检测完成', `评分 ${report.score}/100`);
+      setTab('detect');
+      await refresh();
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center gap-2 text-xs text-content-weak">
+        <Spinner /> 加载环境详情…
+      </div>
+    );
+  }
+
+  if (error || !env) {
+    return (
+      <div className="page-pad">
+        <Card>
+          <EmptyState
+            title="无法打开环境"
+            description={error ?? '环境不存在或已被删除'}
+            action={<Button variant="primary" onClick={() => navigate('/')}>返回环境列表</Button>}
+          />
+        </Card>
+      </div>
+    );
+  }
+
+  const status = envStatusMeta[env.status];
+  const running = !!env.runtime;
+
+  return (
+    <div className="page-pad space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="truncate text-xl font-semibold tracking-tight text-content-main">{env.name}</h1>
+            {running ? (
+              <Badge tone="success">
+                <StatusDot tone="success" pulse /> 运行中
+              </Badge>
+            ) : (
+              <Badge tone={status.tone === 'success' ? 'primary' : status.tone === 'warning' ? 'warning' : 'neutral'}>
+                {status.label}
+              </Badge>
+            )}
+            {env.testEnv ? <Badge tone="outline">{testEnvLabels[env.testEnv] ?? env.testEnv}</Badge> : null}
+            {env.tags.map((tag) => <Badge key={tag} tone="neutral">#{tag}</Badge>)}
+          </div>
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-content-weak">
+            <span>{env.project || '未指定项目'}</span>
+            <span>·</span>
+            <span>{env.accountRole || '未指定角色'}</span>
+            {env.caseId ? (
+              <>
+                <span>·</span>
+                <span className="font-mono">{env.caseId}</span>
+              </>
+            ) : null}
+            <span>·</span>
+            <span>{env.proxy?.name ?? '直连'}</span>
+            <span>·</span>
+            <span>{env.accountCount} 个账号</span>
+            <span>·</span>
+            <span>最近打开 {relativeTime(env.lastOpenedAt)}</span>
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Tooltip content="刷新详情">
+            <Button variant="ghost" size="icon" onClick={() => void refresh()}>
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </Tooltip>
+          {can('open_close') ? (
+            running ? (
+              <Button variant="secondary" loading={busy} onClick={() => void close()}>
+                <Square className="h-4 w-4" /> 关闭
+              </Button>
+            ) : (
+              <Button variant="secondary" loading={busy} onClick={() => void open()}>
+                <MonitorPlay className="h-4 w-4" /> 打开环境
+              </Button>
+            )
+          ) : null}
+          {can('open_close') ? (
+            <Button variant="secondary" onClick={() => void detect()} loading={detecting}>
+              <Radar className="h-4 w-4" /> 检测指纹
+            </Button>
+          ) : null}
+          {can('export_sensitive') ? (
+            <Button variant="secondary" onClick={() => setShowExport(true)}>
+              <Download className="h-4 w-4" /> 导出包
+            </Button>
+          ) : null}
+          {can('clone_env') ? (
+            <Button variant="secondary" onClick={() => setShowClone(true)}>
+              <Copy className="h-4 w-4" /> 克隆
+            </Button>
+          ) : null}
+          {can('delete_env') ? (
+            <Button variant="ghost" size="icon" className="text-danger" onClick={() => setShowDelete(true)}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <Card className="p-3">
+          <p className="flex items-center gap-1 text-[10px] text-content-hint"><Users className="h-3 w-3" /> 账号台账</p>
+          <p className="mt-1 text-lg font-semibold text-content-main">{env.accountCount}</p>
+        </Card>
+        <Card className="p-3">
+          <p className="flex items-center gap-1 text-[10px] text-content-hint"><Camera className="h-3 w-3" /> 指纹快照</p>
+          <p className="mt-1 text-lg font-semibold text-content-main">{env.snapshotCount}</p>
+        </Card>
+        <Card className="p-3">
+          <p className="flex items-center gap-1 text-[10px] text-content-hint"><Fingerprint className="h-3 w-3" /> 指纹平台</p>
+          <p className="mt-1 truncate text-xs font-medium text-content-main">{env.fingerprint.clientHints.platform} · {env.fingerprint.timezone}</p>
+          <p className="truncate text-[10px] text-content-hint">{env.fingerprint.screen.width}×{env.fingerprint.screen.height} · DPR {env.fingerprint.screen.pixelRatio}</p>
+        </Card>
+        <Card className="p-3">
+          <p className="flex items-center gap-1 text-[10px] text-content-hint"><Globe2 className="h-3 w-3" /> 代理出口</p>
+          <p className="mt-1 truncate text-xs font-medium text-content-main">{env.proxy?.exitIp ?? env.proxy?.name ?? '直连'}</p>
+          <p className="truncate text-[10px] text-content-hint">{env.proxy ? `${env.proxy.exitCountry ?? '未知国家'} · ${env.proxy.latencyMs ?? '—'}ms` : '未绑定代理'}</p>
+        </Card>
+        <Card className="p-3">
+          <p className="flex items-center gap-1 text-[10px] text-content-hint"><ShieldCheck className="h-3 w-3" /> 运行状态</p>
+          <p className="mt-1 truncate text-xs font-medium text-content-main">{running ? `PID ${env.runtime?.pid}` : '未运行'}</p>
+          <p className="truncate text-[10px] text-content-hint">{running ? `${env.runtime?.memoryMb} MB · CPU ${env.runtime?.cpuPercent.toFixed(1)}%` : `更新于 ${formatDate(env.updatedAt)}`}</p>
+        </Card>
+      </div>
+
+      <Tabs
+        value={tab}
+        onValueChange={(value) => setTab(value as TabId)}
+        items={[
+          { value: 'overview', label: '概览' },
+          { value: 'fingerprint', label: '指纹配置' },
+          { value: 'accounts', label: '账号台账', badge: env.accountCount || undefined },
+          { value: 'snapshots', label: '指纹快照', badge: env.snapshotCount || undefined },
+          { value: 'network', label: '网络与 Mock' },
+          { value: 'extensions', label: '扩展' },
+          { value: 'detect', label: '检测报告' },
+          { value: 'debug', label: '调试与自动化' },
+        ]}
+      />
+
+      <div>
+        {tab === 'overview' ? <OverviewPanel env={env} groups={groups} onUpdated={applyEnv} /> : null}
+        {tab === 'fingerprint' ? <FingerprintEditor env={env} onSaved={applyEnv} /> : null}
+        {tab === 'accounts' ? (
+          <AccountsPanel
+            env={env}
+            onCountChanged={(count) =>
+              setEnv((current) => (current ? { ...current, accountCount: count } : current))
+            }
+          />
+        ) : null}
+        {tab === 'snapshots' ? <SnapshotsPanel env={env} onUpdated={applyEnv} /> : null}
+        {tab === 'network' ? <NetworkingPanel env={env} proxies={proxies} onUpdated={applyEnv} /> : null}
+        {tab === 'extensions' ? <ExtensionsPanel env={env} /> : null}
+        {tab === 'detect' ? <DetectionPanel env={env} /> : null}
+        {tab === 'debug' ? <DebugPanel env={env} onRefresh={refresh} /> : null}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3 text-[10px] text-content-hint">
+        <span className="inline-flex items-center gap-1"><Network className="h-3 w-3" /> 独立进程 / profile / 调试端口</span>
+        <span className="inline-flex items-center gap-1"><KeyRound className="h-3 w-3" /> 账号密码与 Cookie 密文存储</span>
+        <span className="inline-flex items-center gap-1"><ScrollText className="h-3 w-3" /> 所有高危操作写审计</span>
+        <span className="inline-flex items-center gap-1"><Settings2 className="h-3 w-3" /> 主题仅作用于面板</span>
+      </div>
+
+      <CloneEnvironmentDialog
+        open={showClone}
+        onOpenChange={setShowClone}
+        env={env}
+        onCloned={(cloned) => {
+          useEnvStore.getState().replace(cloned);
+          setShowClone(false);
+          navigate(`/envs/${cloned.id}`);
+        }}
+      />
+      <ExportEnvironmentsDialog open={showExport} onOpenChange={setShowExport} envs={[env]} />
+      <ConfirmDialog
+        open={showDelete}
+        onOpenChange={setShowDelete}
+        title="删除环境"
+        description={`将永久删除「${env.name}」及其 profile、账号、快照、Hosts/Mock 数据。审计日志保留。`}
+        confirmLabel="删除环境"
+        requiredText="DELETE"
+        onConfirm={async () => {
+          try {
+            await ipc.envDelete(env.id, true);
+            useEnvStore.getState().remove(env.id);
+            toast.success('环境已删除');
+            navigate('/');
+          } catch (err) {
+            toastError(err);
+          }
+        }}
+      />
+    </div>
+  );
+}

@@ -1,0 +1,456 @@
+\# FinEnv 指纹环境 技术设计文档
+
+产品名称：FinEnv 指纹环境
+
+仓库名称：fin-env-browser
+
+文档版本：V1.0
+
+基础框架：Tauri 2.0
+
+文档用途：开发落地、架构评审、CI配置、维护参考
+
+
+
+\## 1 整体架构说明
+
+核心原则：\*\*Tauri 仅做管理控制台，被测网页在外部独立 Chromium/Firefox 子进程运行，禁止使用 Tauri WebView 加载待测页面\*\*
+
+四层架构：
+
+```
+
+【前端 UI 层 React+TS】 <--Tauri IPC--> 【Rust 调度核心层】
+
+↓
+
+【CDP 控制器 \& 进程生命周期管理】
+
+↓
+
+【Chromium / Firefox 隔离进程集群（独立 profile）】
+
+```
+
+\- UI层：环境列表、指纹表单、代理配置、审计日志、主题设置、API密钥管理
+
+\- Rust调度核心：IPC权限校验、进程启停监控、加密存储、资源限流、内置HTTP API服务
+
+\- CDP控制器：维护WebSocket连接、注入指纹Hook、截图、录屏、页面脚本执行
+
+\- 浏览器实例层：独立进程、独立用户目录、独立调试端口，和主面板解耦；面板崩溃不强制杀掉浏览器进程（可选）
+
+
+
+\## 2 技术栈明细
+
+\### 2.1 Tauri 2.0 主程序（管理面板）
+
+\- 后端语言：Rust 1.80+
+
+\- 异步运行时：tokio
+
+\- IPC：Tauri Capability（白名单权限模型，严格控制前端可调用能力）
+
+\- 本地数据库：rusqlite（SQLite）
+
+\- 加密库：ring（AES256-GCM）
+
+\- HTTP API服务：Axum（可选开启，独立端口）
+
+\- 日志：tracing，结构化日志，输出文件+数据库审计表
+
+\- 系统能力：托盘、全局快捷键、文件对话框、自动更新、系统通知
+
+
+
+\### 2.2 前端（Tauri 前端）
+
+\- 语言：TypeScript
+
+\- 框架：React 18
+
+\- 构建工具：Vite
+
+\- UI组件：shadcn/ui
+
+\- 样式：TailwindCSS + CSS变量主题系统
+
+\- 状态管理：Zustand
+
+\- HTTP客户端：fetch，IPC调用封装层单独抽象
+
+\- 主题系统：CSS Token驱动亮色/暗色/自定义主色
+
+
+
+\### 2.3 浏览器内核 \& 控制层
+
+\- 主内核：官方 Chromium（版本锁定，打包内置，也支持使用系统Chrome）
+
+\- 备选内核：Firefox（Marionette协议）
+
+\- 控制协议：CDP（Chrome DevTools Protocol）
+
+\- 进程管理：Rust std::process + tokio::Command，托管子进程、监听退出信号、采集资源占用
+
+\- 指纹注入方案：
+
+&#x20; - V1：CDP Runtime.evaluate 注入JS Hook（快速落地）
+
+&#x20; - V2：预编译内核补丁，内核级指纹篡改（高保真，迭代版本）
+
+\- Chromium 关键启动参数：
+
+```
+
+\--user-data-dir={env\_profile\_path}
+
+\--remote-debugging-port={random\_unique\_port}
+
+\--proxy-server={proxy\_url}
+
+\--no-first-run
+
+\--no-default-browser-check
+
+\--mute-audio
+
+```
+
+
+
+
+
+\### 2.4 SDK与自动化
+
+\- JS SDK、Python SDK：封装HTTP API + CDP，提供给外部自动化脚本
+
+\- 兼容Playwright：可复用Playwright连接到FinEnv分配的CDP端口
+
+
+
+\### 2.5 辅助依赖
+
+\- 指纹校验：请求BrowserLeaks/Pixelscan接口生成报告
+
+\- 代理检测：tcp ping、http连通性检测、IP解析
+
+\- 打包：tauri-cli，cross-rs 跨平台编译
+
+\- CI：Gitea Actions / GitHub Actions
+
+
+
+\## 3 仓库目录结构
+
+```
+
+fin-env-browser/
+
+├── frontend/                     # Tauri 前端 React+Vite
+
+│   ├── src/
+
+│   │   ├── pages/                # 页面：环境列表、指纹配置、代理、审计、设置、主题
+
+│   │   ├── components/           # 业务组件、表单、表格、弹窗
+
+│   │   ├── theme/                # CSS 变量、主题 token、明暗主题定义
+
+│   │   ├── ipc/                  # IPC 调用封装，向后端请求
+
+│   │   ├── store/                # zustand 状态
+
+│   │   └── utils/
+
+│   └── vite.config.ts
+
+├── src-tauri/                    # Tauri Rust 后端
+
+│   ├── src/
+
+│   │   ├── main.rs               # 入口
+
+│   │   ├── process/              # 进程调度、监控、资源采集
+
+│   │   ├── cdp/                  # CDP 连接管理、指纹注入、截图录屏
+
+│   │   ├── db/                   # sqlite 表定义、迁移、CRUD、加密封装
+
+│   │   ├── crypto/               # AES256 加密工具
+
+│   │   ├── audit\_log.rs          # 审计日志写入
+
+│   │   ├── api\_server/           # Axum REST API 服务
+
+│   │   └── capability/           # Tauri 权限声明
+
+│   └── tauri.conf.json
+
+├── chromium-bin/                 # 内置锁定版本 Chromium（可选）
+
+├── sdk/                          # JS SDK、Python SDK
+
+├── docs/
+
+│   ├── fin-env-requirement.md
+
+│   ├── fin-env-tech.md
+
+│   └── api-docs.md
+
+├── scripts/                      # CI 打包、备份、环境迁移脚本
+
+└── README.md
+
+```
+
+
+
+\## 4 主题自定义系统详细设计
+
+\### 4.1 模式
+
+\- light：亮色
+
+\- dark：暗色
+
+\- auto：跟随操作系统
+
+
+
+\### 4.2 CSS Token（变量体系）
+
+```css
+
+:root {
+
+&#x20; --color-primary: #165DFF;
+
+&#x20; --color-primary-light: #E8F3FF;
+
+&#x20; --color-primary-dark: #0E42C2;
+
+
+
+&#x20; --bg-base: #ffffff;
+
+&#x20; --bg-secondary: #f7f8fa;
+
+&#x20; --bg-tertiary: #f2f3f5;
+
+
+
+&#x20; --text-main: #1d2129;
+
+&#x20; --text-weak: #86909c;
+
+&#x20; --text-hint: #c9cdd4;
+
+
+
+&#x20; --border: #e5e6eb;
+
+&#x20; --border-strong: #dcdfe6;
+
+
+
+&#x20; --danger: #f53f3f;
+
+&#x20; --success: #00b42a;
+
+&#x20; --warning: #ff7d00;
+
+
+
+&#x20; --radius-sm: 4px;
+
+&#x20; --radius-md: 8px;
+
+&#x20; --radius-lg: 12px;
+
+}
+
+
+
+\[data-theme="dark"] {
+
+&#x20; --bg-base: #17171a;
+
+&#x20; --bg-secondary: #232324;
+
+&#x20; --bg-tertiary: #2a2a2c;
+
+
+
+&#x20; --text-main: #f2f3f5;
+
+&#x20; --text-weak: #86909c;
+
+&#x20; --text-hint: #5e6573;
+
+
+
+&#x20; --border: #2e2e30;
+
+&#x20; --border-strong: #3a3a3c;
+
+}
+
+```
+
+前端提供取色器修改 `--color-primary`；修改后持久化存入数据库主题配置表。
+
+支持导出主题 json，导入恢复。
+
+布局密度变量：紧凑模式 / 宽松模式，控制间距大小。
+
+
+
+> 
+
+> 边界说明：主题 CSS 仅作用于 FinEnv 管理面板，不会注入到 Chromium 待测页面，不影响指纹。
+
+
+
+\## 5 数据库核心表设计（SQLite）
+
+
+
+1\. environments 环境主表：id、name、group\_id、status、profile\_dir、proxy\_id、fingerprint\_snapshot\_id、created\_at
+
+2\. accounts 账号台账：id、env\_id、username、password\_enc、remark、owner、status
+
+3\. fingerprint\_snapshots 指纹快照：id、env\_id、fingerprint\_json、create\_time
+
+4\. proxies 代理池表
+
+5\. audit\_logs 审计日志表（不可删，仅追加）
+
+6\. theme\_config 主题配置表：mode、primary\_color、density、config\_json
+
+7\. users 团队用户表（团队版）
+
+
+
+所有敏感字段：password\_enc、cookie 等，AES256 加密存储，密钥本地派生，不硬编码。
+
+
+
+\## 6 API 设计（Axum HTTP 服务）
+
+
+
+基础路径 `/api/v1`
+
+
+
+\- POST /envs 创建环境
+
+\- GET /envs 列表查询
+
+\- POST /envs/{id}/open 打开环境
+
+\- POST /envs/{id}/close 关闭环境
+
+\- GET /envs/{id}/screenshot 截图
+
+\- GET /envs/{id}/cookies 获取 Cookie
+
+\- PUT /envs/{id}/fingerprint 更新指纹
+
+\- POST /envs/{id}/snapshot 创建快照
+
+\- POST /envs/{id}/restore-snapshot 恢复快照
+
+
+
+\## 7 资源管控实现（Rust 层）
+
+
+
+全局配置项持久化：
+
+
+
+\- max\_concurrent\_browsers：最大同时打开浏览器数量
+
+\- idle\_timeout\_min：闲置自动关闭时间
+
+\- memory\_limit\_mb：单进程内存告警阈值
+
+Rust 后台线程定时轮询所有子进程 PID，读取 CPU、内存；超过阈值触发告警 / 关闭，写入审计日志。
+
+
+
+\## 8 安全设计
+
+
+
+1\. Tauri Capability 白名单，前端不能随意调用文件、进程等系统能力。
+
+2\. 敏感数据 AES256-GCM 加密落盘，密钥基于本机设备信息派生。
+
+3\. 浏览器进程独立沙箱，和主程序权限隔离。
+
+4\. 高危操作（批量导出账号密码）二次确认，强制审计日志记录。
+
+5\. 云同步包整体加密，服务端无法解密明文。
+
+6\. CDP 端口随机，不固定，避免端口扫描。
+
+
+
+\## 9 打包与兼容性矩阵
+
+
+
+\- Windows：Win10/Win11；自动检测 WebView2 Runtime，缺失引导安装；支持安装包 + 便携绿色版
+
+\- MacOS：dmg，支持签名公证
+
+\- Linux：AppImage / deb
+
+\- CI 自动产物：安装包、checksum、版本文件
+
+
+
+\## 10 风险清单 \& 降级方案
+
+
+
+表格
+
+
+
+| 风险 | 应对方案 | 降级方案 |
+
+| --- | --- | --- |
+
+| Rust 学习成本高 | 先做 V0 原型验证业务流程 | V0 阶段使用 Node 脚本调度 Chromium，跑通业务，V1 再迁移 Tauri |
+
+| Chromium 版本升级，CDP 接口变更、指纹脚本失效 | 固定 Chromium 版本；环境绑定内核版本；快照备份 | 多内核版本管理，环境绑定指定内核 |
+
+| Windows 老机器缺少 WebView2 | 打包附带引导安装程序 | 提示用户手动安装 WebView2 |
+
+| Tauri IPC 权限配置失误 | 严格最小权限原则，每个能力单独声明 Capability | 代码评审，IPC 调用全部加日志 |
+
+| 浏览器进程僵死 | 定时心跳检测，超时强制 kill 进程 | 面板提供一键强制回收全部浏览器按钮 |
+
+
+
+\## 11 开发规范
+
+
+
+1\. 所有 Rust 异步代码统一 tokio；日志统一 tracing
+
+2\. 前端所有样式走 CSS Token，禁止硬编码颜色
+
+3\. 所有数据库变更必须写迁移脚本
+
+4\. 所有子进程操作、高危接口必须写入审计日志
+
+5\. 禁止在前端存储任何明文敏感信息
+
