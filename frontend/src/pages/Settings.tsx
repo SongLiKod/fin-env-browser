@@ -710,7 +710,7 @@ export function SettingsPage() {
                   <p className="text-[10px] text-content-hint">{appInfo?.chromiumVersion ?? '版本未知'}</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="默认启动地址" hint="打开环境未指定 URL 时使用">
+                  <Field label="默认启动地址" hint="留空或 about:blank 时打开 FinEnv 内置环境信息启动页">
                     <Input value={form.defaultStartUrl} onChange={(event) => update('defaultStartUrl', event.target.value)} placeholder="about:blank" />
                   </Field>
                   <Field label="指纹检测服务 URL" hint="检测时新开标签页访问">

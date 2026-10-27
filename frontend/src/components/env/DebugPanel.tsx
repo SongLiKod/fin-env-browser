@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Film,
   FolderDown,
+  FolderOpen,
   Globe2,
   HardDriveDownload,
   Play,
@@ -127,7 +128,7 @@ export function DebugPanel({
             {!running ? (
               <>
                 <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-                  <Field label="启动后访问地址" hint="留空使用系统设置中的默认地址">
+                  <Field label="启动后访问地址" hint="留空使用 FinEnv 内置环境信息启动页">
                     <Input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://test.example.com/login" />
                   </Field>
                   <div className="flex items-end pb-1">
@@ -310,28 +311,73 @@ export function DebugPanel({
               >
                 <Radar className="h-4 w-4" /> 采集验证码
               </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  void ipc.openArtifactDir('screenshots').catch(toastError)
+                }
+                title="打开截图保存目录"
+              >
+                <FolderOpen className="h-4 w-4" /> 图片目录
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  void ipc.openArtifactDir('recordings').catch(toastError)
+                }
+                title="打开录屏保存目录"
+              >
+                <FolderOpen className="h-4 w-4" /> 视频目录
+              </Button>
             </div>
             {screenshot ? (
               <div className="rounded-md border border-border p-2">
                 <img src={screenshot.dataUrl} alt="截图" className="max-h-[360px] w-full rounded object-contain" />
                 <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-content-hint">
                   <span className="truncate">{screenshot.path}</span>
-                  <a className="inline-flex items-center gap-1 text-primary" href={screenshot.dataUrl} download={`finenv-${env.id}.png`}>
-                    <Download className="h-3 w-3" /> 下载
-                  </a>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-primary"
+                      onClick={() => void ipc.openArtifactDir('screenshots').catch(toastError)}
+                    >
+                      <FolderOpen className="h-3 w-3" /> 目录
+                    </button>
+                    <a className="inline-flex items-center gap-1 text-primary" href={screenshot.dataUrl} download={`finenv-${env.id}.png`}>
+                      <Download className="h-3 w-3" /> 下载
+                    </a>
+                  </div>
                 </div>
               </div>
             ) : null}
             {recordingResult ? (
               <div className="rounded-md border border-border bg-surface-secondary p-2 text-[11px]">
                 <p className="font-medium text-content-main">录屏完成 · {recordingResult.frameCount} 帧 · {formatDuration(recordingResult.durationMs)}</p>
-                <p className="mt-0.5 break-all text-content-hint">{recordingResult.manifestPath || recordingResult.directory}</p>
+                <div className="mt-0.5 flex items-center gap-2">
+                  <p className="min-w-0 flex-1 break-all text-content-hint">{recordingResult.manifestPath || recordingResult.directory}</p>
+                  <button
+                    type="button"
+                    className="inline-flex shrink-0 items-center gap-1 text-primary"
+                    onClick={() => void ipc.openArtifactDir('recordings').catch(toastError)}
+                  >
+                    <FolderOpen className="h-3 w-3" /> 打开目录
+                  </button>
+                </div>
               </div>
             ) : null}
             {harPath ? (
               <div className="flex items-center gap-2 rounded-md border border-border bg-surface-secondary p-2 text-[11px]">
                 <HardDriveDownload className="h-3.5 w-3.5 text-primary" />
                 <span className="min-w-0 flex-1 break-all text-content-main">{harPath}</span>
+                <button
+                  type="button"
+                  className="inline-flex shrink-0 items-center gap-1 text-[10px] text-primary"
+                  onClick={() => void ipc.openArtifactDir('har').catch(toastError)}
+                >
+                  <FolderOpen className="h-3 w-3" /> 目录
+                </button>
                 <CopyButton value={harPath} />
               </div>
             ) : null}

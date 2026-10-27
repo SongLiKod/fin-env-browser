@@ -28,8 +28,12 @@ export function envBorderColor(env: { id: string; borderColor?: string | null })
   return ENV_COLOR_PALETTE[hash % ENV_COLOR_PALETTE.length];
 }
 
-export function hexToRgba(hex: string, alpha: number): string {
-  const value = hex.replace('#', '');
+export function envBorderWidth(env: { borderWidth?: number | null }): number {
+  const width = env.borderWidth ?? 3;
+  return Math.min(12, Math.max(1, Math.round(width)));
+}
+
+export function hexToRgba(hex: string, alpha: number): string {  const value = hex.replace('#', '');
   if (value.length !== 6) return `rgba(37, 99, 235, ${alpha})`;
   const r = Number.parseInt(value.slice(0, 2), 16);
   const g = Number.parseInt(value.slice(2, 4), 16);

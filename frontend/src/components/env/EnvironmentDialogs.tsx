@@ -48,13 +48,14 @@ export function CreateEnvironmentDialog({
     tags: '',
     notes: '',
     borderColor: '',
+    borderWidth: 3,
     templateOs: 'win11',
     autoRestart: false,
     memoryLimitMb: '',
     idleTimeoutMin: '',
   });
 
-  const update = (key: keyof typeof form, value: string | boolean) =>
+  const update = (key: keyof typeof form, value: string | boolean | number) =>
     setForm((current) => ({ ...current, [key]: value }));
 
   const submit = async (event: React.FormEvent) => {
@@ -77,6 +78,7 @@ export function CreateEnvironmentDialog({
         tags: parseTags(form.tags),
         notes: form.notes,
         borderColor: form.borderColor,
+        borderWidth: form.borderWidth,
         templateOs: form.templateOs,
         autoRestart: form.autoRestart,
         memoryLimitMb: form.memoryLimitMb ? Number(form.memoryLimitMb) : null,
@@ -121,8 +123,13 @@ export function CreateEnvironmentDialog({
             placeholder="例如：订单中心 - 测试账号 A"
           />
         </Field>
-        <Field label="环境标识色" hint="用于列表、详情和浏览器窗口边框，便于区分多个环境" className="col-span-2">
-          <ColorPicker value={form.borderColor} onChange={(value) => update('borderColor', value)} />
+        <Field label="环境标识色" hint="列表、详情与运行栏使用该颜色和粗细；浏览器窗口边框同步颜色" className="col-span-2">
+          <ColorPicker
+            value={form.borderColor}
+            onChange={(value) => update('borderColor', value)}
+            width={form.borderWidth}
+            onWidthChange={(value) => update('borderWidth', value)}
+          />
         </Field>
         <Field label="分组">
           <Select value={form.groupId} onChange={(event) => update('groupId', event.target.value)} placeholder="不分组">

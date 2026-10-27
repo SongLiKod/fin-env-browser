@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { envBorderColor, envIpSummary, hexToRgba, isValidHexColor } from './environment';
+import { envBorderColor, envBorderWidth, envIpSummary, hexToRgba, isValidHexColor } from './environment';
 
 describe('environment identity helpers', () => {
   it('uses a custom border color and rejects invalid values', () => {
@@ -13,6 +13,13 @@ describe('environment identity helpers', () => {
     const second = envBorderColor({ id: 'env-123', borderColor: '' });
     expect(first).toMatch(/^#[0-9A-F]{6}$/);
     expect(first).toBe(second);
+  });
+
+  it('clamps the accent width to a usable range', () => {
+    expect(envBorderWidth({ borderWidth: 6 })).toBe(6);
+    expect(envBorderWidth({ borderWidth: 0 })).toBe(1);
+    expect(envBorderWidth({ borderWidth: 99 })).toBe(12);
+    expect(envBorderWidth({})).toBe(3);
   });
 
   it('formats the IP summary and rgba color', () => {

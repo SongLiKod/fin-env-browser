@@ -40,7 +40,9 @@ for (const file of [
   'src-tauri/migrations/001_init.sql',
   'src-tauri/migrations/002_hardening.sql',
   'src-tauri/migrations/003_environment_identity.sql',
+  'src-tauri/migrations/004_environment_border_width.sql',
   'src-tauri/src/process/mod.rs',
+  'src-tauri/src/start_page.rs',
   'src-tauri/src/cdp/mod.rs',
   'src-tauri/src/db/mod.rs',
   'src-tauri/src/crypto/mod.rs',
@@ -124,6 +126,8 @@ const identity = read('src-tauri/migrations/003_environment_identity.sql');
 for (const column of ['border_color', 'ip_address', 'ip_country', 'ip_checked_at']) {
   if (!identity.includes(column)) fail(`环境身份迁移缺少 ${column}`);
 }
+const borderWidth = read('src-tauri/migrations/004_environment_border_width.sql');
+if (!borderWidth.includes('border_width')) fail('环境标识色粗细迁移缺失');
 ok('全部核心表、审计触发器、环境身份字段存在');
 
 console.log('\n[6] 安全与主题令牌');

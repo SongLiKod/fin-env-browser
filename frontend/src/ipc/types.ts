@@ -153,6 +153,7 @@ export interface Environment {
   idleTimeoutMin: number | null;
   fingerprint: Fingerprint;
   borderColor: string;
+  borderWidth: number;
   ipAddress: string | null;
   ipCountry: string | null;
   ipCountryCode: string | null;
@@ -250,6 +251,7 @@ export interface CreateEnvironmentInput {
   tags?: string[];
   notes?: string | null;
   borderColor?: string | null;
+  borderWidth?: number | null;
   kernel?: string | null;
   chromiumPath?: string | null;
   templateOs?: string | null;
@@ -272,6 +274,7 @@ export interface UpdateEnvironmentInput {
   tags?: string[];
   notes?: string;
   borderColor?: string;
+  borderWidth?: number;
   kernel?: string;
   chromiumPath?: string | null;
   autoRestart?: boolean;

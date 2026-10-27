@@ -233,6 +233,8 @@ export const ipc = {
   captchaCapture: (envId: string) =>
     call<string | null>('captcha_capture', { envId }),
   readArtifact: (path: string) => call<string>('read_artifact', { path }),
+  openArtifactDir: (kind: 'screenshots' | 'recordings' | 'har' | 'exports' | 'backups' | 'reports') =>
+    call<void>('open_artifact_dir', { kind }),
 
   // settings / api / theme / audit
   settingsGet: () => call<Settings>('settings_get'),

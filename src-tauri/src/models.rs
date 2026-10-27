@@ -32,6 +32,10 @@ pub fn new_id() -> String {
 // Environments
 // ---------------------------------------------------------------------------
 
+fn default_border_width() -> u32 {
+    3
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Environment {
@@ -57,6 +61,8 @@ pub struct Environment {
     pub fingerprint: Fingerprint,
     #[serde(default)]
     pub border_color: String,
+    #[serde(default = "default_border_width")]
+    pub border_width: u32,
     #[serde(default)]
     pub ip_address: Option<String>,
     #[serde(default)]
@@ -141,6 +147,8 @@ pub struct CreateEnvironmentInput {
     #[serde(default)]
     pub border_color: Option<String>,
     #[serde(default)]
+    pub border_width: Option<u32>,
+    #[serde(default)]
     pub kernel: Option<String>,
     #[serde(default)]
     pub chromium_path: Option<String>,
@@ -183,6 +191,8 @@ pub struct UpdateEnvironmentInput {
     pub notes: Option<String>,
     #[serde(default)]
     pub border_color: Option<String>,
+    #[serde(default)]
+    pub border_width: Option<u32>,
     #[serde(default)]
     pub kernel: Option<String>,
     #[serde(default, deserialize_with = "double_option")]

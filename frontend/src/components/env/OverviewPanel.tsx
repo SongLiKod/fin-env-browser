@@ -37,6 +37,7 @@ export function OverviewPanel({
     tags: env.tags.join(', '),
     notes: env.notes,
     borderColor: env.borderColor,
+    borderWidth: env.borderWidth ?? 3,
     autoRestart: env.autoRestart,
     memoryLimitMb: env.memoryLimitMb?.toString() ?? '',
     idleTimeoutMin: env.idleTimeoutMin?.toString() ?? '',
@@ -56,6 +57,7 @@ export function OverviewPanel({
       tags: env.tags.join(', '),
       notes: env.notes,
       borderColor: env.borderColor,
+      borderWidth: env.borderWidth ?? 3,
       autoRestart: env.autoRestart,
       memoryLimitMb: env.memoryLimitMb?.toString() ?? '',
       idleTimeoutMin: env.idleTimeoutMin?.toString() ?? '',
@@ -85,6 +87,7 @@ export function OverviewPanel({
         tags: parseTags(form.tags),
         notes: form.notes,
         borderColor: form.borderColor,
+        borderWidth: form.borderWidth,
         autoRestart: form.autoRestart,
         memoryLimitMb: form.memoryLimitMb ? Number(form.memoryLimitMb) : null,
         idleTimeoutMin: form.idleTimeoutMin ? Number(form.idleTimeoutMin) : null,
@@ -151,8 +154,13 @@ export function OverviewPanel({
             <Field label="测试用例 ID">
               <Input value={form.caseId} onChange={(event) => update('caseId', event.target.value)} disabled={!canEdit} placeholder="CASE-1024" />
             </Field>
-            <Field label="环境标识色" className="col-span-2 md:col-span-3" hint="列表、详情与浏览器窗口边框会使用该颜色">
-              <ColorPicker value={form.borderColor} onChange={(value) => update('borderColor', value)} />
+            <Field label="环境标识色" className="col-span-2 md:col-span-3" hint="列表、详情与运行栏使用该颜色和粗细；浏览器窗口边框同步颜色">
+              <ColorPicker
+                value={form.borderColor}
+                onChange={(value) => update('borderColor', value)}
+                width={form.borderWidth}
+                onWidthChange={(value) => update('borderWidth', value)}
+              />
             </Field>
             <Field label="标签" className="col-span-2 md:col-span-3" hint="逗号或空格分隔">              <Input value={form.tags} onChange={(event) => update('tags', event.target.value)} disabled={!canEdit} />
             </Field>

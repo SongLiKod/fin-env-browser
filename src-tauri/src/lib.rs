@@ -17,6 +17,7 @@ mod paths;
 mod process;
 mod proxy_check;
 mod services;
+mod start_page;
 mod state;
 
 use std::sync::OnceLock;
@@ -245,6 +246,7 @@ pub fn run() {
             commands::browser_status,
             commands::browser_list_running,
             commands::browser_screenshot,
+            commands::open_artifact_dir,
             commands::browser_cookies_get,
             commands::browser_cookies_set,
             commands::browser_execute,

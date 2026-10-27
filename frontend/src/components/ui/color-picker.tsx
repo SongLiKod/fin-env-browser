@@ -5,15 +5,20 @@ import { ENV_COLOR_PALETTE, isValidHexColor } from '@/utils/environment';
 export function ColorPicker({
   value,
   onChange,
+  width,
+  onWidthChange,
   allowAuto = true,
 }: {
   value: string;
   onChange: (value: string) => void;
+  width?: number;
+  onWidthChange?: (value: number) => void;
   allowAuto?: boolean;
 }) {
   const normalized = value.trim();
   const valid = isValidHexColor(normalized);
   const swatch = valid ? normalized.toUpperCase() : '#2563EB';
+  const borderWidth = Math.min(12, Math.max(1, width ?? 3));
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -69,6 +74,23 @@ export function ColorPicker({
         maxLength={7}
         className="h-7 w-[92px] rounded-md border border-border bg-surface-base px-2 font-mono text-[11px] uppercase text-content-main outline-none focus:border-primary"
       />
+      {onWidthChange ? (
+        <div className="flex w-full items-center gap-2 pt-0.5">
+          <span className="text-[10px] text-content-hint">粗细</span>
+          <input
+            type="range"
+            min={1}
+            max={12}
+            step={1}
+            value={borderWidth}
+            onChange={(event) => onWidthChange(Number(event.target.value))}
+            className="h-1 w-32 cursor-pointer accent-[var(--color-primary)]"
+            aria-label="标识色粗细"
+          />
+          <span className="w-8 text-[10px] tabular-nums text-content-weak">{borderWidth}px</span>
+          <span className="h-4 rounded-sm" style={{ width: borderWidth, backgroundColor: swatch }} />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -28,7 +28,7 @@ import { useAuthStore } from '@/store/auth';
 import { useEnvStore } from '@/store/env';
 import { toastError, useToastStore } from '@/store/toast';
 import { cn, envStatusMeta, formatDate, relativeTime, testEnvLabels } from '@/utils';
-import { envBorderColor, envIpSummary, hexToRgba } from '@/utils/environment';
+import { envBorderColor, envBorderWidth, envIpSummary, hexToRgba } from '@/utils/environment';
 import { Badge, StatusDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, EmptyState, Spinner } from '@/components/ui/card';
@@ -236,12 +236,13 @@ export function EnvironmentDetailPage() {
   const status = envStatusMeta[env.status];
   const running = !!env.runtime;
   const accent = envBorderColor(env);
+  const accentWidth = envBorderWidth(env);
 
   return (
     <div className="page-pad space-y-4">
       <div
         className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border bg-surface-base p-4"
-        style={{ borderLeft: `3px solid ${accent}`, backgroundColor: hexToRgba(accent, 0.025) }}
+        style={{ borderLeft: `${accentWidth}px solid ${accent}`, backgroundColor: hexToRgba(accent, 0.025) }}
       >
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

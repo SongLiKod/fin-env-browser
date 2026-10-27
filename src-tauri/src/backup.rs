@@ -458,6 +458,7 @@ mod tests {
             idle_timeout_min: None,
             fingerprint: crate::fingerprint::template("win11"),
             border_color: "#2563EB".into(),
+            border_width: 3,
             ip_address: None,
             ip_country: None,
             ip_country_code: None,

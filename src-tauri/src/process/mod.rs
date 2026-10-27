@@ -238,13 +238,27 @@ impl BrowserManager {
             .map(|e| e.path)
             .collect::<Vec<_>>();
         let mocks = self.db.list_mocks(&env.id)?;
-        let start_url = options
+        let headless = options.headless.unwrap_or(false);
+        let requested_url = options
             .url
-            .clone()
-            .or_else(|| Some(settings.default_start_url.clone()))
-            .filter(|v| !v.trim().is_empty())
-            .unwrap_or_else(|| "about:blank".into());
-        if start_url != "about:blank"
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        let configured_url = settings.default_start_url.trim();
+        let use_start_page = !headless
+            && requested_url.is_none()
+            && (configured_url.is_empty() || configured_url == "about:blank");
+        let start_page_path =
+            use_start_page.then(|| paths::start_page_path(&self.data_dir, &env.id));
+        let start_url = match &start_page_path {
+            Some(path) => crate::start_page::file_url(path)?,
+            None => requested_url
+                .map(ToString::to_string)
+                .or_else(|| (!configured_url.is_empty()).then(|| configured_url.to_string()))
+                .unwrap_or_else(|| "about:blank".into()),
+        };
+        if start_page_path.is_none()
+            && start_url != "about:blank"
             && !start_url.starts_with("http://")
             && !start_url.starts_with("https://")
         {
@@ -252,7 +266,6 @@ impl BrowserManager {
                 "启动地址仅支持 http://、https:// 或 about:blank",
             ));
         }
-        let headless = options.headless.unwrap_or(false);
         let window_name = format!("FinEnv · {}", env.name);
 
         let args = build_chromium_args(
@@ -339,6 +352,17 @@ impl BrowserManager {
                 har_recording: false,
                 warnings: vec![],
             };
+            if let Some(path) = &start_page_path {
+                crate::start_page::write_at(
+                    path,
+                    env,
+                    proxy.as_ref(),
+                    self.db.account_count_for_env(&env.id)?,
+                    self.db.snapshot_count_for_env(&env.id)?,
+                    Some(&runtime),
+                    &start_url,
+                )?;
+            }
             let instance = Arc::new(BrowserInstance {
                 env_id: env.id.clone(),
                 pid,
@@ -979,6 +1003,15 @@ impl BrowserManager {
         let value = instance.client.evaluate(script).await?;
         self.touch(&instance);
         Ok(value)
+    }
+
+    pub async fn reload(self: &Arc<Self>, env_id: &str) -> Result<()> {
+        let instance = self.instance(env_id)?;
+        instance
+            .client
+            .call("Page.reload", json!({ "ignoreCache": false }))
+            .await?;
+        Ok(())
     }
 
     pub async fn navigate(self: &Arc<Self>, env_id: &str, url: &str) -> Result<String> {

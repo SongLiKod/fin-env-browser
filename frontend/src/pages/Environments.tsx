@@ -36,7 +36,7 @@ import { useAuthStore } from '@/store/auth';
 import { useEnvStore } from '@/store/env';
 import { toastError, useToastStore } from '@/store/toast';
 import { cn, envStatusMeta, formatDateShort, relativeTime, testEnvLabels, truncate } from '@/utils';
-import { envBorderColor, envIpSummary, hexToRgba } from '@/utils/environment';
+import { envBorderColor, envBorderWidth, envIpSummary, hexToRgba } from '@/utils/environment';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge, StatusDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -467,11 +467,12 @@ export function EnvironmentsPage() {
                   const isRunning = !!env.runtime;
                   const status = envStatusMeta[env.status];
                   const accent = envBorderColor(env);
+                  const accentWidth = envBorderWidth(env);
                   return (
                     <tr
                       key={env.id}
                       style={{
-                        boxShadow: `inset 3px 0 0 ${accent}`,
+                        boxShadow: `inset ${accentWidth}px 0 0 ${accent}`,
                         backgroundColor: isRunning ? hexToRgba(accent, 0.035) : undefined,
                       }}
                     >

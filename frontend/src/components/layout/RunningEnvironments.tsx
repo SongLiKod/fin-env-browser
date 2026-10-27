@@ -6,7 +6,7 @@ import type { EnvironmentView } from '@/ipc/types';
 import { useEnvStore } from '@/store/env';
 import { toastError } from '@/store/toast';
 import { cn } from '@/utils';
-import { envBorderColor, envIpSummary, hexToRgba } from '@/utils/environment';
+import { envBorderColor, envBorderWidth, envIpSummary, hexToRgba } from '@/utils/environment';
 
 export function RunningEnvironments() {
   const navigate = useNavigate();
@@ -80,13 +80,18 @@ export function RunningEnvironments() {
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:thin]">
         {running.map((env) => {
           const color = envBorderColor(env);
+          const width = envBorderWidth(env);
           const isChecking = checking.has(env.id);
           const isClosing = closing.has(env.id);
           return (
             <div
               key={env.id}
-              className="flex shrink-0 items-center gap-2 rounded-md border border-border border-l-[3px] px-2.5 py-1 shadow-sm"
-              style={{ borderLeftColor: color, backgroundColor: hexToRgba(color, 0.06) }}
+              className="flex shrink-0 items-center gap-2 rounded-md border border-border px-2.5 py-1 shadow-sm"
+              style={{
+                borderLeftColor: color,
+                borderLeftWidth: width,
+                backgroundColor: hexToRgba(color, 0.06),
+              }}
             >
               <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
               <button

@@ -1074,6 +1074,45 @@ pub async fn captcha_capture(
     Ok(path)
 }
 
+/// Open one of the application's artifact directories in the OS file manager.
+/// The path is resolved from the data directory, never from the frontend.
+#[tauri::command]
+pub fn open_artifact_dir(state: State<'_, SharedState>, kind: String) -> Result<()> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::ViewList)?.username;
+    let dir = match kind.as_str() {
+        "screenshots" => paths::screenshots_dir(&state.data_dir),
+        "recordings" => paths::recordings_dir(&state.data_dir),
+        "har" => paths::har_dir(&state.data_dir),
+        "exports" => paths::exports_dir(&state.data_dir),
+        "backups" => paths::backups_dir(&state.data_dir),
+        "reports" => paths::reports_dir(&state.data_dir),
+        other => return Err(AppError::bad_request(format!("不支持的目录类型: {other}"))),
+    };
+    paths::ensure_dir(&dir)?;
+
+    #[cfg(target_os = "windows")]
+    let opened = std::process::Command::new("explorer").arg(&dir).spawn();
+    #[cfg(target_os = "macos")]
+    let opened = std::process::Command::new("open").arg(&dir).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let opened = std::process::Command::new("xdg-open").arg(&dir).spawn();
+    #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
+    let opened: std::io::Result<std::process::Child> = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "当前平台不支持打开目录",
+    ));
+
+    opened.map_err(|e| AppError::internal(format!("无法打开目录 {}: {e}", dir.display())))?;
+    let _ = Audit::global(
+        &state.db,
+        &actor,
+        actions::ARTIFACT_OPEN_DIR,
+        format!("打开产物目录 {}: {}", kind, dir.display()),
+    );
+    Ok(())
+}
+
 /// Read a PNG/JPEG artifact (screenshot, captcha, detection report) as a data
 /// URL. The path is restricted to the application data directory to prevent
 /// this command from becoming an arbitrary file read primitive.

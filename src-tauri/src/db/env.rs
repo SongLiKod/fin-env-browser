@@ -11,7 +11,8 @@ use super::{bool_int, int_bool, Db};
 const ENV_COLUMNS: &str = "id, name, group_id, status, profile_dir, proxy_id, fingerprint_snapshot_id, \
     project, test_env, account_role, version, case_id, tags, notes, kernel, chromium_path, \
     auto_restart, memory_limit_mb, idle_timeout_min, fingerprint_json, created_at, updated_at, last_opened_at, \
-    border_color, ip_address, ip_country, ip_country_code, ip_city, ip_timezone, ip_source, ip_checked_at";
+    border_color, ip_address, ip_country, ip_country_code, ip_city, ip_timezone, ip_source, ip_checked_at, \
+    border_width";
 
 fn decrypt_fingerprint(
     stored: &str,
@@ -86,6 +87,7 @@ fn row_to_env(row: &Row<'_>, crypto: Option<&CryptoManager>) -> rusqlite::Result
         ip_timezone: row.get(28)?,
         ip_source: row.get(29)?,
         ip_checked_at: row.get(30)?,
+        border_width: row.get::<_, i64>(31)? as u32,
         created_at: row.get(20)?,
         updated_at: row.get(21)?,
         last_opened_at: row.get(22)?,
@@ -184,8 +186,8 @@ impl Db {
                  fingerprint_snapshot_id, project, test_env, account_role, version, case_id, tags,
                  notes, kernel, chromium_path, auto_restart, memory_limit_mb, idle_timeout_min,
                  fingerprint_json, created_at, updated_at, last_opened_at, border_color, ip_address,
-                 ip_country, ip_country_code, ip_city, ip_timezone, ip_source, ip_checked_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)",
+                 ip_country, ip_country_code, ip_city, ip_timezone, ip_source, ip_checked_at, border_width)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)",
                 params![
                     env.id,
                     env.name,
@@ -218,6 +220,7 @@ impl Db {
                     env.ip_timezone,
                     env.ip_source,
                     env.ip_checked_at,
+                    env.border_width,
                 ],
             )?;
             Ok(())
@@ -235,7 +238,7 @@ impl Db {
                  auto_restart=?17, memory_limit_mb=?18, idle_timeout_min=?19, fingerprint_json=?20,
                  updated_at=?21, last_opened_at=?22, border_color=?23, ip_address=?24,
                  ip_country=?25, ip_country_code=?26, ip_city=?27, ip_timezone=?28, ip_source=?29,
-                 ip_checked_at=?30 WHERE id=?1",
+                 ip_checked_at=?30, border_width=?31 WHERE id=?1",
                 params![
                     env.id,
                     env.name,
@@ -267,6 +270,7 @@ impl Db {
                     env.ip_timezone,
                     env.ip_source,
                     env.ip_checked_at,
+                    env.border_width,
                 ],
             )?;
             if changed == 0 {

@@ -123,6 +123,7 @@ pub mod actions {
     pub const SYNC_PUSH: &str = "sync.push";
     pub const SYNC_PULL: &str = "sync.pull";
     pub const HAR_EXPORT: &str = "har.export";
+    pub const ARTIFACT_OPEN_DIR: &str = "artifact.open_dir";
     pub const SESSION_RECONNECT: &str = "browser.reconnect";
     pub const API_REQUEST: &str = "api.request";
 }

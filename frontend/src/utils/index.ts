@@ -263,6 +263,7 @@ export const auditActionLabels: Record<string, string> = {
   'sync.push': '同步上传',
   'sync.pull': '同步下载',
   'har.export': '导出 HAR',
+  'artifact.open_dir': '打开产物目录',
   'audit.export': '导出审计',
   'group.create': '创建分组',
   'group.update': '更新分组',

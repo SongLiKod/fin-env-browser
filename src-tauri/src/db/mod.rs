@@ -57,6 +57,7 @@ mod tests {
             idle_timeout_min: None,
             fingerprint: crate::fingerprint::template("win11"),
             border_color: "#2563EB".into(),
+            border_width: 3,
             ip_address: None,
             ip_country: None,
             ip_country_code: None,
@@ -207,6 +208,7 @@ mod tests {
         db.save_environment_ip(&info).unwrap();
         let loaded = db.get_environment(&env.id).unwrap();
         assert_eq!(loaded.border_color, "#2563EB");
+        assert_eq!(loaded.border_width, 3);
         assert_eq!(loaded.ip_address.as_deref(), Some("203.0.113.10"));
         assert_eq!(loaded.ip_country.as_deref(), Some("Japan"));
         assert_eq!(loaded.ip_country_code.as_deref(), Some("JP"));
@@ -214,6 +216,10 @@ mod tests {
         assert_eq!(loaded.ip_timezone.as_deref(), Some("Asia/Tokyo"));
         assert_eq!(loaded.ip_source.as_deref(), Some("proxy"));
         assert!(loaded.ip_checked_at.is_some());
+        let mut widened = loaded;
+        widened.border_width = 7;
+        db.update_environment(&widened).unwrap();
+        assert_eq!(db.get_environment(&env.id).unwrap().border_width, 7);
         let _ = std::fs::remove_dir_all(dir);
     }
 }
@@ -297,6 +303,10 @@ impl Db {
             (
                 "003_environment_identity",
                 include_str!("../../migrations/003_environment_identity.sql"),
+            ),
+            (
+                "004_environment_border_width",
+                include_str!("../../migrations/004_environment_border_width.sql"),
             ),
         ];
         let current: i64 =

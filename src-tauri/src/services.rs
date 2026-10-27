@@ -50,6 +50,25 @@ pub fn get_environment(state: &SharedState, id: &str) -> Result<EnvironmentView>
     environment_view(state, state.db.get_environment(id)?)
 }
 
+fn refresh_start_page(state: &SharedState, env: &Environment) -> bool {
+    let proxy = env
+        .proxy_id
+        .as_ref()
+        .and_then(|id| state.db.get_proxy(id).ok());
+    let accounts = state.db.account_count_for_env(&env.id).unwrap_or(0);
+    let snapshots = state.db.snapshot_count_for_env(&env.id).unwrap_or(0);
+    let runtime = state.browsers.get_runtime(&env.id);
+    crate::start_page::refresh_if_present(
+        &state.data_dir,
+        env,
+        proxy.as_ref(),
+        accounts,
+        snapshots,
+        runtime.as_ref(),
+    )
+    .is_ok()
+}
+
 pub fn create_environment(
     state: &SharedState,
     input: CreateEnvironmentInput,
@@ -106,6 +125,7 @@ pub fn create_environment(
         tags: clean_tags(input.tags),
         notes: input.notes.unwrap_or_default(),
         border_color: normalize_border_color(input.border_color)?,
+        border_width: valid_border_width(input.border_width)?,
         kernel,
         chromium_path: input.chromium_path.filter(|p| !p.trim().is_empty()),
         auto_restart: input.auto_restart.unwrap_or(false),
@@ -212,6 +232,9 @@ pub async fn update_environment(
     if let Some(color) = input.border_color {
         env.border_color = normalize_border_color(Some(color))?;
     }
+    if let Some(width) = input.border_width {
+        env.border_width = valid_border_width(Some(width))?;
+    }
     if let Some(kernel) = input.kernel {
         if kernel != "chromium" {
             return Err(AppError::bad_request("V1 仅支持 Chromium 内核"));
@@ -232,6 +255,7 @@ pub async fn update_environment(
     }
     env.updated_at = now_iso();
     state.db.update_environment(&env)?;
+    let _ = refresh_start_page(state, &env);
     if env.status == "disabled" && state.browsers.is_running(&env.id) {
         state
             .browsers
@@ -408,6 +432,14 @@ fn normalize_border_color(value: Option<String>) -> Result<String> {
         Err(AppError::bad_request(
             "边框颜色需为 6 位十六进制，例如 #2563EB",
         ))
+    }
+}
+
+fn valid_border_width(value: Option<u32>) -> Result<u32> {
+    match value {
+        None | Some(0) => Ok(3),
+        Some(width) if (1..=12).contains(&width) => Ok(width),
+        _ => Err(AppError::bad_request("环境标识色粗细需为 1-12px")),
     }
 }
 
@@ -909,6 +941,18 @@ pub async fn check_environment_ip(
         checked_at,
     };
     state.db.save_environment_ip(&info)?;
+    if let Ok(updated) = state.db.get_environment(env_id) {
+        let refreshed = refresh_start_page(state, &updated);
+        if refreshed
+            && state
+                .browsers
+                .get_runtime(env_id)
+                .map(|runtime| runtime.current_url.contains("/start-pages/"))
+                .unwrap_or(false)
+        {
+            let _ = state.browsers.reload(env_id).await;
+        }
+    }
 
     Audit::env(
         &state.db,
@@ -995,6 +1039,7 @@ pub async fn align_proxy(
     }
     updated.updated_at = now_iso();
     state.db.update_environment(&updated)?;
+    let _ = refresh_start_page(state, &updated);
     if state.browsers.is_running(env_id) {
         state
             .browsers

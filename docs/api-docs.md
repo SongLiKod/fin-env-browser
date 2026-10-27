@@ -99,7 +99,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "http://127.0.0.1:17321/api/v1/envs?runningOnly=true"
 ```
 
-返回 `EnvironmentView[]`，包含 `fingerprint`、`proxy`、`runtime`、`accountCount`、`snapshotCount`，以及最近一次出口 IP 检测字段：`borderColor`、`ipAddress`、`ipCountry`、`ipCountryCode`、`ipCity`、`ipTimezone`、`ipSource`、`ipCheckedAt`。
+返回 `EnvironmentView[]`，包含 `fingerprint`、`proxy`、`runtime`、`accountCount`、`snapshotCount`，以及环境标识与最近一次出口 IP 检测字段：`borderColor`、`borderWidth`、`ipAddress`、`ipCountry`、`ipCountryCode`、`ipCity`、`ipTimezone`、`ipSource`、`ipCheckedAt`。
 
 ### POST /envs
 
@@ -124,6 +124,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "tags": ["回归", "P0"],
   "notes": "仅用于 staging 回归",
   "borderColor": "#2563EB",
+  "borderWidth": 4,
   "templateOs": "win11",
   "autoRestart": false,
   "memoryLimitMb": 1500,
@@ -132,7 +133,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
 }
 ```
 
-`templateOs`：`win11` / `win10` / `mac` / `linux`。不传 `fingerprint` 时自动生成自洽模板；传入时按内置规则校验，存在冲突返回 `400 fingerprint_conflict`。`borderColor` 为 6 位十六进制（如 `#2563EB`），留空则按环境 ID 自动生成标识色。
+`templateOs`：`win11` / `win10` / `mac` / `linux`。不传 `fingerprint` 时自动生成自洽模板；传入时按内置规则校验，存在冲突返回 `400 fingerprint_conflict`。`borderColor` 为 6 位十六进制（如 `#2563EB`），留空则按环境 ID 自动生成标识色；`borderWidth` 为 1-12px，默认 3px，控制面板中标识色色条的粗细。
 
 成功：`201 Created` + `EnvironmentView`。
 
@@ -172,6 +173,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "status": "active",
   "tags": ["回归"],
   "borderColor": "#16A34A",
+  "borderWidth": 5,
   "autoRestart": true,
   "memoryLimitMb": null,
   "idleTimeoutMin": 0
@@ -203,6 +205,7 @@ curl -X DELETE -H "Authorization: Bearer $FINENV_API_KEY" \
 ```
 
 - 达到 `maxConcurrentBrowsers` 返回 `400 capacity_limit`。
+- 未传 `url` 且系统默认启动地址为空/`about:blank` 时，自动打开 FinEnv 本地环境启动页（`file://.../start-pages/<envId>.html`），展示环境、指纹、代理、IP 与实时浏览器信息；启动页不会发起外部请求。
 - 返回 `BrowserRuntime`：`pid`、`debugPort`、`wsEndpoint`、`currentUrl`、`warnings` 等。
 - 浏览器使用独立 `user-data-dir`、随机调试端口、独立 profile；关闭面板不会强制结束进程，重启面板后会自动接管。
 - 使用代理时自动注入 `--disable-quic`、WebRTC 防泄漏参数；直连环境可配置独立 Hosts。

@@ -114,23 +114,23 @@ cargo test
 
 ## 13. 本轮校验记录
 
-- `npm --prefix frontend run check`：通过（`tsc --noEmit` 0 error；Vitest 4 个文件 / 19 用例；Vite 生产构建成功，产物 `frontend/dist`）
+- `npm --prefix frontend run check`：通过（`tsc --noEmit` 0 error；Vitest 4 个文件 / 20 用例；Vite 生产构建成功，产物 `frontend/dist`）
 - `sdk/js npm test`：4/4 通过（URL/Header/JSON/错误映射）
 - `sdk/python python -m unittest`：4/4 通过（查询构造/请求体/错误映射/环境变量）
 - Python 3.12 `py_compile`：通过
-- `node scripts/verify.mjs`：通过，0 提示（106 个 Tauri 命令注册、106 个前端 IPC 命令覆盖、30 条 API 路由、18 张表、Capability、主题 Token、需求/技术文档能力追踪）
+- `node scripts/verify.mjs`：通过，0 提示（107 个 Tauri 命令注册、107 个前端 IPC 命令覆盖、30 条 API 路由、18 张表、Capability、主题 Token、需求/技术文档能力追踪）
 - `cargo fmt --check`：通过
 - `cargo check`：通过
 - `cargo clippy --all-targets -- -D warnings`：通过（0 warning）
-- 核心逻辑测试（独立 harness，无 Tauri 运行时依赖）：14/14 通过
+- 核心逻辑测试（独立 harness，无 Tauri 运行时依赖）：15/15 通过
   - AES-GCM 字段加密/解密、错误口令拒绝
   - 加密包往返、主密钥跨设备导入与本机包裹持久化
   - 指纹模板一致性、冲突拒绝、时区/WebRTC 校验、国家对齐、注入脚本内容
   - 环境/快照指纹落盘密文校验
   - 账号密码、Cookie 缓存密文落盘校验
   - 审计哈希链校验 + 禁止 UPDATE/DELETE
-  - 数据库迁移幂等（001 + 002 + 003 环境身份迁移）
-  - 环境标识色与出口 IP 字段落盘往返
+  - 数据库迁移幂等（001 + 002 + 003 + 004 环境身份迁移）
+  - 环境标识色、粗细与出口 IP 字段落盘往返
   - 加密备份跨设备可移植（备份内携带主密钥）并完整恢复账号密码、代理密码、同步密钥与 Cookie 缓存
 - 真实二进制端到端（debug 构建 + 临时数据目录 + 本机 Chromium/Edge）：
   - 健康检查、环境创建/列表、快照、审计链校验、删除二次确认、重启后数据持久化
@@ -148,7 +148,7 @@ cargo test
 
 - **运行环境常驻栏**：`RunningEnvironments` 位于顶栏下方，实时列出所有运行中的环境，显示标识色、名称、项目、出口 IP、PID，并提供刷新 IP、进入详情、关闭浏览器操作；每 5 秒同步一次，面板重启或 API 打开的环境同样可见。
 - **浏览器窗口身份**：启动参数新增 `--window-name=FinEnv · <环境名>`，Chromium 窗口名称/任务栏标题可区分环境；面板与浏览器窗口使用同一套标识色。
-- **环境标识色**：`environments.border_color`（迁移 003）保存 6 位十六进制颜色；未设置时按环境 ID 生成稳定调色板色。列表行左侧色条、环境名色点、详情页左侧色条、创建/编辑对话框色板与取色器均使用该颜色。
+- **环境标识色**：`environments.border_color`（迁移 003）保存 6 位十六进制颜色；`environments.border_width`（迁移 004，1-12px，默认 3px）控制标识色色条粗细。未设置颜色时按环境 ID 生成稳定调色板色。列表行左侧色条、环境名色点、详情页左侧色条、运行栏、创建/编辑对话框色板、取色器与粗细滑杆均使用该配置。
 - **Windows 窗口边框**：Windows 11 下通过 DWM `DWMWA_BORDER_COLOR` 将同一颜色应用到真实 Chromium 窗口边框；其他平台自动忽略，不影响功能。
 - **出口 IP**：新增 `POST /envs/{id}/check-ip` 与 IPC `env_check_ip`。绑定代理时经代理检测，否则直连检测，出口 IP/国家/城市/时区/来源/检测时间写入环境并在列表、详情、运行栏展示；代理变更时自动清空旧 IP。
 - **界面修复**：修正 `Select` 组件宽度类作用在 `<select>` 而非外层容器导致的筛选区纵向堆叠；筛选区改为单行自适应并在第二行放置批量操作、环境计数与清除/分组管理。
@@ -157,4 +157,17 @@ cargo test
   - 直连出口检测返回 `220.197.77.126 / China / Beijing / Asia/Shanghai`，并持久化到环境。
   - 非法颜色 `"borderColor": "red"` 返回 400；合法 `#0D9488` 可 PATCH 成功。
   - Chromium 窗口标题为 `FinEnv · <环境名>`；窗口边缘像素为设置的 `#16A34A`；无“不支持的命令行标记”提示；`navigator.webdriver === false`。
-  - 前端 `npm run check` 通过（19 用例 + 构建）；`cargo fmt`/`clippy` 通过；核心 harness 14/14 通过；`scripts/verify.mjs` 0 提示。
+  - 前端 `npm run check` 通过（20 用例 + 构建）；`cargo fmt`/`clippy` 通过；核心 harness 15/15 通过；`scripts/verify.mjs` 0 提示。
+
+## 15. 内置环境启动页与产物目录
+
+- **默认启动页**：未指定打开 URL、且系统默认启动地址为空或 `about:blank` 时，`process::open` 生成 `start-pages/<envId>.html` 并以 `file://` 打开；headless 仍使用 `about:blank`。
+- **页面内容**：环境名称/项目/测试环境/角色/版本/用例/标签/备注、出口 IP/位置/来源、代理、指纹摘要、账号与快照数、运行 PID/端口/内存、启动地址，以及从 `navigator`/`WebGL` 读取的实时浏览器信息；支持亮/暗色、标识色与 1-12px 粗细、地址输入跳转、复制/刷新。
+- **动态更新**：打开环境时写入 PID/端口等运行信息；IP 检测、环境信息更新、代理对齐后会重写启动页文件，点击“刷新信息”即可看到最新内容。
+- **产物目录**：`open_artifact_dir` 命令（`screenshots`/`recordings`/`har`/`exports`/`backups`/`reports`）调用系统文件管理器打开应用数据目录；截图/录屏卡片新增“图片目录/视频目录”按钮，并写审计 `artifact.open_dir`。
+- **验证**：
+  - 实际打开环境后 `currentUrl` 为 `file:///.../start-pages/<envId>.html`；启动页标题、标识色 `#2563EB`、粗细 `6px` 正确。
+  - 启动页显示实时 `navigator.webdriver === false`、UA、平台、语言、时区、屏幕、WebGL。
+  - 调用 `env_check_ip` 后重写启动页，刷新页面显示 `220.197.77.126 / Beijing / China / Asia/Shanghai`。
+  - `open_artifact_dir('screenshots')` 与 `open_artifact_dir('recordings')` 均成功打开目录。
+  - 启动页 HTML 转义测试覆盖环境名与备注中的 `<script>` 注入。
