@@ -285,3 +285,9 @@ cargo test
 - **校验**：`npm run version:check`、`npm run verify` 与 CI 的 Version consistency 步骤检查所有副本；`src-tauri/build.rs` 在编译前校验 `VERSION` 与 `Cargo.toml`。
 - **UI**：登录页、侧栏、设置页和 API 版本均读取运行时版本，不再硬编码 `V1.0`。
 - **验证**：`node scripts/sync-version.mjs --check` 返回一致；Tauri、Cargo、前端与 SDK 版本均跟随 `VERSION`。
+
+## 27. 浏览器视频声音
+
+- **问题**：Chromium 启动参数包含全局 `--mute-audio`，所有环境里的视频和音频都被静音。
+- **修复**：移除 `--mute-audio`，浏览器按页面和系统音量正常播放声音；环境隔离、指纹和代理参数不变。
+- **验证**：重新构建后启动环境，打开带声音的视频页面可正常输出音频；`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings` 通过。

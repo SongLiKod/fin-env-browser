@@ -1648,7 +1648,6 @@ fn build_chromium_args(
         "--remote-allow-origins=*".into(),
         "--no-first-run".into(),
         "--no-default-browser-check".into(),
-        "--mute-audio".into(),
         "--disable-background-networking".into(),
         "--disable-component-update".into(),
         "--disable-sync".into(),

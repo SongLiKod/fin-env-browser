@@ -116,8 +116,6 @@
 
 \--no-default-browser-check
 
-\--mute-audio
-
 ```
 
 
