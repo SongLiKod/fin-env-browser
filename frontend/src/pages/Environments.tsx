@@ -522,7 +522,24 @@ export function EnvironmentsPage() {
                       </td>
                       <td>
                         <div className="flex items-start gap-2">
-                          <StatusDot tone={isRunning ? 'success' : status.tone === 'success' ? 'primary' : 'muted'} pulse={isRunning} className="mt-1.5" />
+                          <span
+                            className={cn(
+                              'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md',
+                              isRunning
+                                ? 'bg-[color-mix(in_srgb,var(--success)_16%,transparent)] text-[var(--success)] ring-1 ring-[color-mix(in_srgb,var(--success)_45%,transparent)]'
+                                : 'text-content-hint',
+                            )}
+                            title={isRunning ? `环境运行中 · PID ${env.runtime?.pid}` : undefined}
+                          >
+                            {isRunning ? (
+                              <MonitorPlay className="h-3.5 w-3.5" />
+                            ) : (
+                              <StatusDot
+                                tone={status.tone === 'success' ? 'primary' : 'muted'}
+                                className="mt-0"
+                              />
+                            )}
+                          </span>
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5">
                               <span
@@ -535,9 +552,22 @@ export function EnvironmentsPage() {
                               </Link>
                             </div>
                             <div className="mt-1 flex flex-wrap items-center gap-1">
-                              <Badge tone={isRunning ? 'success' : status.tone === 'warning' ? 'warning' : status.tone === 'muted' ? 'neutral' : 'primary'}>
-                                {isRunning ? '运行中' : status.label}
-                              </Badge>
+                              {isRunning ? (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--success)_38%,transparent)] bg-[color-mix(in_srgb,var(--success)_13%,transparent)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)]">
+                                  <span className="relative flex h-1.5 w-1.5">
+                                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--success)] opacity-60" />
+                                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
+                                  </span>
+                                  运行中
+                                  <span className="font-mono text-[9px] font-normal opacity-80">
+                                    PID {env.runtime?.pid}
+                                  </span>
+                                </span>
+                              ) : (
+                                <Badge tone={status.tone === 'warning' ? 'warning' : status.tone === 'muted' ? 'neutral' : 'primary'}>
+                                  {status.label}
+                                </Badge>
+                              )}
                               {env.testEnv ? <Badge tone="outline">{testEnvLabels[env.testEnv] ?? env.testEnv}</Badge> : null}
                               {env.tags.slice(0, 2).map((tag) => (
                                 <Badge key={tag} tone="neutral">

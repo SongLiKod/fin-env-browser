@@ -91,7 +91,7 @@
 - 安全：Capability 白名单（核心 + dialog），无 fs/shell/http 插件权限；CDP 仅 127.0.0.1。
 - 稳定性：SQLite 迁移；升级前自动快照与备份；浏览器进程独立于面板。
 - 兼容：Windows/macOS/Linux Tauri 配置与 CI 矩阵。
-- 性能：进程调度 tokio；前端构建产物 ~503KB JS（gzip ~148KB）；启动目标 ≤2s 依赖本机环境。
+- 性能：进程调度 tokio；前端构建产物 ~507KB JS（gzip ~149KB）；启动目标 ≤2s 依赖本机环境。
 
 ## 12. 可重复校验命令
 
@@ -222,3 +222,13 @@ cargo test
   - 停止后主控点击继续增加、从属保持不变；`GET /broadcast` 返回 `active: false`。
   - UI WebView2 CDP 截图确认开启对话框、同步进行中面板、顶部状态栏、暂停/恢复/停止流程；console 无 error。
 - **已知限制**：不同步标签栏拖拽/固定/分组等浏览器自身管理操作；跨域 iframe 内的点击不在捕获范围；仅建议用于受信测试站点。
+
+## 19. 左侧栏折叠与运行环境标记
+
+- **折叠/展开**：顶栏左侧新增折叠按钮；折叠后侧栏宽度从 232px 变为 64px，仅保留 Logo、导航图标、运行数量、头像与改密/退出按钮；展开恢复完整工作区、资源管控卡片、用户名/角色与版本信息。
+- **持久化**：状态写入 `localStorage` 的 `finenv.sidebar.collapsed`，刷新或重开面板后保持上次状态；折叠导航项保留 `title`/`aria-label`，便于识别。
+- **运行标记**：环境中运行中的行显示绿色 Monitor 图标、带脉冲圆点的「运行中 PID xxxx」徽标、绿色运行状态列与右上角运行计数；未运行环境保持普通状态徽标。
+- **验证（WebView2 CDP）**：
+  - 展开态截图确认完整侧栏与运行环境标记；折叠后侧栏实测宽度 64px，`data-collapsed=true` 且 `localStorage` 为 `1`；再次展开宽度 232px、状态恢复为 `0`。
+  - 运行环境行 `innerText` 同时包含「运行中」与 `PID <pid>`，绿色标记颜色为 `rgb(0, 180, 42)`。
+  - 浏览器 console 无 error；`npm --prefix frontend run check` 通过。

@@ -1,5 +1,13 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ChevronLeft, MemoryStick, Moon, Sun, Zap } from 'lucide-react';
+import {
+  ChevronLeft,
+  MemoryStick,
+  Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Sun,
+  Zap,
+} from 'lucide-react';
 import { useThemeStore } from '@/store/theme';
 import { useEnvStore } from '@/store/env';
 import { cn } from '@/utils';
@@ -15,7 +23,13 @@ const titles: Record<string, string> = {
   '/settings': '系统设置',
 };
 
-export function Topbar() {
+export function Topbar({
+  sidebarCollapsed,
+  onToggleSidebar,
+}: {
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+}) {
   const location = useLocation();
   const navigate = useNavigate();
   const mode = useThemeStore((state) => state.theme.mode);
@@ -30,6 +44,21 @@ export function Topbar() {
   return (
     <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-surface-base/90 px-5 backdrop-blur">
       <div className="flex min-w-0 items-center gap-2">
+        <Tooltip content={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'} side="bottom">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onToggleSidebar}
+            aria-label={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}
+            aria-expanded={!sidebarCollapsed}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+          </Button>
+        </Tooltip>
         {location.pathname.startsWith('/envs/') ? (
           <Button variant="ghost" size="icon-sm" onClick={() => navigate('/')} title="返回环境列表">
             <ChevronLeft className="h-4 w-4" />
