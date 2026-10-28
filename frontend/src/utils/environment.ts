@@ -33,6 +33,25 @@ export function envBorderWidth(env: { borderWidth?: number | null }): number {
   return Math.min(12, Math.max(1, Math.round(width)));
 }
 
+export type EnvironmentAccess = 'view' | 'operate' | 'manage';
+
+export function envAccessRank(level?: string | null): number {
+  return level === 'manage' ? 2 : level === 'operate' ? 1 : 0;
+}
+
+export function envHasAccess(
+  env: { accessLevel?: string | null },
+  required: EnvironmentAccess,
+): boolean {
+  return envAccessRank(env.accessLevel) >= envAccessRank(required);
+}
+
+export function envAccessLabel(level?: string | null): string {
+  if (level === 'manage') return '管理';
+  if (level === 'operate') return '操作';
+  return '查看';
+}
+
 export function hexToRgba(hex: string, alpha: number): string {  const value = hex.replace('#', '');
   if (value.length !== 6) return `rgba(37, 99, 235, ${alpha})`;
   const r = Number.parseInt(value.slice(0, 2), 16);

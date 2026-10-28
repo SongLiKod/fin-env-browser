@@ -29,7 +29,7 @@ import { useAuthStore } from '@/store/auth';
 import { useEnvStore } from '@/store/env';
 import { toastError, useToastStore } from '@/store/toast';
 import { cn, envStatusMeta, formatDate, relativeTime, testEnvLabels } from '@/utils';
-import { envBorderColor, envBorderWidth, envIpSummary, hexToRgba } from '@/utils/environment';
+import { envBorderColor, envBorderWidth, envAccessLabel, envHasAccess, envIpSummary, hexToRgba } from '@/utils/environment';
 import { Badge, StatusDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, EmptyState, Spinner } from '@/components/ui/card';
@@ -241,6 +241,29 @@ export function EnvironmentDetailPage() {
   const running = !!env.runtime;
   const accent = envBorderColor(env);
   const accentWidth = envBorderWidth(env);
+  const canOperateEnv = envHasAccess(env, 'operate');
+  const canManageEnv = envHasAccess(env, 'manage');
+  const tabItems = [
+    { value: 'overview', label: '概览' },
+    ...(canManageEnv && can('edit_fingerprint_proxy')
+      ? [{ value: 'fingerprint', label: '指纹配置' }]
+      : []),
+    { value: 'accounts', label: '账号台账', badge: env.accountCount || undefined },
+    ...(canManageEnv && can('edit_fingerprint_proxy')
+      ? [{ value: 'snapshots', label: '指纹快照', badge: env.snapshotCount || undefined }]
+      : []),
+    ...(canManageEnv && can('edit_fingerprint_proxy')
+      ? [{ value: 'network', label: '网络与 Mock' }]
+      : []),
+    ...(canManageEnv && can('edit_env') ? [{ value: 'extensions', label: '扩展' }] : []),
+    ...(canManageEnv && can('manage_env_members')
+      ? [{ value: 'access', label: '访问成员' }]
+      : []),
+    ...(canOperateEnv && can('open_close') ? [{ value: 'detect', label: '检测报告' }] : []),
+    ...(canOperateEnv && can('open_close')
+      ? [{ value: 'debug', label: '调试与自动化' }]
+      : []),
+  ];
 
   return (
     <div className="page-pad space-y-4">
@@ -260,6 +283,17 @@ export function EnvironmentDetailPage() {
                 {status.label}
               </Badge>
             )}
+            <Badge
+              tone={
+                env.accessLevel === 'manage'
+                  ? 'success'
+                  : env.accessLevel === 'operate'
+                    ? 'primary'
+                    : 'neutral'
+              }
+            >
+              我的权限 · {envAccessLabel(env.accessLevel)}
+            </Badge>
             {env.testEnv ? <Badge tone="outline">{testEnvLabels[env.testEnv] ?? env.testEnv}</Badge> : null}
             {env.tags.map((tag) => <Badge key={tag} tone="neutral">#{tag}</Badge>)}
           </div>
@@ -289,7 +323,7 @@ export function EnvironmentDetailPage() {
               <RefreshCw className="h-4 w-4" />
             </Button>
           </Tooltip>
-          {can('open_close') ? (
+          {can('open_close') && canOperateEnv ? (
             running ? (
               <Button variant="secondary" loading={busy} onClick={() => void close()}>
                 <Square className="h-4 w-4" /> 关闭
@@ -300,7 +334,7 @@ export function EnvironmentDetailPage() {
               </Button>
             )
           ) : null}
-          {can('open_close') ? (
+          {can('open_close') && canOperateEnv ? (
             <Button variant="secondary" onClick={() => void detect()} loading={detecting}>
               <Radar className="h-4 w-4" /> 检测指纹
             </Button>
@@ -310,17 +344,17 @@ export function EnvironmentDetailPage() {
               <Download className="h-4 w-4" /> 导出包
             </Button>
           ) : null}
-          {can('create_env') ? (
+          {can('create_env') && canOperateEnv ? (
             <Button variant="secondary" onClick={() => setShowTemplate(true)}>
               <LayoutTemplate className="h-4 w-4" /> 保存为模板
             </Button>
           ) : null}
-          {can('clone_env') ? (
+          {can('clone_env') && canOperateEnv ? (
             <Button variant="secondary" onClick={() => setShowClone(true)}>
               <Copy className="h-4 w-4" /> 克隆
             </Button>
           ) : null}
-          {can('delete_env') ? (
+          {can('delete_env') && canManageEnv ? (
             <Button variant="ghost" size="icon" className="text-danger" onClick={() => setShowDelete(true)}>
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -372,22 +406,14 @@ export function EnvironmentDetailPage() {
       <Tabs
         value={tab}
         onValueChange={(value) => setTab(value as TabId)}
-        items={[
-          { value: 'overview', label: '概览' },
-          { value: 'fingerprint', label: '指纹配置' },
-          { value: 'accounts', label: '账号台账', badge: env.accountCount || undefined },
-          { value: 'snapshots', label: '指纹快照', badge: env.snapshotCount || undefined },
-          { value: 'network', label: '网络与 Mock' },
-          { value: 'extensions', label: '扩展' },
-          { value: 'access', label: '访问成员' },
-          { value: 'detect', label: '检测报告' },
-          { value: 'debug', label: '调试与自动化' },
-        ]}
+        items={tabItems}
       />
 
       <div>
         {tab === 'overview' ? <OverviewPanel env={env} groups={groups} onUpdated={applyEnv} /> : null}
-        {tab === 'fingerprint' ? <FingerprintEditor env={env} onSaved={applyEnv} /> : null}
+        {tab === 'fingerprint' && canManageEnv && can('edit_fingerprint_proxy') ? (
+          <FingerprintEditor env={env} onSaved={applyEnv} />
+        ) : null}
         {tab === 'accounts' ? (
           <AccountsPanel
             env={env}
@@ -396,10 +422,18 @@ export function EnvironmentDetailPage() {
             }
           />
         ) : null}
-        {tab === 'snapshots' ? <SnapshotsPanel env={env} onUpdated={applyEnv} /> : null}
-        {tab === 'network' ? <NetworkingPanel env={env} proxies={proxies} onUpdated={applyEnv} /> : null}
-        {tab === 'extensions' ? <ExtensionsPanel env={env} /> : null}
-        {tab === 'access' ? <AccessPanel env={env} /> : null}
+        {tab === 'snapshots' && canManageEnv && can('edit_fingerprint_proxy') ? (
+          <SnapshotsPanel env={env} onUpdated={applyEnv} />
+        ) : null}
+        {tab === 'network' && canManageEnv && can('edit_fingerprint_proxy') ? (
+          <NetworkingPanel env={env} proxies={proxies} onUpdated={applyEnv} />
+        ) : null}
+        {tab === 'extensions' && canManageEnv && can('edit_env') ? (
+          <ExtensionsPanel env={env} />
+        ) : null}
+        {tab === 'access' && canManageEnv && can('manage_env_members') ? (
+          <AccessPanel env={env} />
+        ) : null}
         {tab === 'detect' ? <DetectionPanel env={env} /> : null}
         {tab === 'debug' ? <DebugPanel env={env} onRefresh={refresh} /> : null}
       </div>

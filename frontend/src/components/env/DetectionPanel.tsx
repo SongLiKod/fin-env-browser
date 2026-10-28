@@ -14,6 +14,7 @@ import { ipc } from '@/ipc/client';
 import { useAuthStore } from '@/store/auth';
 import { toastError, useToastStore } from '@/store/toast';
 import { formatDate, formatDateShort } from '@/utils';
+import { envHasAccess } from '@/utils/environment';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, EmptyState, Spinner } from '@/components/ui/card';
@@ -21,7 +22,8 @@ import { CopyButton } from '@/components/ui/misc';
 
 export function DetectionPanel({ env }: { env: EnvironmentView }) {
   const toast = useToastStore();
-  const canOpen = useAuthStore((state) => state.can('open_close'));
+  const canOpen =
+    useAuthStore((state) => state.can('open_close')) && envHasAccess(env, 'operate');
   const [reports, setReports] = React.useState<FingerprintReport[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);

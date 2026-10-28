@@ -23,6 +23,7 @@ import { ipc } from '@/ipc/client';
 import { useAuthStore } from '@/store/auth';
 import { toastError, useToastStore } from '@/store/toast';
 import { formatDateShort } from '@/utils';
+import { envHasAccess } from '@/utils/environment';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, EmptyState, Spinner } from '@/components/ui/card';
@@ -40,7 +41,9 @@ export function NetworkingPanel({
   onUpdated: (env: EnvironmentView) => void;
 }) {
   const toast = useToastStore();
-  const canEdit = useAuthStore((state) => state.can('edit_fingerprint_proxy'));
+  const canEdit =
+    useAuthStore((state) => state.can('edit_fingerprint_proxy')) &&
+    envHasAccess(env, 'manage');
   const [proxyId, setProxyId] = React.useState(env.proxyId ?? '');
   const [restart, setRestart] = React.useState(false);
   const [savingProxy, setSavingProxy] = React.useState(false);

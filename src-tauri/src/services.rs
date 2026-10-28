@@ -33,6 +33,14 @@ pub fn environment_view(state: &SharedState, env: Environment) -> Result<Environ
         runtime: state.browsers.get_runtime(&env.id),
         account_count: state.db.account_count_for_env(&env.id)?,
         snapshot_count: state.db.snapshot_count_for_env(&env.id)?,
+        access_level: match state.current_user() {
+            Some(user) if user.role == "super_admin" => "manage".into(),
+            Some(user) => state
+                .db
+                .environment_member_level(&env.id, &user.id)?
+                .unwrap_or_else(|| "view".into()),
+            None => "manage".into(),
+        },
         proxy,
         env,
     })

@@ -39,7 +39,7 @@ import { useAuthStore } from '@/store/auth';
 import { useEnvStore } from '@/store/env';
 import { toastError, useToastStore } from '@/store/toast';
 import { cn, envStatusMeta, formatDateShort, relativeTime, testEnvLabels, truncate } from '@/utils';
-import { envBorderColor, envBorderWidth, envIpSummary, hexToRgba } from '@/utils/environment';
+import { envBorderColor, envBorderWidth, envAccessLabel, envHasAccess, envIpSummary, hexToRgba } from '@/utils/environment';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Badge, StatusDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -144,6 +144,8 @@ export function EnvironmentsPage() {
   }, [filter]);
 
   const selectedEnvs = envs.filter((env) => selected.has(env.id));
+  const canOperateSelected = selectedEnvs.every((env) => envHasAccess(env, 'operate'));
+  const canManageSelected = selectedEnvs.every((env) => envHasAccess(env, 'manage'));
   const running = envs.filter((env) => env.runtime);
   const totalMemory = running.reduce((total, env) => total + (env.runtime?.memoryMb ?? 0), 0);
   const totalAccounts = envs.reduce((total, env) => total + env.accountCount, 0);
@@ -260,9 +262,11 @@ export function EnvironmentsPage() {
             >
               <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} /> 刷新
             </Button>
-            <Button variant="secondary" onClick={() => setShowTemplates(true)}>
-              <LayoutTemplate className="h-4 w-4" /> 模板
-            </Button>
+            {can('create_env') ? (
+              <Button variant="secondary" onClick={() => setShowTemplates(true)}>
+                <LayoutTemplate className="h-4 w-4" /> 模板
+              </Button>
+            ) : null}
             {can('create_env') ? (
               <>
                 <Button variant="secondary" onClick={() => setShowImport(true)}>
@@ -383,12 +387,12 @@ export function EnvironmentsPage() {
             {selected.size > 0 ? (
               <>
                 <span className="text-xs text-content-weak">已选 {selected.size} 个</span>
-                {can('open_close') ? (
+                {can('open_close') && canOperateSelected ? (
                   <Button variant="soft" size="sm" onClick={() => setShowBatchOps(true)}>
                     <Zap className="h-3.5 w-3.5" /> 批量操作
                   </Button>
                 ) : null}
-                {can('open_close') ? (
+                {can('open_close') && canOperateSelected ? (
                   <Button
                     variant="soft"
                     size="sm"
@@ -399,7 +403,7 @@ export function EnvironmentsPage() {
                     <Radio className="h-3.5 w-3.5" /> 同步控制
                   </Button>
                 ) : null}
-                {can('edit_env') ? (
+                {can('edit_env') && canManageSelected ? (
                   <Select
                     className="h-7 w-[140px] text-xs"
                     value=""
@@ -418,12 +422,12 @@ export function EnvironmentsPage() {
                     <Download className="h-3.5 w-3.5" /> 批量导出
                   </Button>
                 ) : null}
-                {can('edit_fingerprint_proxy') ? (
+                {can('edit_fingerprint_proxy') && canManageSelected ? (
                   <Button variant="ghost" size="sm" onClick={() => setShowAssignProxy(true)}>
                     <Globe2 className="h-3.5 w-3.5" /> 分配代理
                   </Button>
                 ) : null}
-                {can('delete_env') ? (
+                {can('delete_env') && canManageSelected ? (
                   <Button variant="ghost" size="sm" className="text-danger" onClick={() => setBulkDelete(true)}>
                     <Trash2 className="h-3.5 w-3.5" /> 批量删除
                   </Button>
@@ -552,6 +556,17 @@ export function EnvironmentsPage() {
                               </Link>
                             </div>
                             <div className="mt-1 flex flex-wrap items-center gap-1">
+                              <Badge
+                                tone={
+                                  env.accessLevel === 'manage'
+                                    ? 'success'
+                                    : env.accessLevel === 'operate'
+                                      ? 'primary'
+                                      : 'neutral'
+                                }
+                              >
+                                我的权限 · {envAccessLabel(env.accessLevel)}
+                              </Badge>
                               {isRunning ? (
                                 <span className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--success)_38%,transparent)] bg-[color-mix(in_srgb,var(--success)_13%,transparent)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)]">
                                   <span className="relative flex h-1.5 w-1.5">
@@ -652,7 +667,7 @@ export function EnvironmentsPage() {
                       </td>
                       <td>
                         <div className="flex items-center justify-end gap-1">
-                          {can('open_close') ? (
+                          {can('open_close') && envHasAccess(env, 'operate') ? (
                             isRunning ? (
                               <Button variant="ghost" size="icon-sm" title="关闭环境" loading={busyId === env.id} onClick={() => void closeEnv(env)}>
                                 <Square className="h-3.5 w-3.5" />
@@ -667,7 +682,7 @@ export function EnvironmentsPage() {
                             <Button
                               variant="ghost"
                               size="icon-sm"
-                              disabled={!isRunning || !can('open_close')}
+                              disabled={!isRunning || !can('open_close') || !envHasAccess(env, 'operate')}
                               onClick={() => void capture(env)}
                             >
                               <Camera className="h-3.5 w-3.5" />
@@ -676,12 +691,12 @@ export function EnvironmentsPage() {
                           <Button variant="ghost" size="icon-sm" title="环境详情" onClick={() => navigate(`/envs/${env.id}`)}>
                             <ArrowRight className="h-3.5 w-3.5" />
                           </Button>
-                          {can('clone_env') ? (
+                          {can('clone_env') && envHasAccess(env, 'operate') ? (
                             <Button variant="ghost" size="icon-sm" title="克隆" onClick={() => setCloneTarget(env)}>
                               <Copy className="h-3.5 w-3.5" />
                             </Button>
                           ) : null}
-                          {can('delete_env') ? (
+                          {can('delete_env') && envHasAccess(env, 'manage') ? (
                             <Button variant="ghost" size="icon-sm" title="删除" className="text-danger" onClick={() => setDeleteTarget(env)}>
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>

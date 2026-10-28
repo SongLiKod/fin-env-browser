@@ -4,12 +4,14 @@ import { ArrowUpRight, MonitorPlay, RefreshCw, Square } from 'lucide-react';
 import { ipc } from '@/ipc/client';
 import type { EnvironmentView } from '@/ipc/types';
 import { useEnvStore } from '@/store/env';
+import { useAuthStore } from '@/store/auth';
 import { toastError } from '@/store/toast';
 import { cn } from '@/utils';
-import { envBorderColor, envBorderWidth, envIpSummary, hexToRgba } from '@/utils/environment';
+import { envBorderColor, envBorderWidth, envHasAccess, envIpSummary, hexToRgba } from '@/utils/environment';
 
 export function RunningEnvironments() {
   const navigate = useNavigate();
+  const can = useAuthStore((state) => state.can);
   const envs = useEnvStore((state) => state.envs);
   const replace = useEnvStore((state) => state.replace);
   const clearRuntime = useEnvStore((state) => state.clearRuntime);
@@ -131,6 +133,7 @@ export function RunningEnvironments() {
                 className={cn('text-content-hint hover:text-danger', isClosing && 'pointer-events-none')}
                 title="关闭浏览器"
                 onClick={() => void close(env)}
+                hidden={!can('open_close') || !envHasAccess(env, 'operate')}
               >
                 <Square className="h-3 w-3" />
               </button>

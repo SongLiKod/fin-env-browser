@@ -17,6 +17,7 @@ import { pickDirectory } from '@/utils/dialog';
 import { useAuthStore } from '@/store/auth';
 import { toastError, useToastStore } from '@/store/toast';
 import { cn, formatDateShort } from '@/utils';
+import { envHasAccess } from '@/utils/environment';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, EmptyState, Spinner } from '@/components/ui/card';
@@ -27,7 +28,7 @@ import { Switch } from '@/components/ui/switch';
 
 export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
   const toast = useToastStore();
-  const canEdit = useAuthStore((state) => state.can('edit_env'));
+  const canEdit = useAuthStore((state) => state.can('edit_env')) && envHasAccess(env, 'manage');
   const [envs, setEnvs] = React.useState<EnvironmentView[]>([]);
   const [all, setAll] = React.useState<Extension[]>([]);
   const [assigned, setAssigned] = React.useState<Extension[]>([]);

@@ -102,7 +102,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "http://127.0.0.1:17321/api/v1/envs?runningOnly=true"
 ```
 
-返回 `EnvironmentView[]`，包含 `fingerprint`、`proxy`、`runtime`、`accountCount`、`snapshotCount`，以及环境标识与最近一次出口 IP 检测字段：`borderColor`、`borderWidth`、`ipAddress`、`ipCountry`、`ipCountryCode`、`ipCity`、`ipTimezone`、`ipSource`、`ipCheckedAt`。
+返回 `EnvironmentView[]`，包含 `fingerprint`、`proxy`、`runtime`、`accountCount`、`snapshotCount`、`accessLevel`，以及环境标识与最近一次出口 IP 检测字段：`borderColor`、`borderWidth`、`ipAddress`、`ipCountry`、`ipCountryCode`、`ipCity`、`ipTimezone`、`ipSource`、`ipCheckedAt`。`accessLevel` 是当前登录用户在该环境的权限（`view` / `operate` / `manage`）。
 
 ### POST /envs
 

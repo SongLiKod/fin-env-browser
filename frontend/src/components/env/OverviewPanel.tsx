@@ -5,6 +5,7 @@ import { ipc } from '@/ipc/client';
 import { useAuthStore } from '@/store/auth';
 import { toastError, useToastStore } from '@/store/toast';
 import { formatDate, parseTags, testEnvLabels } from '@/utils';
+import { envHasAccess } from '@/utils/environment';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -23,7 +24,7 @@ export function OverviewPanel({
   onUpdated: (env: EnvironmentView) => void;
 }) {
   const toast = useToastStore();
-  const canEdit = useAuthStore((state) => state.can('edit_env'));
+  const canEdit = useAuthStore((state) => state.can('edit_env')) && envHasAccess(env, 'manage');
   const [saving, setSaving] = React.useState(false);
   const [form, setForm] = React.useState({
     name: env.name,
@@ -155,12 +156,22 @@ export function OverviewPanel({
               <Input value={form.caseId} onChange={(event) => update('caseId', event.target.value)} disabled={!canEdit} placeholder="CASE-1024" />
             </Field>
             <Field label="环境标识色" className="col-span-2 md:col-span-3" hint="列表、详情、运行栏与浏览器窗口边框使用该颜色和粗细（Windows 窗口边框）">
-              <ColorPicker
-                value={form.borderColor}
-                onChange={(value) => update('borderColor', value)}
-                width={form.borderWidth}
-                onWidthChange={(value) => update('borderWidth', value)}
-              />
+              {canEdit ? (
+                <ColorPicker
+                  value={form.borderColor}
+                  onChange={(value) => update('borderColor', value)}
+                  width={form.borderWidth}
+                  onWidthChange={(value) => update('borderWidth', value)}
+                />
+              ) : (
+                <div className="flex items-center gap-2 text-xs text-content-weak">
+                  <span
+                    className="h-4 w-4 rounded-sm ring-1 ring-black/10"
+                    style={{ backgroundColor: form.borderColor || '#2563EB' }}
+                  />
+                  {form.borderColor || '自动标识色'} · {form.borderWidth}px
+                </div>
+              )}
             </Field>
             <Field label="标签" className="col-span-2 md:col-span-3" hint="逗号或空格分隔">              <Input value={form.tags} onChange={(event) => update('tags', event.target.value)} disabled={!canEdit} />
             </Field>

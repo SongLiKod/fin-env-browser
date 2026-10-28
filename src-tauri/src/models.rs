@@ -91,6 +91,7 @@ pub struct EnvironmentView {
     pub runtime: Option<BrowserRuntime>,
     pub account_count: u32,
     pub snapshot_count: u32,
+    pub access_level: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

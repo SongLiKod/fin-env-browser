@@ -28,6 +28,7 @@ import { ipc } from '@/ipc/client';
 import { useAuthStore } from '@/store/auth';
 import { toastError, useToastStore } from '@/store/toast';
 import { copyText, formatDate, formatDuration } from '@/utils';
+import { envHasAccess } from '@/utils/environment';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, Spinner } from '@/components/ui/card';
@@ -44,7 +45,8 @@ export function DebugPanel({
   onRefresh: () => Promise<void>;
 }) {
   const toast = useToastStore();
-  const canOpen = useAuthStore((state) => state.can('open_close'));
+  const canOpen =
+    useAuthStore((state) => state.can('open_close')) && envHasAccess(env, 'operate');
   const canSensitive = useAuthStore((state) => state.can('export_sensitive'));
   const [url, setUrl] = React.useState('https://');
   const [preScript, setPreScript] = React.useState('');

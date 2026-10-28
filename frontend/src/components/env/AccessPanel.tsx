@@ -9,6 +9,7 @@ import type {
 import { useAuthStore } from '@/store/auth';
 import { toastError, useToastStore } from '@/store/toast';
 import { roleLabels } from '@/utils';
+import { envHasAccess } from '@/utils/environment';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, EmptyState, Spinner } from '@/components/ui/card';
@@ -37,7 +38,7 @@ export function AccessPanel({ env }: { env: EnvironmentView }) {
     try {
       const list = await ipc.envMemberList(env.id);
       setMembers(list);
-      if (can('manage_env_members')) {
+      if (can('manage_env_members') && envHasAccess(env, 'manage')) {
         try {
           setCandidates(await ipc.envMemberCandidates(env.id));
           setManage(true);

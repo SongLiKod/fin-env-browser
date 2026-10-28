@@ -18,6 +18,7 @@ import type {
 } from '@/ipc/types';
 import { ipc } from '@/ipc/client';
 import { accountStatusMeta, cn, formatDateShort, parseCsvRows } from '@/utils';
+import { envHasAccess } from '@/utils/environment';
 import { accountPackageFilter, pickFile, saveFile } from '@/utils/dialog';
 import { useAuthStore } from '@/store/auth';
 import { toastError, useToastStore } from '@/store/toast';
@@ -38,7 +39,7 @@ export function AccountsPanel({
   onCountChanged?: (count: number) => void;
 }) {
   const toast = useToastStore();
-  const canEdit = useAuthStore((state) => state.can('edit_env'));
+  const canEdit = useAuthStore((state) => state.can('edit_env')) && envHasAccess(env, 'operate');
   const canExport = useAuthStore((state) => state.can('export_sensitive'));
   const [accounts, setAccounts] = React.useState<Account[]>([]);
   const [loading, setLoading] = React.useState(true);

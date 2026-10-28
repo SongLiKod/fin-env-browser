@@ -206,6 +206,7 @@ export interface EnvironmentView extends Environment {
   runtime: BrowserRuntime | null;
   accountCount: number;
   snapshotCount: number;
+  accessLevel: 'view' | 'operate' | 'manage' | string;
 }
 
 export interface EnvironmentMember {

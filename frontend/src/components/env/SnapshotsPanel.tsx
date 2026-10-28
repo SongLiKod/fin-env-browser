@@ -5,6 +5,7 @@ import { ipc } from '@/ipc/client';
 import { useAuthStore } from '@/store/auth';
 import { toastError, useToastStore } from '@/store/toast';
 import { formatDate } from '@/utils';
+import { envHasAccess } from '@/utils/environment';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, EmptyState, Spinner } from '@/components/ui/card';
@@ -20,7 +21,9 @@ export function SnapshotsPanel({
   onUpdated: (env: EnvironmentView) => void;
 }) {
   const toast = useToastStore();
-  const canEdit = useAuthStore((state) => state.can('edit_fingerprint_proxy'));
+  const canEdit =
+    useAuthStore((state) => state.can('edit_fingerprint_proxy')) &&
+    envHasAccess(env, 'manage');
   const [snapshots, setSnapshots] = React.useState<FingerprintSnapshot[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [createOpen, setCreateOpen] = React.useState(false);
