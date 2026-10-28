@@ -113,6 +113,8 @@ pub mod actions {
     pub const BROADCAST_STOP: &str = "broadcast.stop";
     pub const BROADCAST_PAUSE: &str = "broadcast.pause";
     pub const BROADCAST_RESUME: &str = "broadcast.resume";
+    pub const ENV_MEMBER_SET: &str = "env.member_set";
+    pub const ENV_MEMBER_REMOVE: &str = "env.member_remove";
     pub const CAPTCHA_HANDLE: &str = "captcha.handle";
     pub const SETTINGS_UPDATE: &str = "settings.update";
     pub const THEME_UPDATE: &str = "theme.update";

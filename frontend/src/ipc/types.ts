@@ -12,7 +12,8 @@ export type PermissionKey =
   | 'audit_view'
   | 'settings_manage'
   | 'user_manage'
-  | 'api_key_manage';
+  | 'api_key_manage'
+  | 'manage_env_members';
 
 export interface User {
   id: string;
@@ -205,6 +206,31 @@ export interface EnvironmentView extends Environment {
   runtime: BrowserRuntime | null;
   accountCount: number;
   snapshotCount: number;
+}
+
+export interface EnvironmentMember {
+  userId: string;
+  username: string;
+  displayName: string;
+  role: Role;
+  enabled: boolean;
+  accessLevel: 'view' | 'operate' | 'manage' | string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EnvironmentMemberCandidate {
+  userId: string;
+  username: string;
+  displayName: string;
+  role: Role;
+  enabled: boolean;
+  accessLevel: 'view' | 'operate' | 'manage' | string | null;
+}
+
+export interface EnvironmentMemberInput {
+  userId: string;
+  accessLevel: 'view' | 'operate' | 'manage';
 }
 
 export interface EnvironmentIpInfo {

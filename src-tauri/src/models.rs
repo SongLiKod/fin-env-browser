@@ -95,6 +95,37 @@ pub struct EnvironmentView {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct EnvironmentMember {
+    pub user_id: String,
+    pub username: String,
+    pub display_name: String,
+    pub role: String,
+    pub enabled: bool,
+    pub access_level: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentMemberCandidate {
+    pub user_id: String,
+    pub username: String,
+    pub display_name: String,
+    pub role: String,
+    pub enabled: bool,
+    pub access_level: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentMemberInput {
+    pub user_id: String,
+    pub access_level: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EnvironmentTemplate {
     pub id: String,
     pub name: String,

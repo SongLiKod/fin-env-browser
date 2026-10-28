@@ -334,6 +334,8 @@ fin-env-browser/
 
 8\. environment\_templates 环境模板表：id、name、description、业务字段、fingerprint\_json、标识色/宽度、group\_id、proxy\_mode（none/fixed/pool）、proxy\_id、extension\_ids、资源限制
 
+9\. environment\_members 环境成员表：env\_id、user\_id、access\_level（view/operate/manage）、created\_at、updated\_at；非超级管理员只能访问被分配的环境
+
 
 
 所有敏感字段：password\_enc、cookie 等，AES256 加密存储，密钥本地派生，不硬编码。
@@ -455,6 +457,8 @@ Rust 后台线程定时轮询所有子进程 PID，读取 CPU、内存；超过�
 4\. 所有子进程操作、高危接口必须写入审计日志
 
 5\. 禁止在前端存储任何明文敏感信息
+
+6\. 非超级管理员访问环境时，必须同时通过全局角色权限和 `environment_members` 环境成员级别校验；列表查询按成员关系过滤，禁止只依赖前端隐藏。
 
 
 

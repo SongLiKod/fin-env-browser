@@ -69,7 +69,8 @@
 
 ## 8. 团队权限与审计（P1）
 
-- 四种角色 + 12 项细粒度权限：`capability/mod.rs`，Tauri 命令和 API 双重检查。
+- 四种角色 + 13 项细粒度权限：`capability/mod.rs`，Tauri 命令和 API 双重检查。
+- 环境级访问控制：`environment_members` 保存成员与 `view/operate/manage` 级别；非超级管理员的环境列表按成员关系过滤，环境详情、账号、指纹、浏览器、代理、Hosts/Mock、扩展、快照等操作同时校验环境访问级别；创建者自动获得管理权限。
 - 高危导出全局开关：`Settings.allow_sensitive_export`。
 - 审计字段、哈希链、禁止 UPDATE/DELETE 触发器、JSON/CSV 导出：`db/audit.rs`、`Audit.tsx`。
 - 用户管理与密码修改：`Settings` 团队页 + 侧栏修改密码。
@@ -91,7 +92,7 @@
 - 安全：Capability 白名单（核心 + dialog），无 fs/shell/http 插件权限；CDP 仅 127.0.0.1。
 - 稳定性：SQLite 迁移；升级前自动快照与备份；浏览器进程独立于面板。
 - 兼容：Windows/macOS/Linux Tauri 配置与 CI 矩阵。
-- 性能：进程调度 tokio；前端构建产物 ~507KB JS（gzip ~149KB）；启动目标 ≤2s 依赖本机环境。
+- 性能：进程调度 tokio；前端构建产物 ~512KB JS（gzip ~150KB）；启动目标 ≤2s 依赖本机环境。
 
 ## 12. 可重复校验命令
 
@@ -118,7 +119,7 @@ cargo test
 - `sdk/js npm test`：4/4 通过（URL/Header/JSON/错误映射）
 - `sdk/python python -m unittest`：4/4 通过（查询构造/请求体/错误映射/环境变量）
 - Python 3.12 `py_compile`：通过
-- `node scripts/verify.mjs`：通过，0 提示（122 个 Tauri 命令注册、122 个前端 IPC 命令覆盖、37 条 API 路由、19 张表、Capability、主题 Token、需求/技术文档能力追踪）
+- `node scripts/verify.mjs`：通过，0 提示（126 个 Tauri 命令注册、126 个前端 IPC 命令覆盖、37 条 API 路由、20 张表、Capability、主题 Token、需求/技术文档能力追踪）
 - `cargo fmt --check`：通过
 - `cargo check`：通过
 - `cargo clippy --all-targets -- -D warnings`：通过（0 warning）
@@ -232,3 +233,16 @@ cargo test
   - 展开态截图确认完整侧栏与运行环境标记；折叠后侧栏实测宽度 64px，`data-collapsed=true` 且 `localStorage` 为 `1`；再次展开宽度 232px、状态恢复为 `0`。
   - 运行环境行 `innerText` 同时包含「运行中」与 `PID <pid>`，绿色标记颜色为 `rgb(0, 180, 42)`。
   - 浏览器 console 无 error；`npm --prefix frontend run check` 通过。
+
+## 20. �������Ŷӳ�Ա���ʿ���
+
+- **����ģ��**��Ǩ�� 006 ���� `environment_members`��env_id��user_id��access_level��created_at��updated_at������ `users` �� `environments` ��������ɫ��Ȼ��ȫ�ֹ���Ȩ�ޣ�������Ա�������������ƿɲ����ľ��廷����
+- **���ʼ���**��`view` �ɲ鿴�������˺��б���`operate` ������/�رա���ͼ��������ά���˺��� Hosts/Mock��`manage` ���޸Ļ�����ָ�ơ����������ա���չ��������Ա����������/��¡/����/ģ����������ʱ�������Զ���� `manage`��
+- **ǿ��У��**�������б�����Ա��ϵ���ˣ�`env_get`���˺š�ָ�ơ����ա�������Hosts/Mock����չ���������ͬ�����Ƶ�����ͬʱУ��ȫ�ֽ�ɫȨ�޺ͻ������ʼ��𣻷ǳ�Աֱ�ӷ��ʷ��� `403`����������Աʼ�տɷ���ȫ��������
+- **�������**�������������������ʳ�Ա��ҳǩ����������Ա�Ͳ��Ը����ˣ�`manage_env_members`��������/����/�Ƴ���Ա�����Թ���ʦ�޳�Ա����Ȩ�ޡ�
+- **API ˵��**��REST API ��Կ��Ϊ����Ա���Զ���ƾ֤���������Ŷӳ�Ա�������䣻�Ŷӳ�Ա���������� FinEnv ����¼�Ự��
+- **��֤**��
+  - �������� A/B ����Թ���ʦ�û�������Ա���û����䵽 A �Ҽ���Ϊ `operate`��`env_member_list` ���� `admin:manage` �� `tester:operate`��
+  - ���Թ���ʦ��¼�� `env_list` ֻ���� A��`env_get(B)` �� `browser_open(B)` �����ؽ�ֹ���ʣ����� A ������`env_member_candidates(A)` ��ȱ�� `manage_env_members` ���ܾ���
+  - WebView2 CDP ��ͼȷ�Ϲ���Ա�����ʳ�Ա��ҳǩչʾ��Ա������ѡ������/�Ƴ������Թ���ʦ�����б�ֻ��ʾ�����价����
+  - `cargo fmt` / `cargo clippy --all-targets -- -D warnings` ͨ����ǰ�� typecheck/build ͨ����

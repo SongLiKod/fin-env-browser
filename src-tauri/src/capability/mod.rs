@@ -22,6 +22,43 @@ pub enum Permission {
     SettingsManage,
     UserManage,
     ApiKeyManage,
+    ManageEnvMembers,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum EnvAccess {
+    View,
+    Operate,
+    Manage,
+}
+
+impl EnvAccess {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::View => "查看",
+            Self::Operate => "操作",
+            Self::Manage => "管理",
+        }
+    }
+}
+
+pub fn valid_env_access(level: &str) -> bool {
+    matches!(level, "view" | "operate" | "manage")
+}
+
+pub fn env_access_rank(level: &str) -> Option<u8> {
+    match level {
+        "view" => Some(0),
+        "operate" => Some(1),
+        "manage" => Some(2),
+        _ => None,
+    }
+}
+
+pub fn env_access_allows(level: &str, required: EnvAccess) -> bool {
+    env_access_rank(level)
+        .map(|rank| rank >= required as u8)
+        .unwrap_or(false)
 }
 
 impl Permission {
@@ -39,6 +76,7 @@ impl Permission {
             Self::SettingsManage => "settings_manage",
             Self::UserManage => "user_manage",
             Self::ApiKeyManage => "api_key_manage",
+            Self::ManageEnvMembers => "manage_env_members",
         }
     }
 
@@ -56,6 +94,7 @@ impl Permission {
             Self::SettingsManage => "系统设置",
             Self::UserManage => "用户与角色",
             Self::ApiKeyManage => "API 密钥管理",
+            Self::ManageEnvMembers => "管理环境成员",
         }
     }
 
@@ -73,6 +112,7 @@ impl Permission {
             Self::SettingsManage => "资源限制、API 服务、备份同步等设置",
             Self::UserManage => "新增用户、分配角色、重置密码",
             Self::ApiKeyManage => "创建与吊销 API 密钥",
+            Self::ManageEnvMembers => "为环境分配团队成员与访问级别",
         }
     }
 }
@@ -98,6 +138,7 @@ pub fn role_permissions(role: &str) -> Vec<Permission> {
             SettingsManage,
             UserManage,
             ApiKeyManage,
+            ManageEnvMembers,
         ],
         "test_lead" => vec![
             ViewList,
@@ -109,6 +150,7 @@ pub fn role_permissions(role: &str) -> Vec<Permission> {
             ExportSensitive,
             AuditView,
             SettingsManage,
+            ManageEnvMembers,
         ],
         "test_engineer" => vec![
             ViewList,
@@ -155,6 +197,7 @@ pub fn permission_matrix() -> Vec<PermissionDef> {
         Permission::SettingsManage,
         Permission::UserManage,
         Permission::ApiKeyManage,
+        Permission::ManageEnvMembers,
     ]
     .into_iter()
     .map(|perm| PermissionDef {

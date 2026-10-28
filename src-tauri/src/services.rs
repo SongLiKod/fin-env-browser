@@ -48,6 +48,33 @@ pub fn list_environments(
         .collect()
 }
 
+pub fn list_environments_visible(
+    state: &SharedState,
+    filter: &EnvironmentFilter,
+    user: &crate::models::User,
+) -> Result<Vec<EnvironmentView>> {
+    let allowed = state.accessible_environment_ids(user)?;
+    let envs = state.db.list_environments(filter)?;
+    let filtered = match allowed {
+        Some(ids) => envs
+            .into_iter()
+            .filter(|env| ids.contains(&env.id))
+            .collect::<Vec<_>>(),
+        None => envs,
+    };
+    filtered
+        .into_iter()
+        .map(|env| environment_view(state, env))
+        .collect()
+}
+
+pub fn assign_environment_manager(state: &SharedState, env_id: &str, user_id: &str) -> Result<()> {
+    state
+        .db
+        .upsert_environment_member(env_id, user_id, "manage")?;
+    Ok(())
+}
+
 pub fn get_environment(state: &SharedState, id: &str) -> Result<EnvironmentView> {
     environment_view(state, state.db.get_environment(id)?)
 }

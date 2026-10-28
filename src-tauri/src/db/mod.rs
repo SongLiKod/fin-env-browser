@@ -14,6 +14,7 @@ pub mod account;
 pub mod audit;
 pub mod auxiliary;
 pub mod env;
+pub mod member;
 pub mod proxy;
 pub mod settings;
 pub mod stats;
@@ -312,6 +313,10 @@ impl Db {
             (
                 "005_environment_templates",
                 include_str!("../../migrations/005_environment_templates.sql"),
+            ),
+            (
+                "006_environment_members",
+                include_str!("../../migrations/006_environment_members.sql"),
             ),
         ];
         let current: i64 =

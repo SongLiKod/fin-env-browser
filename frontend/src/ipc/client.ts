@@ -27,6 +27,9 @@ import {
   type DashboardStats,
   type EnvironmentFilter,
   type EnvironmentIpInfo,
+  type EnvironmentMember,
+  type EnvironmentMemberCandidate,
+  type EnvironmentMemberInput,
   type EnvironmentTemplate,
   type EnvironmentView,
   type Extension,
@@ -133,6 +136,14 @@ export const ipc = {
     call<EnvironmentView[]>('env_bulk_import', { paths, passphrase }),
   envProjects: () => call<string[]>('env_projects'),
   envTags: () => call<string[]>('env_tags'),
+  envMemberList: (envId: string) =>
+    call<EnvironmentMember[]>('env_member_list', { envId }),
+  envMemberCandidates: (envId: string) =>
+    call<EnvironmentMemberCandidate[]>('env_member_candidates', { envId }),
+  envMemberSet: (envId: string, input: EnvironmentMemberInput) =>
+    call<EnvironmentMember[]>('env_member_set', { envId, input }),
+  envMemberRemove: (envId: string, userId: string) =>
+    call<EnvironmentMember[]>('env_member_remove', { envId, userId }),
 
   // environment templates
   templateList: () => call<EnvironmentTemplate[]>('template_list'),

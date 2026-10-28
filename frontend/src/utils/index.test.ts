@@ -57,7 +57,7 @@ describe('labels', () => {
   it('has labels for every role and permission', () => {
     expect(Object.keys(roleLabels)).toHaveLength(4);
     expect(Object.values(roleLabels).every(Boolean)).toBe(true);
-    expect(Object.keys(permissionLabels)).toHaveLength(12);
+    expect(Object.keys(permissionLabels)).toHaveLength(13);
   });
 
   it('covers core audit actions', () => {

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     path::PathBuf,
     sync::{Arc, Mutex, RwLock},
 };
@@ -6,7 +7,7 @@ use std::{
 use crate::{
     api_server::ApiServerHandle,
     audit_log::{actions, Audit},
-    capability::{self, Permission},
+    capability::{self, EnvAccess, Permission},
     crypto::CryptoManager,
     db::Db,
     error::{AppError, Result},
@@ -121,6 +122,42 @@ impl AppState {
         Ok(user)
     }
 
+    /// Returns `None` for super administrators (all environments) and a set of
+    /// explicitly assigned environment IDs for every other role.
+    pub fn accessible_environment_ids(&self, user: &User) -> Result<Option<HashSet<String>>> {
+        if user.role == "super_admin" {
+            return Ok(None);
+        }
+        Ok(Some(
+            self.db
+                .list_environment_ids_for_user(&user.id)?
+                .into_iter()
+                .collect(),
+        ))
+    }
+
+    pub fn check_environment_access(
+        &self,
+        user: &User,
+        env_id: &str,
+        required: EnvAccess,
+    ) -> Result<()> {
+        if user.role == "super_admin" {
+            return Ok(());
+        }
+        let Some(level) = self.db.environment_member_level(env_id, &user.id)? else {
+            return Err(AppError::forbidden("当前团队成员未被分配到该环境"));
+        };
+        if !capability::env_access_allows(&level, required) {
+            return Err(AppError::forbidden(format!(
+                "当前成员在该环境只有「{}」权限，无法执行「{}」操作",
+                level_label(&level),
+                required.label()
+            )));
+        }
+        Ok(())
+    }
+
     pub fn require_sensitive(&self, permission: Permission, confirmed: bool) -> Result<User> {
         let user = self.require(permission)?;
         if !self.settings().allow_sensitive_export {
@@ -225,6 +262,15 @@ impl AppState {
     pub fn authenticate_api_key(&self, secret: &str) -> Result<Option<crate::models::ApiKey>> {
         let hash = crate::db::settings::hash_api_key(secret);
         self.db.authenticate_api_key(&hash)
+    }
+}
+
+fn level_label(level: &str) -> &'static str {
+    match level {
+        "view" => "查看",
+        "operate" => "操作",
+        "manage" => "管理",
+        _ => "未知",
     }
 }
 

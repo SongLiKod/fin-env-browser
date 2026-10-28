@@ -42,11 +42,14 @@ for (const file of [
   'src-tauri/migrations/003_environment_identity.sql',
   'src-tauri/migrations/004_environment_border_width.sql',
   'src-tauri/migrations/005_environment_templates.sql',
+  'src-tauri/migrations/006_environment_members.sql',
   'src-tauri/src/process/mod.rs',
   'src-tauri/src/process/overlay.rs',
   'src-tauri/src/process/broadcast.rs',
   'src-tauri/src/start_page.rs',
   'src-tauri/src/db/template.rs',
+  'src-tauri/src/db/member.rs',
+  'frontend/src/components/env/AccessPanel.tsx',
   'frontend/src/components/env/BroadcastControlDialog.tsx',
   'frontend/src/components/layout/BroadcastBar.tsx',
   'src-tauri/src/cdp/mod.rs',
@@ -146,7 +149,12 @@ if (!/CREATE TABLE IF NOT EXISTS environment_templates\b/.test(templates)) fail(
 for (const column of ['fingerprint_json', 'proxy_mode', 'proxy_id', 'extension_ids', 'border_color', 'border_width']) {
   if (!templates.includes(column)) fail(`环境模板迁移缺少 ${column}`);
 }
-ok('全部核心表、审计触发器、环境身份字段、环境模板表存在');
+const members = read('src-tauri/migrations/006_environment_members.sql');
+if (!/CREATE TABLE IF NOT EXISTS environment_members\b/.test(members)) fail('缺少环境成员数据表');
+for (const column of ['env_id', 'user_id', 'access_level']) {
+  if (!members.includes(column)) fail(`环境成员迁移缺少 ${column}`);
+}
+ok('全部核心表、审计触发器、环境身份字段、环境模板表、环境成员表存在');
 
 console.log('\n[6] 安全与主题令牌');
 const capability = read('src-tauri/capabilities/default.json');
@@ -164,7 +172,7 @@ ok('CSS Token / 暗色 / 密度完整');
 console.log('\n[7] 需求文档关键能力');
 const requirement = read('docs/fin-env-requirement.md');
 const tech = read('docs/fin-env-tech.md');
-for (const phrase of ['指纹快照', '代理池', 'REST API', 'AES256', '审计日志', '主题配置', '资源管控', '环境模板', '多环境批量操作', '同步控制']) {
+for (const phrase of ['指纹快照', '代理池', 'REST API', 'AES256', '审计日志', '主题配置', '资源管控', '环境模板', '多环境批量操作', '同步控制', '环境级权限']) {
   if (!requirement.includes(phrase)) fail(`需求文档缺少「${phrase}」`);
 }
 for (const phrase of ['AES256-GCM', '主题自定义', 'CDP', 'Axum', 'rusqlite']) {

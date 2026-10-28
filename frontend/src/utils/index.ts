@@ -171,6 +171,7 @@ export const permissionLabels: Record<PermissionKey, string> = {
   settings_manage: '系统设置',
   user_manage: '用户与角色',
   api_key_manage: 'API 密钥管理',
+  manage_env_members: '管理环境成员',
 };
 
 export const envStatusMeta: Record<EnvStatus, { label: string; tone: 'success' | 'muted' | 'warning' }> = {

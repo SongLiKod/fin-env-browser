@@ -49,8 +49,9 @@ import { NetworkingPanel } from '@/components/env/NetworkingPanel';
 import { ExtensionsPanel } from '@/components/env/ExtensionsPanel';
 import { DetectionPanel } from '@/components/env/DetectionPanel';
 import { DebugPanel } from '@/components/env/DebugPanel';
+import { AccessPanel } from '@/components/env/AccessPanel';
 
-const tabIds = ['overview', 'fingerprint', 'accounts', 'snapshots', 'network', 'extensions', 'detect', 'debug'] as const;
+const tabIds = ['overview', 'fingerprint', 'accounts', 'snapshots', 'network', 'extensions', 'access', 'detect', 'debug'] as const;
 type TabId = (typeof tabIds)[number];
 
 export function EnvironmentDetailPage() {
@@ -378,6 +379,7 @@ export function EnvironmentDetailPage() {
           { value: 'snapshots', label: '指纹快照', badge: env.snapshotCount || undefined },
           { value: 'network', label: '网络与 Mock' },
           { value: 'extensions', label: '扩展' },
+          { value: 'access', label: '访问成员' },
           { value: 'detect', label: '检测报告' },
           { value: 'debug', label: '调试与自动化' },
         ]}
@@ -397,6 +399,7 @@ export function EnvironmentDetailPage() {
         {tab === 'snapshots' ? <SnapshotsPanel env={env} onUpdated={applyEnv} /> : null}
         {tab === 'network' ? <NetworkingPanel env={env} proxies={proxies} onUpdated={applyEnv} /> : null}
         {tab === 'extensions' ? <ExtensionsPanel env={env} /> : null}
+        {tab === 'access' ? <AccessPanel env={env} /> : null}
         {tab === 'detect' ? <DetectionPanel env={env} /> : null}
         {tab === 'debug' ? <DebugPanel env={env} onRefresh={refresh} /> : null}
       </div>

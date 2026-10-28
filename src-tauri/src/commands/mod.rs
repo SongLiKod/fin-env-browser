@@ -6,13 +6,14 @@ use tauri::State;
 use crate::{
     audit_log::{actions, Audit},
     backup,
-    capability::{self, Permission},
+    capability::{self, EnvAccess, Permission},
     error::{AppError, Result},
     fingerprint, fingerprint_report,
     models::{
         now_iso, AccountExportRow, AccountInput, ApiKey, AuditFilter, CreateEnvironmentInput,
-        CreatedApiKey, EnvironmentFilter, GroupInput, HostsEntryInput, OpenOptions, ProxyInput,
-        Settings, ThemeConfig, UpdateAccountInput, UpdateEnvironmentInput, UpdateProxyInput,
+        CreatedApiKey, EnvironmentFilter, EnvironmentMember, EnvironmentMemberCandidate,
+        EnvironmentMemberInput, GroupInput, HostsEntryInput, OpenOptions, ProxyInput, Settings,
+        ThemeConfig, UpdateAccountInput, UpdateEnvironmentInput, UpdateProxyInput,
         UpdateSettingsInput, UserInput, UserUpdateInput,
     },
     package, paths, services,
@@ -98,8 +99,8 @@ pub fn env_list(
     filter: Option<EnvironmentFilter>,
 ) -> Result<Vec<crate::models::EnvironmentView>> {
     let state = state.inner().clone();
-    state.require(Permission::ViewList)?;
-    services::list_environments(&state, &filter.unwrap_or_default())
+    let user = state.require(Permission::ViewList)?;
+    services::list_environments_visible(&state, &filter.unwrap_or_default(), &user)
 }
 
 #[tauri::command]
@@ -108,7 +109,8 @@ pub fn env_get(
     id: String,
 ) -> Result<crate::models::EnvironmentView> {
     let state = state.inner().clone();
-    state.require(Permission::ViewList)?;
+    let user = state.require(Permission::ViewList)?;
+    state.check_environment_access(&user, &id, EnvAccess::View)?;
     services::get_environment(&state, &id)
 }
 
@@ -127,7 +129,9 @@ pub fn template_create_from_env(
     input: crate::models::CreateTemplateFromEnvInput,
 ) -> Result<crate::models::EnvironmentTemplate> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::CreateEnv)?.username;
+    let user = state.require(Permission::CreateEnv)?;
+    state.check_environment_access(&user, &input.env_id, EnvAccess::Operate)?;
+    let actor = user.username;
     services::create_template_from_env(&state, input, &actor)
 }
 
@@ -161,8 +165,13 @@ pub fn template_batch_create(
     input: crate::models::BatchCreateTemplateInput,
 ) -> Result<crate::models::BatchCreateResult> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::CreateEnv)?.username;
-    services::batch_create_from_template(&state, input, &actor)
+    let user = state.require(Permission::CreateEnv)?;
+    let actor = user.username.clone();
+    let result = services::batch_create_from_template(&state, input, &actor)?;
+    for env in &result.created {
+        services::assign_environment_manager(&state, &env.id, &user.id)?;
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -171,7 +180,9 @@ pub async fn env_check_ip(
     id: String,
 ) -> Result<crate::models::EnvironmentIpInfo> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::ViewList)?.username;
+    let user = state.require(Permission::ViewList)?;
+    state.check_environment_access(&user, &id, EnvAccess::View)?;
+    let actor = user.username;
     services::check_environment_ip(&state, &id, &actor).await
 }
 
@@ -181,8 +192,9 @@ pub fn env_create(
     input: CreateEnvironmentInput,
 ) -> Result<crate::models::EnvironmentView> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::CreateEnv)?.username;
-    let env = services::create_environment(&state, input, &actor)?;
+    let user = state.require(Permission::CreateEnv)?;
+    let env = services::create_environment(&state, input, &user.username)?;
+    services::assign_environment_manager(&state, &env.id, &user.id)?;
     services::environment_view(&state, env)
 }
 
@@ -193,7 +205,9 @@ pub async fn env_update(
     input: UpdateEnvironmentInput,
 ) -> Result<crate::models::EnvironmentView> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
+    let user = state.require(Permission::EditEnv)?;
+    state.check_environment_access(&user, &id, EnvAccess::Manage)?;
+    let actor = user.username;
     let env = services::update_environment(&state, &id, input, &actor).await?;
     services::environment_view(&state, env)
 }
@@ -201,7 +215,9 @@ pub async fn env_update(
 #[tauri::command]
 pub async fn env_delete(state: State<'_, SharedState>, id: String, confirm: bool) -> Result<()> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::DeleteEnv)?.username;
+    let user = state.require(Permission::DeleteEnv)?;
+    state.check_environment_access(&user, &id, EnvAccess::Manage)?;
+    let actor = user.username;
     if !confirm {
         return Err(AppError::code_with(
             "confirmation_required",
@@ -218,7 +234,11 @@ pub async fn env_bulk_delete(
     confirm: bool,
 ) -> Result<u32> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::DeleteEnv)?.username;
+    let user = state.require(Permission::DeleteEnv)?;
+    for id in &ids {
+        state.check_environment_access(&user, id, EnvAccess::Manage)?;
+    }
+    let actor = user.username.clone();
     if !confirm {
         return Err(AppError::code_with(
             "confirmation_required",
@@ -235,8 +255,10 @@ pub fn env_clone(
     name: Option<String>,
 ) -> Result<crate::models::EnvironmentView> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::CloneEnv)?.username;
-    let env = services::clone_environment(&state, &id, name, &actor)?;
+    let user = state.require(Permission::CloneEnv)?;
+    state.check_environment_access(&user, &id, EnvAccess::Operate)?;
+    let env = services::clone_environment(&state, &id, name, &user.username)?;
+    services::assign_environment_manager(&state, &env.id, &user.id)?;
     services::environment_view(&state, env)
 }
 
@@ -250,9 +272,11 @@ pub fn env_export(
     confirm: bool,
 ) -> Result<usize> {
     let state = state.inner().clone();
-    let actor = state
-        .require_sensitive(Permission::ExportSensitive, confirm)?
-        .username;
+    let user = state.require_sensitive(Permission::ExportSensitive, confirm)?;
+    for id in &ids {
+        state.check_environment_access(&user, id, EnvAccess::View)?;
+    }
+    let actor = user.username;
     let envs: Vec<_> = ids
         .iter()
         .map(|id| state.db.get_environment(id))
@@ -288,7 +312,7 @@ pub fn env_import(
     passphrase: String,
 ) -> Result<Vec<crate::models::EnvironmentView>> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::CreateEnv)?.username;
+    let user = state.require(Permission::CreateEnv)?;
     let envs = package::import_environments(
         &state.db,
         &state.crypto,
@@ -297,9 +321,10 @@ pub fn env_import(
         &passphrase,
     )?;
     for env in &envs {
+        services::assign_environment_manager(&state, &env.id, &user.id)?;
         Audit::env(
             &state.db,
-            &actor,
+            &user.username,
             actions::ENV_IMPORT,
             env,
             format!("从加密环境包 {} 导入", path),
@@ -319,7 +344,7 @@ pub fn env_bulk_import(
     let mut all = Vec::new();
     for path in paths {
         let state = state.inner().clone();
-        let actor = state.require(Permission::CreateEnv)?.username;
+        let user = state.require(Permission::CreateEnv)?;
         let envs = package::import_environments(
             &state.db,
             &state.crypto,
@@ -328,9 +353,10 @@ pub fn env_bulk_import(
             &passphrase,
         )?;
         for env in &envs {
+            services::assign_environment_manager(&state, &env.id, &user.id)?;
             Audit::env(
                 &state.db,
-                &actor,
+                &user.username,
                 actions::ENV_IMPORT,
                 env,
                 format!("批量导入加密环境包 {}", path),
@@ -355,6 +381,87 @@ pub fn env_tags(state: State<'_, SharedState>) -> Result<Vec<String>> {
     let state = state.inner().clone();
     state.require(Permission::ViewList)?;
     state.db.all_tags()
+}
+
+#[tauri::command]
+pub fn env_member_list(
+    state: State<'_, SharedState>,
+    env_id: String,
+) -> Result<Vec<EnvironmentMember>> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::ViewList)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::View)?;
+    state.db.list_environment_members(&env_id)
+}
+
+#[tauri::command]
+pub fn env_member_candidates(
+    state: State<'_, SharedState>,
+    env_id: String,
+) -> Result<Vec<EnvironmentMemberCandidate>> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::ManageEnvMembers)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Manage)?;
+    state.db.list_environment_member_candidates(&env_id)
+}
+
+#[tauri::command]
+pub fn env_member_set(
+    state: State<'_, SharedState>,
+    env_id: String,
+    input: EnvironmentMemberInput,
+) -> Result<Vec<EnvironmentMember>> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::ManageEnvMembers)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Manage)?;
+    if !capability::valid_env_access(&input.access_level) {
+        return Err(AppError::bad_request(
+            "访问级别需为 view / operate / manage",
+        ));
+    }
+    let target = state.db.get_user(&input.user_id)?;
+    if target.id == user.id {
+        return Err(AppError::bad_request("不能修改自己的环境访问级别"));
+    }
+    state
+        .db
+        .upsert_environment_member(&env_id, &input.user_id, &input.access_level)?;
+    Audit::global(
+        &state.db,
+        &user.username,
+        actions::ENV_MEMBER_SET,
+        format!(
+            "设置环境成员：{}（{}）为 {}",
+            target.display_name, target.username, input.access_level
+        ),
+    )?;
+    state.db.list_environment_members(&env_id)
+}
+
+#[tauri::command]
+pub fn env_member_remove(
+    state: State<'_, SharedState>,
+    env_id: String,
+    user_id: String,
+) -> Result<Vec<EnvironmentMember>> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::ManageEnvMembers)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Manage)?;
+    if user_id == user.id {
+        return Err(AppError::bad_request("不能移除自己的环境访问权限"));
+    }
+    let target = state.db.get_user(&user_id)?;
+    state.db.remove_environment_member(&env_id, &user_id)?;
+    Audit::global(
+        &state.db,
+        &user.username,
+        actions::ENV_MEMBER_REMOVE,
+        format!(
+            "移除环境成员：{}（{}）",
+            target.display_name, target.username
+        ),
+    )?;
+    state.db.list_environment_members(&env_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +522,11 @@ pub fn env_assign_group(
     group_id: Option<String>,
 ) -> Result<u32> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
+    let user = state.require(Permission::EditEnv)?;
+    for id in &ids {
+        state.check_environment_access(&user, id, EnvAccess::Manage)?;
+    }
+    let actor = user.username.clone();
     let count = state.db.set_environment_group(&ids, group_id.as_deref())? as u32;
     Audit::global(
         &state.db,
@@ -436,7 +547,8 @@ pub fn account_list(
     env_id: String,
 ) -> Result<Vec<crate::models::Account>> {
     let state = state.inner().clone();
-    state.require(Permission::ViewList)?;
+    let user = state.require(Permission::ViewList)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::View)?;
     state.db.list_accounts(&env_id)
 }
 
@@ -446,8 +558,9 @@ pub fn account_create(
     input: AccountInput,
 ) -> Result<crate::models::Account> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
-    services::create_account(&state, input, &actor)
+    let user = state.require(Permission::EditEnv)?;
+    state.check_environment_access(&user, &input.env_id, EnvAccess::Operate)?;
+    services::create_account(&state, input, &user.username)
 }
 
 #[tauri::command]
@@ -457,24 +570,28 @@ pub fn account_update(
     input: UpdateAccountInput,
 ) -> Result<crate::models::Account> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
-    services::update_account(&state, &id, input, &actor)
+    let user = state.require(Permission::EditEnv)?;
+    let account = state.db.get_account(&id)?;
+    state.check_environment_access(&user, &account.env_id, EnvAccess::Operate)?;
+    services::update_account(&state, &id, input, &user.username)
 }
 
 #[tauri::command]
 pub fn account_delete(state: State<'_, SharedState>, id: String) -> Result<()> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
-    services::delete_account(&state, &id, &actor)
+    let user = state.require(Permission::EditEnv)?;
+    let account = state.db.get_account(&id)?;
+    state.check_environment_access(&user, &account.env_id, EnvAccess::Operate)?;
+    services::delete_account(&state, &id, &user.username)
 }
 
 #[tauri::command]
 pub fn account_reveal(state: State<'_, SharedState>, id: String, confirm: bool) -> Result<String> {
     let state = state.inner().clone();
-    let actor = state
-        .require_sensitive(Permission::ExportSensitive, confirm)?
-        .username;
-    services::reveal_password(&state, &id, &actor)
+    let user = state.require_sensitive(Permission::ExportSensitive, confirm)?;
+    let account = state.db.get_account(&id)?;
+    state.check_environment_access(&user, &account.env_id, EnvAccess::View)?;
+    services::reveal_password(&state, &id, &user.username)
 }
 
 #[tauri::command]
@@ -484,8 +601,9 @@ pub fn account_import(
     rows: Vec<AccountExportRow>,
 ) -> Result<u32> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
-    services::import_accounts(&state, &env_id, &rows, &actor)
+    let user = state.require(Permission::EditEnv)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    services::import_accounts(&state, &env_id, &rows, &user.username)
 }
 
 #[tauri::command]
@@ -496,7 +614,8 @@ pub fn account_import_file(
     passphrase: String,
 ) -> Result<u32> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
+    let user = state.require(Permission::EditEnv)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
     let count = package::import_accounts_file(
         &state.db,
         &state.crypto,
@@ -507,7 +626,7 @@ pub fn account_import_file(
     let env = state.db.get_environment(&env_id)?;
     Audit::env(
         &state.db,
-        &actor,
+        &user.username,
         actions::ACCOUNT_IMPORT,
         &env,
         format!("从文件导入账号 {count} 条"),
@@ -524,9 +643,11 @@ pub fn account_export(
     confirm: bool,
 ) -> Result<usize> {
     let state = state.inner().clone();
-    let actor = state
-        .require_sensitive(Permission::ExportSensitive, confirm)?
-        .username;
+    let user = state.require_sensitive(Permission::ExportSensitive, confirm)?;
+    for env_id in &env_ids {
+        state.check_environment_access(&user, env_id, EnvAccess::View)?;
+    }
+    let actor = user.username;
     let count = package::export_accounts(
         &state.db,
         &state.crypto,
@@ -569,8 +690,9 @@ pub async fn fingerprint_update(
     fp: fingerprint::Fingerprint,
 ) -> Result<crate::models::EnvironmentView> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditFingerprintProxy)?.username;
-    let env = services::update_fingerprint(&state, &env_id, fp, &actor)?;
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Manage)?;
+    let env = services::update_fingerprint(&state, &env_id, fp, &user.username)?;
     services::apply_fingerprint_if_running(&state, &env).await?;
     services::environment_view(&state, env)
 }
@@ -581,7 +703,9 @@ pub async fn fingerprint_detect(
     env_id: String,
 ) -> Result<crate::models::FingerprintReport> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    let actor = user.username;
     let env = state.db.get_environment(&env_id)?;
     if !state.browsers.is_running(&env_id) {
         state
@@ -607,7 +731,8 @@ pub fn fingerprint_reports(
     env_id: String,
 ) -> Result<Vec<crate::models::FingerprintReport>> {
     let state = state.inner().clone();
-    state.require(Permission::ViewList)?;
+    let user = state.require(Permission::ViewList)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::View)?;
     state.db.list_fingerprint_reports(&env_id, 20)
 }
 
@@ -617,7 +742,8 @@ pub fn snapshot_list(
     env_id: String,
 ) -> Result<Vec<crate::models::FingerprintSnapshot>> {
     let state = state.inner().clone();
-    state.require(Permission::ViewList)?;
+    let user = state.require(Permission::ViewList)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::View)?;
     state.db.list_snapshots(&env_id)
 }
 
@@ -628,8 +754,9 @@ pub fn snapshot_create(
     name: Option<String>,
 ) -> Result<crate::models::FingerprintSnapshot> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditFingerprintProxy)?.username;
-    services::create_snapshot(&state, &env_id, name, &actor)
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Manage)?;
+    services::create_snapshot(&state, &env_id, name, &user.username)
 }
 
 #[tauri::command]
@@ -638,21 +765,24 @@ pub async fn snapshot_restore(
     id: String,
 ) -> Result<crate::models::EnvironmentView> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditFingerprintProxy)?.username;
-    let env = services::restore_snapshot(&state, &id, &actor).await?;
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    let snapshot = state.db.get_snapshot(&id)?;
+    state.check_environment_access(&user, &snapshot.env_id, EnvAccess::Manage)?;
+    let env = services::restore_snapshot(&state, &id, &user.username).await?;
     services::environment_view(&state, env)
 }
 
 #[tauri::command]
 pub fn snapshot_delete(state: State<'_, SharedState>, id: String) -> Result<()> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditFingerprintProxy)?.username;
+    let user = state.require(Permission::EditFingerprintProxy)?;
     let snapshot = state.db.get_snapshot(&id)?;
+    state.check_environment_access(&user, &snapshot.env_id, EnvAccess::Manage)?;
     state.db.delete_snapshot(&id)?;
     if let Ok(env) = state.db.get_environment(&snapshot.env_id) {
         Audit::env(
             &state.db,
-            &actor,
+            &user.username,
             actions::SNAPSHOT_DELETE,
             &env,
             format!("删除快照 {} ({})", snapshot.name, id),
@@ -723,8 +853,11 @@ pub fn proxy_assign(
     proxy_id: Option<String>,
 ) -> Result<u32> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditFingerprintProxy)?.username;
-    services::assign_proxy(&state, &env_ids, proxy_id.as_deref(), &actor)
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    for id in &env_ids {
+        state.check_environment_access(&user, id, EnvAccess::Manage)?;
+    }
+    services::assign_proxy(&state, &env_ids, proxy_id.as_deref(), &user.username)
 }
 
 #[tauri::command]
@@ -733,8 +866,9 @@ pub async fn proxy_align(
     env_id: String,
 ) -> Result<crate::models::AlignProxyResult> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditFingerprintProxy)?.username;
-    services::align_proxy(&state, &env_id, &actor).await
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Manage)?;
+    services::align_proxy(&state, &env_id, &user.username).await
 }
 
 // ---------------------------------------------------------------------------
@@ -748,7 +882,9 @@ pub async fn browser_open(
     options: Option<OpenOptions>,
 ) -> Result<crate::models::BrowserRuntime> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    let actor = user.username;
     let env = state.db.get_environment(&env_id)?;
     let runtime = state
         .browsers
@@ -760,7 +896,9 @@ pub async fn browser_open(
 #[tauri::command]
 pub async fn browser_close(state: State<'_, SharedState>, env_id: String) -> Result<()> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    let actor = user.username;
     state
         .browsers
         .close(&env_id, &actor, "用户关闭环境", actions::ENV_CLOSE)
@@ -773,7 +911,8 @@ pub fn browser_status(
     env_id: String,
 ) -> Result<Option<crate::models::BrowserRuntime>> {
     let state = state.inner().clone();
-    state.require(Permission::ViewList)?;
+    let user = state.require(Permission::ViewList)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::View)?;
     Ok(state.browsers.get_runtime(&env_id))
 }
 
@@ -782,8 +921,16 @@ pub fn browser_list_running(
     state: State<'_, SharedState>,
 ) -> Result<Vec<crate::models::BrowserRuntime>> {
     let state = state.inner().clone();
-    state.require(Permission::ViewList)?;
-    Ok(state.browsers.list_runtimes())
+    let user = state.require(Permission::ViewList)?;
+    let allowed = state.accessible_environment_ids(&user)?;
+    let runtimes = state.browsers.list_runtimes();
+    Ok(match allowed {
+        Some(ids) => runtimes
+            .into_iter()
+            .filter(|runtime| ids.contains(&runtime.env_id))
+            .collect(),
+        None => runtimes,
+    })
 }
 
 #[tauri::command]
@@ -792,8 +939,9 @@ pub async fn browser_screenshot(
     env_id: String,
 ) -> Result<crate::models::ScreenshotResult> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
-    state.browsers.screenshot(&env_id, &actor).await
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    state.browsers.screenshot(&env_id, &user.username).await
 }
 
 #[tauri::command]
@@ -802,7 +950,9 @@ pub async fn browser_cookies_get(
     env_id: String,
 ) -> Result<Vec<crate::models::CookieRecord>> {
     let state = state.inner().clone();
-    let actor = state.require_export()?.username;
+    let user = state.require_export()?;
+    state.check_environment_access(&user, &env_id, EnvAccess::View)?;
+    let actor = user.username;
     if state.browsers.is_running(&env_id) {
         state.browsers.cookies_get(&env_id, &actor, true).await
     } else {
@@ -827,8 +977,12 @@ pub async fn browser_cookies_set(
     cookies: Vec<crate::models::CookieRecord>,
 ) -> Result<u32> {
     let state = state.inner().clone();
-    let actor = state.require_export()?.username;
-    state.browsers.cookies_set(&env_id, &cookies, &actor).await
+    let user = state.require_export()?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    state
+        .browsers
+        .cookies_set(&env_id, &cookies, &user.username)
+        .await
 }
 
 #[tauri::command]
@@ -838,7 +992,8 @@ pub async fn browser_execute(
     script: String,
 ) -> Result<Value> {
     let state = state.inner().clone();
-    state.require(Permission::OpenClose)?;
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
     state.browsers.execute(&env_id, &script).await
 }
 
@@ -849,14 +1004,16 @@ pub async fn browser_navigate(
     url: String,
 ) -> Result<String> {
     let state = state.inner().clone();
-    state.require(Permission::OpenClose)?;
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
     state.browsers.navigate(&env_id, &url).await
 }
 
 #[tauri::command]
 pub async fn browser_reload(state: State<'_, SharedState>, env_id: String) -> Result<()> {
     let state = state.inner().clone();
-    state.require(Permission::OpenClose)?;
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
     state.browsers.reload(&env_id).await
 }
 
@@ -866,8 +1023,11 @@ pub async fn broadcast_start(
     input: crate::models::BroadcastStartInput,
 ) -> Result<crate::models::BroadcastStatus> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
-    state.browsers.broadcast_start(input, &actor).await
+    let user = state.require(Permission::OpenClose)?;
+    for env_id in &input.env_ids {
+        state.check_environment_access(&user, env_id, EnvAccess::Operate)?;
+    }
+    state.browsers.broadcast_start(input, &user.username).await
 }
 
 #[tauri::command]
@@ -908,7 +1068,8 @@ pub fn browser_cdp_info(
     env_id: String,
 ) -> Result<crate::models::CdpInfo> {
     let state = state.inner().clone();
-    state.require(Permission::OpenClose)?;
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
     state.browsers.cdp_info(&env_id)
 }
 
@@ -919,7 +1080,9 @@ pub async fn browser_recording_start(
     interval_ms: Option<u64>,
 ) -> Result<crate::models::RecordingResult> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    let actor = user.username;
     state
         .browsers
         .start_recording(&env_id, interval_ms.unwrap_or(1000), &actor)
@@ -932,29 +1095,55 @@ pub async fn browser_recording_stop(
     env_id: String,
 ) -> Result<crate::models::RecordingResult> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
-    state.browsers.stop_recording(&env_id, &actor).await
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    state.browsers.stop_recording(&env_id, &user.username).await
 }
 
 #[tauri::command]
 pub async fn browser_har_start(state: State<'_, SharedState>, env_id: String) -> Result<()> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
-    state.browsers.start_har(&env_id, &actor).await
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    state.browsers.start_har(&env_id, &user.username).await
 }
 
 #[tauri::command]
 pub async fn browser_har_stop(state: State<'_, SharedState>, env_id: String) -> Result<String> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
-    state.browsers.stop_har(&env_id, &actor).await
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    state.browsers.stop_har(&env_id, &user.username).await
 }
 
 #[tauri::command]
 pub async fn browser_force_recycle_all(state: State<'_, SharedState>) -> Result<u32> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
-    state.browsers.force_recycle_all(&actor).await
+    let user = state.require(Permission::OpenClose)?;
+    let allowed = state.accessible_environment_ids(&user)?;
+    let Some(allowed) = allowed else {
+        return state.browsers.force_recycle_all(&user.username).await;
+    };
+    let ids = state
+        .browsers
+        .list_runtimes()
+        .into_iter()
+        .filter(|runtime| allowed.contains(&runtime.env_id))
+        .map(|runtime| runtime.env_id)
+        .collect::<Vec<_>>();
+    let count = ids.len() as u32;
+    for id in ids {
+        let _ = state
+            .browsers
+            .close(
+                &id,
+                &user.username,
+                "回收可访问的运行环境",
+                actions::ENV_RECYCLE,
+            )
+            .await;
+    }
+    Ok(count)
 }
 
 #[tauri::command]
@@ -965,23 +1154,29 @@ pub async fn browser_switch_proxy(
     restart: bool,
 ) -> Result<crate::models::EnvironmentView> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditFingerprintProxy)?.username;
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Manage)?;
     let running = state.browsers.is_running(&env_id);
     services::assign_proxy(
         &state,
         std::slice::from_ref(&env_id),
         proxy_id.as_deref(),
-        &actor,
+        &user.username,
     )?;
     if running && restart {
         state
             .browsers
-            .close(&env_id, &actor, "切换代理，重启浏览器", actions::ENV_CLOSE)
+            .close(
+                &env_id,
+                &user.username,
+                "切换代理，重启浏览器",
+                actions::ENV_CLOSE,
+            )
             .await?;
         let env = state.db.get_environment(&env_id)?;
         state
             .browsers
-            .open(&env, &OpenOptions::default(), &actor)
+            .open(&env, &OpenOptions::default(), &user.username)
             .await?;
     }
     let env = state.db.get_environment(&env_id)?;
@@ -1007,7 +1202,8 @@ pub fn hosts_list(
     env_id: String,
 ) -> Result<Vec<crate::models::HostsEntry>> {
     let state = state.inner().clone();
-    state.require(Permission::ViewList)?;
+    let user = state.require(Permission::ViewList)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::View)?;
     state.db.list_hosts(&env_id)
 }
 
@@ -1018,8 +1214,9 @@ pub fn hosts_set(
     entries: Vec<HostsEntryInput>,
 ) -> Result<Vec<crate::models::HostsEntry>> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
-    services::set_hosts(&state, &env_id, &entries, &actor)
+    let user = state.require(Permission::EditEnv)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    services::set_hosts(&state, &env_id, &entries, &user.username)
 }
 
 #[tauri::command]
@@ -1028,7 +1225,8 @@ pub fn mock_list(
     env_id: String,
 ) -> Result<Vec<crate::models::MockRule>> {
     let state = state.inner().clone();
-    state.require(Permission::ViewList)?;
+    let user = state.require(Permission::ViewList)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::View)?;
     state.db.list_mocks(&env_id)
 }
 
@@ -1039,8 +1237,9 @@ pub async fn mock_set(
     rules: Vec<crate::models::MockRuleInput>,
 ) -> Result<Vec<crate::models::MockRule>> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
-    services::set_mocks(&state, &env_id, &rules, &actor).await
+    let user = state.require(Permission::EditEnv)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    services::set_mocks(&state, &env_id, &rules, &user.username).await
 }
 
 #[tauri::command]
@@ -1087,7 +1286,11 @@ pub fn extension_assign(
     env_ids: Vec<String>,
 ) -> Result<()> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
+    let user = state.require(Permission::EditEnv)?;
+    for id in &env_ids {
+        state.check_environment_access(&user, id, EnvAccess::Manage)?;
+    }
+    let actor = user.username.clone();
     let ext = state.db.get_extension(&extension_id)?;
     state.db.assign_extension(&extension_id, &env_ids)?;
     Audit::global(
@@ -1110,12 +1313,15 @@ pub fn extension_unassign(
     env_ids: Vec<String>,
 ) -> Result<()> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
+    let user = state.require(Permission::EditEnv)?;
+    for id in &env_ids {
+        state.check_environment_access(&user, id, EnvAccess::Manage)?;
+    }
     let ext = state.db.get_extension(&extension_id)?;
     state.db.unassign_extension(&extension_id, &env_ids)?;
     Audit::global(
         &state.db,
-        &actor,
+        &user.username,
         "extension.unassign",
         format!("取消扩展 {} 在 {} 个环境的分配", ext.name, env_ids.len()),
     )?;
@@ -1129,8 +1335,12 @@ pub async fn extension_install_online(
     env_ids: Option<Vec<String>>,
 ) -> Result<crate::models::Extension> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
-    services::install_extension_online(&state, &source, &env_ids.unwrap_or_default(), &actor).await
+    let user = state.require(Permission::EditEnv)?;
+    let env_ids = env_ids.unwrap_or_default();
+    for id in &env_ids {
+        state.check_environment_access(&user, id, EnvAccess::Manage)?;
+    }
+    services::install_extension_online(&state, &source, &env_ids, &user.username).await
 }
 
 #[tauri::command]
@@ -1147,8 +1357,32 @@ pub fn extension_update(
 #[tauri::command]
 pub fn extension_assign_all(state: State<'_, SharedState>, id: String) -> Result<u32> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::EditEnv)?.username;
-    services::assign_extension_to_all(&state, &id, &actor)
+    let user = state.require(Permission::EditEnv)?;
+    let allowed = state.accessible_environment_ids(&user)?;
+    let Some(allowed) = allowed else {
+        return services::assign_extension_to_all(&state, &id, &user.username);
+    };
+    let envs = state.db.list_environments(&Default::default())?;
+    let mut ids = Vec::new();
+    for env in envs {
+        if allowed.contains(&env.id) {
+            state.check_environment_access(&user, &env.id, EnvAccess::Manage)?;
+            ids.push(env.id);
+        }
+    }
+    let extension = state.db.get_extension(&id)?;
+    state.db.assign_extension(&id, &ids)?;
+    Audit::global(
+        &state.db,
+        &user.username,
+        actions::EXTENSION_ASSIGN,
+        format!(
+            "扩展 {} 应用到可访问的 {} 个环境",
+            extension.name,
+            ids.len()
+        ),
+    )?;
+    Ok(ids.len() as u32)
 }
 
 #[tauri::command]
@@ -1177,7 +1411,8 @@ pub async fn extension_open_store(
     source: String,
 ) -> Result<()> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
     let url = services::store_extension_url(&source)?;
     let env = state.db.get_environment(&env_id)?;
     if state.browsers.is_running(&env_id) {
@@ -1187,7 +1422,7 @@ pub async fn extension_open_store(
             url: Some(url),
             ..Default::default()
         };
-        state.browsers.open(&env, &options, &actor).await?;
+        state.browsers.open(&env, &options, &user.username).await?;
     }
     Ok(())
 }
@@ -1198,7 +1433,8 @@ pub fn env_extensions(
     env_id: String,
 ) -> Result<Vec<crate::models::Extension>> {
     let state = state.inner().clone();
-    state.require(Permission::ViewList)?;
+    let user = state.require(Permission::ViewList)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::View)?;
     state.db.extensions_for_env(&env_id)
 }
 
@@ -1208,14 +1444,31 @@ pub fn captcha_list(
     env_id: Option<String>,
 ) -> Result<Vec<crate::models::CaptchaEvent>> {
     let state = state.inner().clone();
-    state.require(Permission::ViewList)?;
-    state.db.list_captcha(env_id.as_deref(), 200)
+    let user = state.require(Permission::ViewList)?;
+    if let Some(env_id) = env_id.as_deref() {
+        state.check_environment_access(&user, env_id, EnvAccess::View)?;
+    }
+    let events = state.db.list_captcha(env_id.as_deref(), 200)?;
+    if env_id.is_some() {
+        return Ok(events);
+    }
+    let allowed = state.accessible_environment_ids(&user)?;
+    Ok(match allowed {
+        Some(ids) => events
+            .into_iter()
+            .filter(|event| ids.contains(&event.env_id))
+            .collect(),
+        None => events,
+    })
 }
 
 #[tauri::command]
 pub fn captcha_handle(state: State<'_, SharedState>, id: String, handled: bool) -> Result<()> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
+    let user = state.require(Permission::OpenClose)?;
+    let event = state.db.get_captcha(&id)?;
+    state.check_environment_access(&user, &event.env_id, EnvAccess::View)?;
+    let actor = user.username;
     state.db.mark_captcha_handled(&id, handled)?;
     Audit::global(
         &state.db,
@@ -1236,7 +1489,9 @@ pub async fn captcha_capture(
     env_id: String,
 ) -> Result<Option<String>> {
     let state = state.inner().clone();
-    let actor = state.require(Permission::OpenClose)?.username;
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    let actor = user.username;
     let path = state.browsers.capture_captcha_screenshot(&env_id).await?;
     state
         .db

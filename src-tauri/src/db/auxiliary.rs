@@ -443,6 +443,34 @@ impl Db {
         })
     }
 
+    pub fn get_captcha(&self, id: &str) -> Result<CaptchaEvent> {
+        self.with(|conn| {
+            conn.query_row(
+                "SELECT c.id, c.env_id, e.name, c.url, c.source, c.hint, c.screenshot_path, c.handled, c.created_at
+                 FROM captcha_events c JOIN environments e ON e.id = c.env_id
+                 WHERE c.id = ?1",
+                params![id],
+                |row| {
+                    Ok(CaptchaEvent {
+                        id: row.get(0)?,
+                        env_id: row.get(1)?,
+                        env_name: row.get(2)?,
+                        url: row.get(3)?,
+                        source: row.get(4)?,
+                        hint: row.get(5)?,
+                        screenshot_path: row.get(6)?,
+                        handled: int_bool(row.get(7)?),
+                        created_at: row.get(8)?,
+                    })
+                },
+            )
+            .map_err(|error| match error {
+                rusqlite::Error::QueryReturnedNoRows => AppError::not_found("验证码事件不存在"),
+                other => other.into(),
+            })
+        })
+    }
+
     pub fn mark_captcha_handled(&self, id: &str, handled: bool) -> Result<()> {
         self.with(|conn| {
             let changed = conn.execute(
