@@ -1383,6 +1383,56 @@ fn validate_proxy_input(input: &ProxyInput) -> Result<()> {
 // Settings, theme, stats
 // ---------------------------------------------------------------------------
 
+const RESERVED_LAUNCH_ARGS: &[&str] = &[
+    "--user-data-dir",
+    "--profile-directory",
+    "--remote-debugging-port",
+    "--remote-debugging-address",
+    "--remote-allow-origins",
+    "--proxy-server",
+    "--proxy-bypass-list",
+    "--host-resolver-rules",
+    "--load-extension",
+    "--window-size",
+    "--window-name",
+    "--lang",
+    "--accept-lang",
+];
+
+fn sanitize_launch_args(args: &[String]) -> Result<Vec<String>> {
+    if args.len() > 64 {
+        return Err(AppError::bad_request("附加启动参数不能超过 64 项"));
+    }
+    let mut out = Vec::new();
+    for raw in args {
+        let arg = raw.trim();
+        if arg.is_empty() {
+            continue;
+        }
+        if arg.len() > 512 {
+            return Err(AppError::bad_request("单个启动参数不能超过 512 个字符"));
+        }
+        if !arg.starts_with("--") {
+            return Err(AppError::bad_request(format!(
+                "启动参数必须使用 --flag 或 --flag=value 格式: {arg}"
+            )));
+        }
+        if arg.chars().any(|value| matches!(value, '\0' | '\r' | '\n')) {
+            return Err(AppError::bad_request("启动参数不能包含控制字符"));
+        }
+        let name = arg.split('=').next().unwrap_or(arg);
+        if RESERVED_LAUNCH_ARGS.contains(&name) {
+            return Err(AppError::bad_request(format!(
+                "不能覆盖环境隔离参数: {name}"
+            )));
+        }
+        if !out.iter().any(|existing| existing == arg) {
+            out.push(arg.to_string());
+        }
+    }
+    Ok(out)
+}
+
 pub async fn update_settings(
     state: &SharedState,
     input: UpdateSettingsInput,
@@ -1435,6 +1485,9 @@ pub async fn update_settings(
         || settings.api_port != state.settings().api_port;
     if let Some(path) = input.chromium_path {
         settings.chromium_path = path.filter(|p| !p.trim().is_empty());
+    }
+    if let Some(args) = input.chromium_launch_args {
+        settings.chromium_launch_args = sanitize_launch_args(&args)?;
     }
     if let Some(url) = input.default_start_url {
         settings.default_start_url = url.trim().to_string();

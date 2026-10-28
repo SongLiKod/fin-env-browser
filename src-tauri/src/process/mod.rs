@@ -287,6 +287,7 @@ impl BrowserManager {
             &window_name,
             "about:blank",
             headless,
+            &settings.chromium_launch_args,
         );
 
         let mut command = Command::new(&chrome);
@@ -1628,6 +1629,35 @@ impl BrowserManager {
 // Browser process helpers
 // ---------------------------------------------------------------------------
 
+/// Static Chromium flags shared by every environment. This list is also
+/// exposed in Settings > System > Browser launch arguments so users can see
+/// what FinEnv adds before appending their own flags.
+pub const DEFAULT_CHROMIUM_ARGS: &[&str] = &[
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-sync",
+    "--disable-default-apps",
+    "--disable-breakpad",
+    "--disable-client-side-phishing-detection",
+    "--disable-popup-blocking",
+    "--disable-prompt-on-repost",
+    "--disable-hang-monitor",
+    "--disable-dev-shm-usage",
+    "--disable-quic",
+    "--dns-prefetch-disable",
+    "--disable-features=Translate,OptimizationHints,MediaRouter,InterestFeedContentSuggestions,PreconnectToSearch,NetworkPrediction",
+    "--no-pings",
+];
+
+pub fn default_chromium_args() -> Vec<String> {
+    DEFAULT_CHROMIUM_ARGS
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_chromium_args(
     fp: &fingerprint::Fingerprint,
@@ -1639,6 +1669,7 @@ fn build_chromium_args(
     window_name: &str,
     start_url: &str,
     headless: bool,
+    extra_args: &[String],
 ) -> Vec<String> {
     let mut args = vec![
         format!("--user-data-dir={}", profile_dir.display()),
@@ -1646,33 +1677,21 @@ fn build_chromium_args(
         format!("--remote-debugging-port={port}"),
         "--remote-debugging-address=127.0.0.1".into(),
         "--remote-allow-origins=*".into(),
-        "--no-first-run".into(),
-        "--no-default-browser-check".into(),
-        "--disable-background-networking".into(),
-        "--disable-component-update".into(),
-        "--disable-sync".into(),
-        "--disable-default-apps".into(),
-        "--disable-breakpad".into(),
-        "--disable-client-side-phishing-detection".into(),
-        "--disable-popup-blocking".into(),
-        "--disable-prompt-on-repost".into(),
-        "--disable-hang-monitor".into(),
-        "--disable-dev-shm-usage".into(),
-        "--disable-quic".into(),
-        "--dns-prefetch-disable".into(),
-        "--disable-features=Translate,OptimizationHints,MediaRouter,InterestFeedContentSuggestions,PreconnectToSearch,NetworkPrediction".into(),
-        "--no-pings".into(),
-        format!(
-            "--window-size={},{}",
-            fp.screen.avail_width.max(800),
-            fp.screen.avail_height.max(600)
-        ),
-        format!(
-            "--lang={}",
-            fp.languages.first().cloned().unwrap_or_else(|| "en-US".into())
-        ),
-        format!("--accept-lang={}", fp.languages.join(",")),
     ];
+    args.extend(DEFAULT_CHROMIUM_ARGS.iter().map(|arg| (*arg).to_string()));
+    args.push(format!(
+        "--window-size={},{}",
+        fp.screen.avail_width.max(800),
+        fp.screen.avail_height.max(600)
+    ));
+    args.push(format!(
+        "--lang={}",
+        fp.languages
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "en-US".into())
+    ));
+    args.push(format!("--accept-lang={}", fp.languages.join(",")));
     if headless {
         args.push("--headless=new".into());
     }
@@ -1701,6 +1720,7 @@ fn build_chromium_args(
     if !extensions.is_empty() {
         args.push(format!("--load-extension={}", extensions.join(",")));
     }
+    args.extend(extra_args.iter().cloned());
     if !start_url.is_empty() {
         args.push(start_url.to_string());
     }

@@ -762,6 +762,8 @@ pub struct Settings {
     pub api_host: String,
     pub api_port: u16,
     pub chromium_path: Option<String>,
+    #[serde(default)]
+    pub chromium_launch_args: Vec<String>,
     pub default_start_url: String,
     pub detection_service_url: String,
     pub allow_sensitive_export: bool,
@@ -798,6 +800,7 @@ impl Default for Settings {
             api_host: "127.0.0.1".into(),
             api_port: 17321,
             chromium_path: None,
+            chromium_launch_args: Vec::new(),
             default_start_url: "about:blank".into(),
             detection_service_url: "https://browserleaks.com/javascript".into(),
             allow_sensitive_export: true,
@@ -843,6 +846,8 @@ pub struct UpdateSettingsInput {
     pub api_port: Option<u16>,
     #[serde(default, deserialize_with = "double_option")]
     pub chromium_path: Option<Option<String>>,
+    #[serde(default)]
+    pub chromium_launch_args: Option<Vec<String>>,
     #[serde(default)]
     pub default_start_url: Option<String>,
     #[serde(default)]
@@ -1092,6 +1097,7 @@ pub struct AppInfo {
     pub arch: String,
     pub chromium_path: Option<String>,
     pub chromium_version: Option<String>,
+    pub chromium_default_args: Vec<String>,
     pub api_base_url: String,
     pub db_path: String,
 }

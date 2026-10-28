@@ -21,6 +21,7 @@ FinEnv 是面向研发测试团队的多账号独立指纹环境管理工具。�
 - 出口 IP：一键检测直连或代理出口 IP/国家/城市/时区，结果持久化并在列表与详情展示
 - 代理池：HTTP/HTTPS/SOCKS5，TCP 检测、出口 IP/国家/时区、批量分配、时区语言对齐
 - 进程隔离：独立 profile、随机调试端口、WebRTC/DNS 防泄漏参数、崩溃接管
+- 启动参数：设置页展示默认 Chromium 参数，支持按行追加自定义 `--flag` / `--flag=value`；profile、调试端口、代理等隔离参数不可覆盖
 - 资源管控：全局并发上限、内存告警/自动关闭、闲置回收、崩溃日志、可选自动重启
 - 自动化：REST API、JS/Python SDK、Playwright CDP、前置脚本、截图/录屏/HAR
 - 回调：截图、录屏、验证码事件可推送到通用 Webhook / 禅道 / Jira（JSON）

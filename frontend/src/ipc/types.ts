@@ -573,6 +573,7 @@ export interface Settings {
   apiHost: string;
   apiPort: number;
   chromiumPath: string | null;
+  chromiumLaunchArgs: string[];
   defaultStartUrl: string;
   detectionServiceUrl: string;
   allowSensitiveExport: boolean;
@@ -603,6 +604,7 @@ export interface UpdateSettingsInput {
   apiHost?: string;
   apiPort?: number;
   chromiumPath?: string | null;
+  chromiumLaunchArgs?: string[];
   defaultStartUrl?: string;
   detectionServiceUrl?: string;
   allowSensitiveExport?: boolean;
@@ -727,6 +729,7 @@ export interface AppInfo {
   arch: string;
   chromiumPath: string | null;
   chromiumVersion: string | null;
+  chromiumDefaultArgs: string[];
   apiBaseUrl: string;
   dbPath: string;
 }

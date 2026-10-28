@@ -1775,6 +1775,7 @@ pub fn app_info(state: State<'_, SharedState>) -> crate::models::AppInfo {
         arch: std::env::consts::ARCH.into(),
         chromium_path: chromium.map(|p| p.to_string_lossy().to_string()),
         chromium_version: None,
+        chromium_default_args: crate::process::default_chromium_args(),
         api_base_url: api.base_url,
         db_path: state.db.path().to_string_lossy().to_string(),
     }

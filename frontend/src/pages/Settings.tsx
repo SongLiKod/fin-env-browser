@@ -41,7 +41,7 @@ import { Card, CardBody, CardHeader, EmptyState, Spinner } from '@/components/ui
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { CopyButton } from '@/components/ui/misc';
 import { Dialog } from '@/components/ui/dialog';
-import { Field, Input, Select } from '@/components/ui/input';
+import { Field, Input, Select, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Tabs } from '@/components/ui/tabs';
 
@@ -127,6 +127,7 @@ export function SettingsPage() {
         apiHost: form.apiHost,
         apiPort: form.apiPort,
         chromiumPath: form.chromiumPath?.trim() || null,
+        chromiumLaunchArgs: form.chromiumLaunchArgs,
         defaultStartUrl: form.defaultStartUrl,
         detectionServiceUrl: form.detectionServiceUrl,
         allowSensitiveExport: form.allowSensitiveExport,
@@ -717,6 +718,52 @@ export function SettingsPage() {
                     <Input value={form.detectionServiceUrl} onChange={(event) => update('detectionServiceUrl', event.target.value)} />
                   </Field>
                 </div>
+              </CardBody>
+            </Card>
+
+            <Card>
+              <CardHeader
+                title="浏览器启动参数"
+                description="默认参数由 FinEnv 固定；附加参数会追加到每个环境启动命令的末尾。"
+                actions={
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => update('chromiumLaunchArgs', [])}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" /> 恢复默认
+                  </Button>
+                }
+              />
+              <CardBody className="space-y-4">
+                <div className="rounded-md border border-border bg-surface-secondary p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-content-main">默认启动参数（只读）</p>
+                    <Badge tone="outline">{appInfo?.chromiumDefaultArgs.length ?? 0} 项</Badge>
+                  </div>
+                  <div className="mt-2 max-h-48 overflow-auto rounded border border-border/70 bg-surface-base p-2 font-mono text-[10px] leading-5 text-content-weak">
+                    {(appInfo?.chromiumDefaultArgs ?? []).map((arg) => (
+                      <div key={arg} className="break-all">
+                        {arg}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[10px] leading-5 text-content-hint">
+                    每个环境还会自动追加 profile 目录、随机调试端口、代理、窗口尺寸、语言、Hosts 与扩展参数；这些隔离参数不可覆盖。
+                  </p>
+                </div>
+                <Field
+                  label="附加启动参数"
+                  hint="每行一个，使用 --flag 或 --flag=value；留空仅使用默认参数。"
+                >
+                  <Textarea
+                    value={form.chromiumLaunchArgs.join('\n')}
+                    onChange={(event) => update('chromiumLaunchArgs', event.target.value.split('\n'))}
+                    rows={6}
+                    spellCheck={false}
+                    placeholder={'--autoplay-policy=no-user-gesture-required\n--disable-gpu'}
+                  />
+                </Field>
               </CardBody>
             </Card>
 
