@@ -155,7 +155,7 @@ export function BroadcastControlDialog({
       title={status?.active ? '同步控制进行中' : '开启同步控制'}
       description={
         status?.active
-          ? '在一个主控窗口中操作，鼠标点击、滚动和键盘输入会实时同步到其他参与窗口。'
+          ? '在一个主控窗口中操作，鼠标点击、滚动、键盘输入以及新建/切换/关闭 Tab 会实时同步到其他参与窗口。'
           : '选择参与环境并指定主控窗口；开启后请直接在 master 浏览器窗口中操作。'
       }
       width="max-w-2xl"
@@ -207,7 +207,7 @@ export function BroadcastControlDialog({
             </div>
             <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-content-weak">
               <MousePointerClick className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-              请在「{master?.name ?? '主控'}」窗口中点击输入框、按钮或滚动页面；其他环境会执行相同的鼠标与键盘事件。
+              请在「{master?.name ?? '主控'}」窗口中点击输入框、按钮或滚动页面；其他环境会执行相同的鼠标、键盘与 Tab 操作。
               面板可以最小化，浏览器窗口需要保持打开。
             </p>
           </div>
@@ -303,7 +303,8 @@ export function BroadcastControlDialog({
           <div className="rounded-lg border border-border bg-surface-secondary/60 p-3 text-[11px] leading-5 text-content-hint">
             <p className="font-medium text-content-weak">同步范围</p>
             <p>鼠标移动、左/中/右键点击、滚轮、键盘输入、粘贴与中文输入法上屏文字。</p>
-            <p className="mt-1">浏览器地址栏、前进/后退按钮和标签栏操作不会同步；页面内点击链接、表单输入与滚动会同步。</p>
+            <p className="mt-1">新建 Tab、切换 Tab、关闭 Tab，以及页面 URL 变化后的导航。</p>
+            <p className="mt-1">浏览器标签栏拖拽/固定、扩展管理等浏览器自身界面操作不会同步；跨域 iframe 内的点击不在捕获范围。</p>
           </div>
         </div>
       )}

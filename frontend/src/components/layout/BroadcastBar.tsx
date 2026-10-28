@@ -97,7 +97,7 @@ export function BroadcastBar() {
         </Badge>
       ) : null}
       <span className="hidden text-content-hint lg:inline">
-        在「{master?.name ?? '主控'}」窗口中点击/输入，其他窗口会同步执行
+        在「{master?.name ?? '主控'}」窗口中点击/输入/新建 Tab，其他窗口会同步操作
       </span>
       <div className="ml-auto flex items-center gap-1">
         <Button

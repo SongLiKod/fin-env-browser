@@ -26,6 +26,7 @@ use crate::{
 pub struct CdpEvent {
     pub method: String,
     pub params: Value,
+    pub session_id: Option<String>,
 }
 
 type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<std::result::Result<Value, String>>>>>;
@@ -87,9 +88,14 @@ impl CdpClient {
                                 value.get("method").and_then(|v| v.as_str())
                             {
                                 let params = value.get("params").cloned().unwrap_or(Value::Null);
+                                let session_id = value
+                                    .get("sessionId")
+                                    .and_then(|v| v.as_str())
+                                    .map(ToString::to_string);
                                 let _ = events_writer.send(CdpEvent {
                                     method: method.to_string(),
                                     params,
+                                    session_id,
                                 });
                             }
                         }
@@ -123,6 +129,15 @@ impl CdpClient {
     }
 
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
+        self.call_on(method, params, None).await
+    }
+
+    pub async fn call_on(
+        &self,
+        method: &str,
+        params: Value,
+        session_id: Option<&str>,
+    ) -> Result<Value> {
         if self.is_closed() {
             return Err(AppError::internal("CDP 连接已关闭"));
         }
@@ -132,7 +147,13 @@ impl CdpClient {
             let mut map = self.pending.lock().await;
             map.insert(id, tx);
         }
-        let payload = json!({ "id": id, "method": method, "params": params }).to_string();
+        let payload = match session_id {
+            Some(session_id) => {
+                json!({ "id": id, "method": method, "params": params, "sessionId": session_id })
+            }
+            None => json!({ "id": id, "method": method, "params": params }),
+        }
+        .to_string();
         if self.tx.send(payload).is_err() {
             return Err(AppError::internal("CDP 消息发送失败"));
         }
@@ -149,8 +170,12 @@ impl CdpClient {
     }
 
     pub async fn evaluate(&self, expression: &str) -> Result<Value> {
+        self.evaluate_on(expression, None).await
+    }
+
+    pub async fn evaluate_on(&self, expression: &str, session_id: Option<&str>) -> Result<Value> {
         let result = self
-            .call(
+            .call_on(
                 "Runtime.evaluate",
                 json!({
                     "expression": expression,
@@ -158,6 +183,7 @@ impl CdpClient {
                     "awaitPromise": true,
                     "userGesture": true
                 }),
+                session_id,
             )
             .await?;
         if let Some(exception) = result.get("exceptionDetails") {

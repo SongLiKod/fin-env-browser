@@ -460,13 +460,17 @@ Rust 后台线程定时轮询所有子进程 PID，读取 CPU、内存；超过�
 
 \## 12 实时同步控制
 
-\- 主控绑定：`BrowserManager::broadcast_start` 先启动缺失环境，并将所有参与窗口纳入会话；通过 `Page.bringToFront` 聚焦主控，通过 `Emulation.setFocusEmulationEnabled` 保证后台参与窗口能接收 CDP 输入事件。
+\- 多 Tab 会话：通过浏览器级 CDP `Target.setDiscoverTargets` 监听 `targetCreated/targetDestroyed/targetInfoChanged`，使用 `Target.attachToTarget(flatten)` 为每个页面 Tab 建立独立会话；主控新建 Tab 后自动在参与环境配对或创建对应 Tab，切换时激活对应从属 Tab，关闭时同步关闭。自然由 `target=_blank` 打开的从属 Tab 会优先配对，未配对的重复 Tab 自动清理。
 
-\- 输入捕获：主控页面通过 `Runtime.addBinding` + `Page.addScriptToEvaluateOnNewDocument` 注入捕获脚本，监听可信的鼠标、滚轮、键盘、粘贴与 `compositionend` 事件，将结构化 JSON 发送给 Rust；脚本会删除全局 binding 引用，减少页面直接伪造广播的入口。
+\- 主控绑定：`BrowserManager::broadcast_start` 先启动缺失环境；主控窗口通过 `Page.bringToFront` 置前，从属窗口使用 `Emulation.setFocusEmulationEnabled` 保证后台窗口仍可接收 CDP 输入，主控保持真实可见性用于活动 Tab 检测。
 
-\- 转发：Rust 使用独立 mpsc worker 串行消费事件，通过 `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent` / `Input.insertText` 发送到其他环境；鼠标坐标按主控/目标视口尺寸缩放，滚轮按坐标寻找可滚动容器并执行滚动。
+\- 输入捕获：主控每个页面 Tab 通过 `Runtime.addBinding` + `Page.addScriptToEvaluateOnNewDocument` 注入捕获脚本，监听可信的鼠标、滚轮、键盘、粘贴与 `compositionend` 事件，将结构化 JSON 发送给 Rust；脚本会删除全局 binding 引用，减少页面直接伪造广播的入口。
+
+\- 转发：Rust 使用独立 mpsc worker 串行消费事件，通过 flat session 的 `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent` / `Input.insertText` 发送到其他环境的对应 Tab；鼠标坐标按主控/目标视口尺寸缩放，滚轮按坐标寻找可滚动容器并执行滚动。
+
+\- 活动 Tab：主控窗口每 500ms 采样各 Tab 的 `document.visibilityState` / `document.hasFocus()`，活动 Tab 变化时通过 `Target.activateTarget` 激活参与环境的对应 Tab；页面 URL 变化时通过 `Page.navigate` 同步导航。
 
 \- 生命周期：`Page.loadEventFired` 时重新绑定主控并安装捕获脚本；暂停只丢弃后续事件；停止会移除脚本、binding 与焦点模拟。参与窗口关闭时自动停止会话，所有操作写入审计。
 
-\- 限制：仅同步页面内容，不同步地址栏、标签栏、前进/后退按钮；跨域 iframe 内的点击不在捕获范围；恶意页面在极短时间内理论上可尝试伪造 binding 输入，仅建议用于受信测试站点。
+\- 限制：不同步标签栏拖拽/固定/分组等浏览器自身管理操作；跨域 iframe 内的点击不在捕获范围；恶意页面在极短时间内理论上可尝试伪造 binding 输入，仅建议用于受信测试站点。
 

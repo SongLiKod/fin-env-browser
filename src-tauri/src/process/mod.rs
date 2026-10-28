@@ -1437,18 +1437,6 @@ impl BrowserManager {
                                         .unwrap_or("{}");
                                     let _ = manager.handle_captcha(&instance, payload).await;
                                 });
-                            } else if name == Some("__finEnvBroadcast") {
-                                let manager = manager.clone();
-                                let instance = instance.clone();
-                                tokio::spawn(async move {
-                                    let payload = params
-                                        .get("payload")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("{}");
-                                    manager
-                                        .broadcast_handle_payload(&instance.env_id, payload)
-                                        .await;
-                                });
                             }
                         }
                         "Network.requestWillBeSent" => {
@@ -1488,13 +1476,6 @@ impl BrowserManager {
                                     }
                                 }
                             }
-                        }
-                        "Page.loadEventFired" => {
-                            let manager = manager.clone();
-                            let instance = instance.clone();
-                            tokio::spawn(async move {
-                                manager.broadcast_on_master_load(&instance.env_id).await;
-                            });
                         }
                         "Page.javascriptDialogOpening" => {
                             let message = event

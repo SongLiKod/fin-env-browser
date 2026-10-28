@@ -205,17 +205,20 @@ cargo test
 
 - **入口**：环境列表多选至少 2 个环境后点击「同步控制」；选择主控窗口、可选统一打开地址、是否自动打开未运行环境。
 - **后端**：`broadcast_start/status/pause/stop` 四个 IPC 命令与 `GET/POST /broadcast`、`POST /broadcast/pause`、`POST /broadcast/stop` REST 接口；状态包含主控、参与环境、暂停状态、累计转发次数和未加入原因。
-- **输入链路**：主控页面通过 CDP `Runtime.addBinding` + `Page.addScriptToEvaluateOnNewDocument` 注入捕获脚本；Rust 用 mpsc worker 串行转发到其他环境：
+- **输入链路**：主控每个页面 Tab 通过 CDP `Runtime.addBinding` + `Page.addScriptToEvaluateOnNewDocument` 注入捕获脚本；Rust 用 mpsc worker 串行转发到其他环境的对应 Tab：
   - 鼠标移动（40ms 节流）、左/中/右键按下/释放、滚轮（按坐标寻找可滚动容器并滚动）；
   - 键盘按键、可打印字符、粘贴文本、输入法 `compositionend` 文本；
   - 主控页面导航/刷新后由 `Page.loadEventFired` 重新绑定并安装脚本。
-- **生命周期**：启动时自动打开缺失环境并统一导航；对全部参与窗口开启焦点模拟，主控窗口置前；暂停只丢弃后续事件；停止移除脚本/binding/焦点模拟，保留浏览器窗口；参与窗口关闭自动停止会话；开始/暂停/恢复/停止全部写审计。
+- **多 Tab 同步**：浏览器级 `Target.setDiscoverTargets` 监听新建/销毁/URL 变化，`Target.attachToTarget(flatten)` 为每个 Tab 建立会话；主控新建 Tab 后自动在参与环境配对自然打开的 Tab 或创建对应 Tab；活动 Tab 通过 `document.visibilityState/hasFocus` 采样后 `Target.activateTarget` 同步激活；关闭主控 Tab 时关闭从属对应 Tab；未配对的重复 Tab 自动清理。页面 URL 变化通过 `Page.navigate` 同步。
+- **生命周期**：启动时自动打开缺失环境并统一导航；主控窗口置前，从属窗口开启焦点模拟保证后台可接收输入；暂停只丢弃后续事件；停止移除脚本/binding/焦点模拟，保留浏览器窗口；参与窗口关闭自动停止会话；开始/暂停/恢复/停止全部写审计。
 - **UI**：同步对话框展示主控、参与窗口、转发次数、未加入错误与暂停/停止操作；关闭对话框后顶部常驻同步栏仍显示状态，可暂停/恢复/停止。
 - **验证（真实 API + CDP）**：
-  - 选中 2 个环境启动同步，主控点击按钮后主控/从属点击数均为 1；输入 `abc` 后两边输入框均为 `abc`。
+  - 单页面回归：选中 2 个环境启动同步，主控点击按钮后主控/从属点击数均为 1；输入 `abc` 后两边输入框均为 `abc`。
   - 滚轮转发后从属 `scrollY=600`，反向滚回 0。
   - 暂停后主控点击数 2、从属仍为 1；恢复后主控 3、从属 2。
   - 主控导航到新 URL 后重新绑定成功，点击后主控 1、从属从 2 增至 3。
+  - 新 Tab：主控点击 `window.open('/newtab')` 后，两个浏览器均出现对应新 Tab（且无多余空白 Tab）；在新 Tab 中点击按钮/输入 `tab`，从属新 Tab 点击数 1、输入值为 `tab`；活动 Tab 切换日志确认从属对应 Tab 被 `Target.activateTarget` 激活。
+  - Ctrl+T 等价路径：浏览器级 `Target.createTarget('about:blank')` 后，参与环境自动创建空白 Tab；关闭主控 Tab 后从属对应 Tab 同步关闭。
   - 停止后主控点击继续增加、从属保持不变；`GET /broadcast` 返回 `active: false`。
   - UI WebView2 CDP 截图确认开启对话框、同步进行中面板、顶部状态栏、暂停/恢复/停止流程；console 无 error。
-- **已知限制**：不同步浏览器地址栏、标签栏、前进/后退按钮；跨域 iframe 内的点击不在捕获范围；仅建议用于受信测试站点。
+- **已知限制**：不同步标签栏拖拽/固定/分组等浏览器自身管理操作；跨域 iframe 内的点击不在捕获范围；仅建议用于受信测试站点。
