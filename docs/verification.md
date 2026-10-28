@@ -140,7 +140,7 @@ cargo test
   - Cookie 写入/读取/加密缓存落盘，应用重启后自动恢复
   - 连续录制 4 帧并生成 manifest；HAR 1.2 文件导出
   - 浏览器关闭与进程回收
-- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"1.0.0"}`。
+- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"2.0.0"}`。
 - Windows GNU 链接阶段会输出 `.rsrc merge failure: multiple non-default manifests` 警告（MinGW 默认清单与 Tauri 资源清单合并提示），构建退出码为 0，产物可正常启动；CI 使用 MSVC 工具链，不涉及该提示。
 - 完整 `cargo test` 的 Tauri 测试二进制在当前 MinGW 沙箱启动阶段报 `STATUS_ENTRYPOINT_NOT_FOUND`（WebView2/工具链运行环境限制）；`cargo check`、`clippy --all-targets` 已完整编译所有测试代码。`.github/workflows/build.yml` 在 Ubuntu 上执行完整单元测试，并在 Windows/macOS/Linux 矩阵中构建安装包。
 - 浏览器预览：登录页亮/暗主题渲染正常，无 console error。
@@ -277,3 +277,11 @@ cargo test
 - **问题**：设置页展示的基础路径 `/api/v1` 没有注册路由，浏览器直接访问返回 404，容易被误认为 API 服务不可用。
 - **修复**：新增公开的 `GET /api/v1` 服务信息页，返回服务名、版本、认证方式、健康检查地址和常用接口；业务接口仍需 API Key。健康检查 `GET /api/v1/health` 保持公开。
 - **验证**：`GET /api/v1` 返回 200 JSON；`GET /api/v1/health` 返回 200；`GET /api/v1/envs` 未带 Key 返回 401；未知路径仍返回 404。
+
+## 26. 版本号单一来源
+
+- **唯一来源**：根目录 `VERSION` 是唯一手工维护的版本号。
+- **同步**：`scripts/sync-version.mjs` 同步根 `package.json`、前端 SDK/锁文件、Python SDK、`src-tauri/Cargo.toml`、`Cargo.lock`、`tauri.conf.json` 和文档当前版本；`npm run build`、Tauri 前置命令与 `scripts/build.ps1` 自动执行同步。
+- **校验**：`npm run version:check`、`npm run verify` 与 CI 的 Version consistency 步骤检查所有副本；`src-tauri/build.rs` 在编译前校验 `VERSION` 与 `Cargo.toml`。
+- **UI**：登录页、侧栏、设置页和 API 版本均读取运行时版本，不再硬编码 `V1.0`。
+- **验证**：`node scripts/sync-version.mjs --check` 返回一致；Tauri、Cargo、前端与 SDK 版本均跟随 `VERSION`。

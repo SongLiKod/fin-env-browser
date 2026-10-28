@@ -78,11 +78,16 @@ cargo tauri dev
 ### 构建
 
 ```bash
+npm run version:sync
 npm --prefix frontend run build
 cargo tauri build
 ```
 
 产物位于 `src-tauri/target/release/bundle/`，包含 Windows NSIS/MSI、macOS dmg、Linux AppImage/deb。CI 工作流会附带 checksum 与 version 文件。
+
+### 版本号
+
+版本号唯一手工维护位置是根目录 `VERSION`。修改后执行 `npm run version:sync`，会同步应用、Tauri、Cargo、前端和 SDK 的版本；`npm run version:check` 用于校验。详见 [docs/versioning.md](docs/versioning.md)。
 
 ### 首次登录
 

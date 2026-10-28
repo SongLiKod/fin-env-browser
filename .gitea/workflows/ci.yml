@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Version consistency
+        run: node scripts/sync-version.mjs --check
       - name: Frontend
         working-directory: frontend
         run: |

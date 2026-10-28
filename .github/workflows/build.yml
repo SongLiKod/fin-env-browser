@@ -52,6 +52,9 @@ jobs:
             frontend/package-lock.json
             sdk/js/package-lock.json
 
+      - name: Version consistency
+        run: node scripts/sync-version.mjs --check
+
       - name: Frontend unit tests & build
         working-directory: frontend
         run: |

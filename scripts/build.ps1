@@ -3,6 +3,12 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+Push-Location $root
+try {
+  node scripts/sync-version.mjs
+} finally {
+  Pop-Location
+}
 Push-Location (Join-Path $root 'frontend')
 try {
   npm ci

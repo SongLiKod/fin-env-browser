@@ -1,11 +1,15 @@
 {
   "name": "finenv-browser",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "scripts": {
+    "version:sync": "node scripts/sync-version.mjs",
+    "version:check": "node scripts/sync-version.mjs --check",
+    "predev": "npm run version:sync",
     "dev": "npm --prefix frontend run dev",
+    "prebuild": "npm run version:sync",
     "build": "npm --prefix frontend run build",
-    "check": "npm --prefix frontend run check",
+    "check": "npm run version:check && npm --prefix frontend run check",
     "verify": "node scripts/verify.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "tauri": "cargo tauri"

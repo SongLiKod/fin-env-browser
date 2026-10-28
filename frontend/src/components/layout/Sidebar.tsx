@@ -13,6 +13,7 @@ import {
   Users,
 } from 'lucide-react';
 import { cn, roleLabels } from '@/utils';
+import { ipc } from '@/ipc/client';
 import { useAuthStore } from '@/store/auth';
 import { useEnvStore } from '@/store/env';
 import { useToastStore } from '@/store/toast';
@@ -44,6 +45,20 @@ export function Sidebar({
   const running = envs.filter((env) => env.runtime).length;
   const toast = useToastStore();
   const [passwordOpen, setPasswordOpen] = React.useState(false);
+  const [version, setVersion] = React.useState('—');
+
+  React.useEffect(() => {
+    let active = true;
+    ipc
+      .appInfo()
+      .then((info) => {
+        if (active) setVersion(info.version);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const items = navigation.filter((item) => !item.permission || can(item.permission));
 
@@ -216,7 +231,7 @@ export function Sidebar({
               </Tooltip>
             </div>
             <div className="mt-2 flex items-center justify-between px-1 text-[10px] text-content-hint">
-              <span>FinEnv V1.0</span>
+              <span>FinEnv V{version}</span>
               <span className="inline-flex items-center gap-1">
                 <Users className="h-3 w-3" /> 团队版
               </span>

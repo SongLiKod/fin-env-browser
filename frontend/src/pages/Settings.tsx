@@ -856,7 +856,10 @@ export function SettingsPage() {
       {tab === 'about' ? (
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
           <Card>
-            <CardHeader title="FinEnv 指纹环境 V1.0" description="多账号独立浏览器环境管理工具 · Tauri 2.0 + Chromium 隔离进程" />
+            <CardHeader
+              title={`FinEnv 指纹环境 V${appInfo?.version ?? '—'}`}
+              description="多账号独立浏览器环境管理工具 · Tauri 2.0 + Chromium 隔离进程"
+            />
             <CardBody className="space-y-3 text-xs leading-6 text-content-weak">
               <p>
                 FinEnv 面向研发测试团队，为每个测试账号绑定一套隔离浏览器环境，持久保留登录态、Cookie、缓存与指纹配置，支持手动调试与自动化平台 API 对接。

@@ -1,5 +1,6 @@
 // Static cross-check between the two specification documents and the codebase.
 // Run: node scripts/verify.mjs
+import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +27,8 @@ console.log('FinEnv 需求/实现静态校验\n');
 
 console.log('[1] 文档与仓库结构');
 for (const file of [
+  'VERSION',
+  'docs/versioning.md',
   'docs/fin-env-requirement.md',
   'docs/fin-env-tech.md',
   'docs/api-docs.md',
@@ -66,6 +69,18 @@ for (const file of [
 ]) {
   if (existsSync(join(root, file))) ok(file);
   else fail(`缺少文件 ${file}`);
+}
+
+console.log('\n[1.5] 版本号单一来源');
+try {
+  const output = execFileSync(process.execPath, [join(root, 'scripts', 'sync-version.mjs'), '--check'], {
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+  ok(output.trim());
+} catch (error) {
+  const detail = `${error.stdout ?? ''}${error.stderr ?? ''}`.trim();
+  fail(`版本号未同步（只修改根目录 VERSION）${detail ? `：${detail}` : ''}`);
 }
 
 console.log('\n[2] Tauri 命令注册');

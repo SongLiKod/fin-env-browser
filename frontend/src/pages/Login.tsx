@@ -20,7 +20,7 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [version, setVersion] = React.useState<string>('1.0.0');
+  const [version, setVersion] = React.useState<string>('—');
 
   React.useEffect(() => {
     ipc
