@@ -678,16 +678,18 @@ export function EnvironmentsPage() {
                               </Button>
                             )
                           ) : null}
-                          <Tooltip content={isRunning ? '截图' : '启动后可截图'}>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              disabled={!isRunning || !can('open_close') || !envHasAccess(env, 'operate')}
-                              onClick={() => void capture(env)}
-                            >
-                              <Camera className="h-3.5 w-3.5" />
-                            </Button>
-                          </Tooltip>
+                          {can('open_close') && envHasAccess(env, 'operate') ? (
+                            <Tooltip content={isRunning ? '截图' : '启动后可截图'}>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                disabled={!isRunning}
+                                onClick={() => void capture(env)}
+                              >
+                                <Camera className="h-3.5 w-3.5" />
+                              </Button>
+                            </Tooltip>
+                          ) : null}
                           <Button variant="ghost" size="icon-sm" title="环境详情" onClick={() => navigate(`/envs/${env.id}`)}>
                             <ArrowRight className="h-3.5 w-3.5" />
                           </Button>
