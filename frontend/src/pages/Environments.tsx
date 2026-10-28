@@ -472,7 +472,7 @@ export function EnvironmentsPage() {
           />
         ) : (
           <div className="table-wrap">
-            <table className="data-table">
+            <table className="data-table env-list-table">
               <thead>
                 <tr>
                   <th className="w-9">
@@ -484,14 +484,14 @@ export function EnvironmentsPage() {
                       aria-label="全选"
                     />
                   </th>
-                  <th>环境</th>
-                  <th>项目 / 用例</th>
-                  <th>指纹</th>
-                  <th>网络 / IP</th>
-                  <th className="text-center">账号</th>
-                  <th className="min-w-[150px]">运行状态</th>
-                  <th>最近打开</th>
-                  <th className="w-[170px] text-right">操作</th>
+                  <th className="min-w-[260px]">环境</th>
+                  <th className="w-[140px]">项目 / 用例</th>
+                  <th className="w-[180px]">指纹</th>
+                  <th className="w-[140px]">网络 / IP</th>
+                  <th className="w-[48px] text-center">账号</th>
+                  <th className="w-[130px] min-w-[130px]">运行状态</th>
+                  <th className="w-[80px]">最近打开</th>
+                  <th className="w-[140px] text-right">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -525,77 +525,82 @@ export function EnvironmentsPage() {
                         />
                       </td>
                       <td>
-                        <div className="flex items-start gap-2">
-                          <span
-                            className={cn(
-                              'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md',
-                              isRunning
-                                ? 'bg-[color-mix(in_srgb,var(--success)_16%,transparent)] text-[var(--success)] ring-1 ring-[color-mix(in_srgb,var(--success)_45%,transparent)]'
-                                : 'text-content-hint',
-                            )}
-                            title={isRunning ? `环境运行中 · PID ${env.runtime?.pid}` : undefined}
-                          >
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <div className="flex min-w-0 items-center gap-1.5">
                             {isRunning ? (
-                              <MonitorPlay className="h-3.5 w-3.5" />
+                              <span
+                                className="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-[color-mix(in_srgb,var(--success)_14%,transparent)] text-[var(--success)]"
+                                title={`环境运行中 · PID ${env.runtime?.pid}`}
+                              >
+                                <MonitorPlay className="h-3 w-3" />
+                              </span>
                             ) : (
                               <StatusDot
                                 tone={status.tone === 'success' ? 'primary' : 'muted'}
-                                className="mt-0"
+                                className="shrink-0"
                               />
                             )}
-                          </span>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span
-                                className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/10"
-                                style={{ backgroundColor: accent }}
-                                title={env.borderColor || '自动标识色'}
-                              />
-                              <Link to={`/envs/${env.id}`} className="block truncate text-sm font-medium text-content-main hover:text-primary">
-                                {env.name}
-                              </Link>
-                            </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-1">
-                              <Badge
-                                tone={
-                                  env.accessLevel === 'manage'
-                                    ? 'success'
-                                    : env.accessLevel === 'operate'
-                                      ? 'primary'
-                                      : 'neutral'
-                                }
-                              >
-                                我的权限 · {envAccessLabel(env.accessLevel)}
-                              </Badge>
-                              {isRunning ? (
-                                <span className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--success)_38%,transparent)] bg-[color-mix(in_srgb,var(--success)_13%,transparent)] px-2 py-0.5 text-[10px] font-semibold text-[var(--success)]">
-                                  <span className="relative flex h-1.5 w-1.5">
-                                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--success)] opacity-60" />
-                                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
-                                  </span>
-                                  运行中
-                                  <span className="font-mono text-[9px] font-normal opacity-80">
-                                    PID {env.runtime?.pid}
-                                  </span>
-                                </span>
-                              ) : (
-                                <Badge tone={status.tone === 'warning' ? 'warning' : status.tone === 'muted' ? 'neutral' : 'primary'}>
-                                  {status.label}
-                                </Badge>
+                            <span
+                              className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/10"
+                              style={{ backgroundColor: accent }}
+                              title={env.borderColor || '自动标识色'}
+                            />
+                            <Link
+                              to={`/envs/${env.id}`}
+                              className="min-w-0 truncate text-sm font-medium text-content-main hover:text-primary"
+                              title={env.name}
+                            >
+                              {env.name}
+                            </Link>
+                            <span
+                              className={cn(
+                                'ml-auto shrink-0 rounded-full border px-1.5 py-0 text-[10px] font-medium leading-4',
+                                env.accessLevel === 'manage'
+                                  ? 'border-[color-mix(in_srgb,var(--success)_35%,transparent)] bg-[color-mix(in_srgb,var(--success)_10%,transparent)] text-[var(--success)]'
+                                  : env.accessLevel === 'operate'
+                                    ? 'border-primary/30 bg-primary-light text-primary'
+                                    : 'border-border bg-surface-tertiary text-content-weak',
                               )}
-                              {env.testEnv ? <Badge tone="outline">{testEnvLabels[env.testEnv] ?? env.testEnv}</Badge> : null}
-                              {env.tags.slice(0, 2).map((tag) => (
-                                <Badge key={tag} tone="neutral">
-                                  #{tag}
-                                </Badge>
-                              ))}
-                              {env.tags.length > 2 ? <span className="text-[10px] text-content-hint">+{env.tags.length - 2}</span> : null}
-                            </div>
+                              title={`我的环境权限：${envAccessLabel(env.accessLevel)}`}
+                            >
+                              {envAccessLabel(env.accessLevel)}权限
+                            </span>
+                          </div>
+                          <div
+                            className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap"
+                            title={[env.testEnv ? testEnvLabels[env.testEnv] ?? env.testEnv : '', ...env.tags.map((tag) => `#${tag}`)].filter(Boolean).join(' · ')}
+                          >
+                            {isRunning ? (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--success)_38%,transparent)] bg-[color-mix(in_srgb,var(--success)_13%,transparent)] px-1.5 py-0 text-[10px] font-semibold leading-4 text-[var(--success)]">
+                                <span className="relative flex h-1.5 w-1.5">
+                                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--success)] opacity-60" />
+                                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
+                                </span>
+                                运行中
+                              </span>
+                            ) : (
+                              <Badge tone={status.tone === 'warning' ? 'warning' : status.tone === 'muted' ? 'neutral' : 'primary'} className="shrink-0 px-1.5 py-0 text-[10px] leading-4">
+                                {status.label}
+                              </Badge>
+                            )}
+                            {env.testEnv ? (
+                              <Badge tone="outline" className="shrink-0 px-1.5 py-0 text-[10px] leading-4">
+                                {testEnvLabels[env.testEnv] ?? env.testEnv}
+                              </Badge>
+                            ) : null}
+                            {env.tags.slice(0, 1).map((tag) => (
+                              <Badge key={tag} tone="neutral" className="shrink-0 px-1.5 py-0 text-[10px] leading-4">
+                                #{tag}
+                              </Badge>
+                            ))}
+                            {env.tags.length > 1 ? (
+                              <span className="shrink-0 text-[10px] text-content-hint">+{env.tags.length - 1}</span>
+                            ) : null}
                           </div>
                         </div>
                       </td>
                       <td>
-                        <div className="max-w-[190px] space-y-0.5 text-xs">
+                        <div className="max-w-[140px] space-y-0.5 text-xs">
                           <p className="truncate text-content-main">{env.project || '未指定项目'}</p>
                           <p className="truncate text-content-hint">
                             {env.accountRole || '未指定角色'} {env.caseId ? `· ${env.caseId}` : ''}
@@ -603,7 +608,7 @@ export function EnvironmentsPage() {
                         </div>
                       </td>
                       <td>
-                        <div className="max-w-[210px] space-y-0.5">
+                        <div className="max-w-[180px] space-y-0.5">
                           <p className="flex items-center gap-1 text-xs text-content-main">
                             <Fingerprint className="h-3 w-3 text-primary" />
                             {env.fingerprint.clientHints.platform} · {env.fingerprint.timezone}
@@ -614,7 +619,7 @@ export function EnvironmentsPage() {
                         </div>
                       </td>
                       <td>
-                        <div className="group/ip max-w-[170px] space-y-0.5">
+                        <div className="group/ip max-w-[140px] space-y-0.5">
                           <p className="flex items-center gap-1 font-mono text-xs text-content-main" title={envIpSummary(env)}>
                             <Globe2 className="h-3 w-3 shrink-0 text-primary" />
                             <span className="truncate">{env.ipAddress ?? 'IP 待检测'}</span>
@@ -651,7 +656,7 @@ export function EnvironmentsPage() {
                             <p className="whitespace-nowrap text-content-hint">
                               CPU {env.runtime.cpuPercent.toFixed(1)}% · {env.runtime.memoryMb} MB
                             </p>
-                            <p className="max-w-[190px] truncate text-content-hint" title={env.runtime.currentUrl}>
+                            <p className="max-w-[130px] truncate text-content-hint" title={env.runtime.currentUrl}>
                               {env.runtime.currentUrl || 'about:blank'}
                             </p>
                           </div>

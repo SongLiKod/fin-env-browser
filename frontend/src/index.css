@@ -184,6 +184,17 @@ a {
     border-bottom: none;
   }
 
+  .env-list-table thead th,
+  .env-list-table tbody td {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .env-list-table tbody td {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
   .code-block {
     @apply overflow-auto rounded-md p-3 font-mono text-xs leading-relaxed;
     background: var(--bg-tertiary);

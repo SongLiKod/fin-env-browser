@@ -13,19 +13,19 @@ use std::time::Duration;
 use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
-        BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-        EndPaint, FillRect, InvalidateRect, SelectObject, SetBkMode, SetTextColor, SetWindowRgn,
-        UpdateWindow, DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER,
-        HGDIOBJ, PAINTSTRUCT, TRANSPARENT,
+        BeginPaint, ClientToScreen, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
+        DeleteObject, DrawTextW, EndPaint, FillRect, InvalidateRect, SelectObject, SetBkMode,
+        SetTextColor, SetWindowRgn, UpdateWindow, DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS,
+        DT_SINGLELINE, DT_VCENTER, HGDIOBJ, PAINTSTRUCT, TRANSPARENT,
     },
     System::LibraryLoader::GetModuleHandleW,
     UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos,
-        GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindow, IsWindowVisible, PeekMessageW,
-        RegisterClassW, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-        TranslateMessage, GWLP_USERDATA, LWA_ALPHA, LWA_COLORKEY, MSG, PM_REMOVE, SWP_NOACTIVATE,
-        SWP_NOZORDER, SW_HIDE, SW_SHOWNOACTIVATE, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-        WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect,
+        GetCursorPos, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindow, IsWindowVisible,
+        PeekMessageW, RegisterClassW, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos,
+        ShowWindow, TranslateMessage, GWLP_USERDATA, LWA_ALPHA, LWA_COLORKEY, MSG, PM_REMOVE,
+        SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOWNOACTIVATE, WNDCLASSW, WS_EX_LAYERED,
+        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
     },
 };
 
@@ -298,18 +298,27 @@ unsafe fn frame_sync(frame: HWND, frame_ptr: *mut Frame, chrome: HWND) {
         ShowWindow(frame, SW_HIDE);
         return;
     }
-    let mut rect = RECT {
+    // Chromium's outer window rect includes the invisible Windows resize border
+    // (8px on the sides and bottom at 100% DPI). Anchoring the overlay to the
+    // client rect keeps the coloured frame flush with the visible page instead
+    // of leaving a gap around the left, right and bottom edges.
+    let mut client = RECT {
         left: 0,
         top: 0,
         right: 0,
         bottom: 0,
     };
-    if GetWindowRect(chrome, &mut rect) == 0 {
+    if GetClientRect(chrome, &mut client) == 0 {
         ShowWindow(frame, SW_HIDE);
         return;
     }
-    let width = rect.right - rect.left;
-    let height = rect.bottom - rect.top;
+    let mut origin = POINT { x: 0, y: 0 };
+    if ClientToScreen(chrome, &mut origin) == 0 {
+        ShowWindow(frame, SW_HIDE);
+        return;
+    }
+    let width = client.right - client.left;
+    let height = client.bottom - client.top;
     if width < 640 || height < 420 {
         ShowWindow(frame, SW_HIDE);
         return;
@@ -322,8 +331,8 @@ unsafe fn frame_sync(frame: HWND, frame_ptr: *mut Frame, chrome: HWND) {
     SetWindowPos(
         frame,
         null_mut(),
-        rect.left,
-        rect.top,
+        origin.x,
+        origin.y,
         width,
         height,
         SWP_NOZORDER | SWP_NOACTIVATE,
@@ -450,9 +459,29 @@ unsafe extern "system" fn frame_proc(
     }
 }
 
+fn window_area(hwnd: HWND) -> i64 {
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+        return 0;
+    }
+    i64::from(rect.right - rect.left).max(0) * i64::from(rect.bottom - rect.top).max(0)
+}
+
 fn wait_for_window(pid: u32) -> Option<HWND> {
     for _ in 0..100 {
-        if let Some(handle) = super::window_handles(pid).into_iter().next() {
+        // Chromium may briefly create auxiliary top-level windows (for example
+        // the "restore pages?" bubble). Pick the largest window so the border
+        // and badge always attach to the actual browser frame.
+        if let Some(handle) = super::window_handles(pid)
+            .into_iter()
+            .filter(|hwnd| window_area(*hwnd) >= 640 * 420)
+            .max_by_key(|hwnd| window_area(*hwnd))
+        {
             return Some(handle);
         }
         thread::sleep(Duration::from_millis(200));
