@@ -2,6 +2,8 @@
 
 基础路径：`http://127.0.0.1:17321/api/v1`（可在「系统设置 → API 服务」修改监听地址与端口）。
 
+浏览器直接访问基础路径会返回 API 服务信息、认证方式和健康检查地址；业务接口需要 API Key。健康检查为 `GET /api/v1/health`，无需认证。
+
 - 协议：HTTP/JSON（截图接口返回 `image/png`）
 - 认证：`Authorization: Bearer finenv_xxx` 或 `X-API-Key: finenv_xxx`
 - 高危确认：删除环境/代理等接口额外要求 `X-FinEnv-Confirm: true`

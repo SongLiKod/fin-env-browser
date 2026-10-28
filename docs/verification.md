@@ -118,7 +118,7 @@ cargo test
 - `sdk/js npm test`：4/4 通过（URL/Header/JSON/错误映射）
 - `sdk/python python -m unittest`：4/4 通过（查询构造/请求体/错误映射/环境变量）
 - Python 3.12 `py_compile`：通过
-- `node scripts/verify.mjs`：通过，0 提示（122 个 Tauri 命令注册、122 个前端 IPC 命令覆盖、37 条 API 路由、19 张表、Capability、主题 Token、需求/技术文档能力追踪）
+- `node scripts/verify.mjs`：通过，0 提示（122 个 Tauri 命令注册、122 个前端 IPC 命令覆盖、38 条 API 路由、19 张表、Capability、主题 Token、需求/技术文档能力追踪）
 - `cargo fmt --check`：通过
 - `cargo check`：通过
 - `cargo clippy --all-targets -- -D warnings`：通过（0 warning）
@@ -271,3 +271,9 @@ cargo test
 - **问题**：Windows 的 `GetWindowRect` 包含 Chromium 外侧不可见的调整边框（100% DPI 时左/右/下各约 8px，顶部为 0），旧覆盖层按外框绘制，导致绿色边框与页面之间在左、右、下出现空隙。
 - **修复**：`frame_sync` 改用 `GetClientRect` + `ClientToScreen` 获取浏览器真实内容区，并把覆盖窗口定位到内容区；边框仍向内绘制，因此左/右/下与顶部一样紧贴页面。覆盖层从 Chromium 可见窗口中按面积选择主窗口，避免误绑「要恢复页面吗？」等辅助弹窗。
 - **验证（真实 Chromium / 100% DPI）**：主窗口外框 `(91,74)-(2011,1106)`，客户区 `(99,74)-(2003,1098)`；边框覆盖窗口实测 `(99,74)-(2003,1098)`，与客户区完全一致。截图像素采样确认左、右、下绿色边框与页面之间不再有 8px 空隙，10px 边框仍可点击穿透。
+
+## 25. API 基础路径可浏览
+
+- **问题**：设置页展示的基础路径 `/api/v1` 没有注册路由，浏览器直接访问返回 404，容易被误认为 API 服务不可用。
+- **修复**：新增公开的 `GET /api/v1` 服务信息页，返回服务名、版本、认证方式、健康检查地址和常用接口；业务接口仍需 API Key。健康检查 `GET /api/v1/health` 保持公开。
+- **验证**：`GET /api/v1` 返回 200 JSON；`GET /api/v1/health` 返回 200；`GET /api/v1/envs` 未带 Key 返回 401；未知路径仍返回 404。

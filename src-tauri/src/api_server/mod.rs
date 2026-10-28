@@ -149,7 +149,9 @@ impl Default for ApiServerHandle {
 }
 
 fn build_router(state: SharedState) -> Router {
-    let public = Router::new().route("/health", get(health));
+    let public = Router::new()
+        .route("/", get(api_index))
+        .route("/health", get(health));
     let protected = Router::new()
         .route("/stats", get(stats))
         .route("/envs", get(list_envs).post(create_env))
@@ -264,6 +266,33 @@ fn confirmed(headers: &HeaderMap) -> bool {
         .and_then(|v| v.to_str().ok())
         .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
         .unwrap_or(false)
+}
+
+async fn api_index() -> Json<Value> {
+    Json(json!({
+        "status": "ok",
+        "app": "FinEnv",
+        "service": "FinEnv REST API",
+        "version": env!("CARGO_PKG_VERSION"),
+        "baseUrl": "/api/v1",
+        "message": "API 服务运行中。业务接口需要 API Key 认证；健康检查无需认证。",
+        "authentication": {
+            "header": "x-api-key",
+            "alternative": "Authorization: Bearer <api-key>"
+        },
+        "health": "/api/v1/health",
+        "endpoints": {
+            "health": "GET /api/v1/health",
+            "stats": "GET /api/v1/stats",
+            "environments": "GET /api/v1/envs",
+            "environment": "GET /api/v1/envs/{id}",
+            "open": "POST /api/v1/envs/{id}/open",
+            "close": "POST /api/v1/envs/{id}/close",
+            "status": "GET /api/v1/envs/{id}/status",
+            "screenshot": "GET /api/v1/envs/{id}/screenshot"
+        },
+        "docs": "docs/api-docs.md"
+    }))
 }
 
 async fn health() -> Json<Value> {
