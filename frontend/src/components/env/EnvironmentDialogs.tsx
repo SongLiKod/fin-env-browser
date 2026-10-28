@@ -123,7 +123,7 @@ export function CreateEnvironmentDialog({
             placeholder="例如：订单中心 - 测试账号 A"
           />
         </Field>
-        <Field label="环境标识色" hint="列表、详情与运行栏使用该颜色和粗细；浏览器窗口边框同步颜色" className="col-span-2">
+        <Field label="环境标识色" hint="列表、详情、运行栏与浏览器窗口边框使用该颜色和粗细（Windows 窗口边框）" className="col-span-2">
           <ColorPicker
             value={form.borderColor}
             onChange={(value) => update('borderColor', value)}

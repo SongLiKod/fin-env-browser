@@ -313,7 +313,7 @@ impl BrowserManager {
             let color = effective_border_color(env);
             let border_color = color.clone();
             tokio::spawn(async move { apply_window_border(pid, &border_color).await });
-            overlay::spawn(pid, env.name.clone(), color);
+            overlay::spawn(pid, env.name.clone(), color, env.border_width);
         }
         let tx = self.exit_tx.clone();
         let env_id_for_wait = env.id.clone();
@@ -857,7 +857,12 @@ impl BrowserManager {
                 map.insert(env.id.clone(), instance.clone());
             }
             #[cfg(windows)]
-            overlay::spawn(session.pid, env.name.clone(), effective_border_color(&env));
+            overlay::spawn(
+                session.pid,
+                env.name.clone(),
+                effective_border_color(&env),
+                env.border_width,
+            );
             self.start_event_handler(instance);
             let _ = Audit::env(
                 &self.db,

@@ -154,7 +154,7 @@ export function OverviewPanel({
             <Field label="测试用例 ID">
               <Input value={form.caseId} onChange={(event) => update('caseId', event.target.value)} disabled={!canEdit} placeholder="CASE-1024" />
             </Field>
-            <Field label="环境标识色" className="col-span-2 md:col-span-3" hint="列表、详情与运行栏使用该颜色和粗细；浏览器窗口边框同步颜色">
+            <Field label="环境标识色" className="col-span-2 md:col-span-3" hint="列表、详情、运行栏与浏览器窗口边框使用该颜色和粗细（Windows 窗口边框）">
               <ColorPicker
                 value={form.borderColor}
                 onChange={(value) => update('borderColor', value)}

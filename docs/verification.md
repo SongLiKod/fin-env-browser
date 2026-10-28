@@ -150,8 +150,8 @@ cargo test
 
 - **运行环境常驻栏**：`RunningEnvironments` 位于顶栏下方，实时列出所有运行中的环境，显示标识色、名称、项目、出口 IP、PID，并提供刷新 IP、进入详情、关闭浏览器操作；每 5 秒同步一次，面板重启或 API 打开的环境同样可见。
 - **浏览器窗口身份**：启动参数新增 `--window-name=FinEnv · <环境名>`，Chromium 窗口名称/任务栏标题可区分环境；面板与浏览器窗口使用同一套标识色。Windows 下额外在浏览器右下角显示可点击穿透的环境悬浮标牌，随窗口移动，鼠标移入时淡出，避免遮挡 Tab 栏。
-- **环境标识色**：`environments.border_color`（迁移 003）保存 6 位十六进制颜色；`environments.border_width`（迁移 004，1-12px，默认 3px）控制标识色色条粗细。未设置颜色时按环境 ID 生成稳定调色板色。列表行左侧色条、环境名色点、详情页左侧色条、运行栏、创建/编辑对话框色板、取色器与粗细滑杆均使用该配置。
-- **Windows 窗口边框**：Windows 11 下通过 DWM `DWMWA_BORDER_COLOR` 将同一颜色应用到真实 Chromium 窗口边框；其他平台自动忽略，不影响功能。
+- **环境标识色**：`environments.border_color`（迁移 003）保存 6 位十六进制颜色；`environments.border_width`（迁移 004，1-12px，默认 3px）控制标识色色条与 Windows 浏览器窗口边框的粗细。未设置颜色时按环境 ID 生成稳定调色板色。列表行左侧色条、环境名色点、详情页左侧色条、运行栏、创建/编辑对话框色板、取色器与粗细滑杆均使用该配置。
+- **Windows 窗口边框**：Windows 11 下通过 DWM `DWMWA_BORDER_COLOR` 将同一颜色应用到真实 Chromium 窗口边框；同时 `process/overlay.rs` 在窗口外叠加一个 `WS_EX_TRANSPARENT | WS_EX_LAYERED` 的点击穿透边框窗口，按 `border_width` 绘制 1-12px 彩色边框，随窗口移动/缩放并在最小化时隐藏。其他平台自动忽略原生覆盖边框，面板标识仍生效。
 - **出口 IP**：新增 `POST /envs/{id}/check-ip` 与 IPC `env_check_ip`。绑定代理时经代理检测，否则直连检测，出口 IP/国家/城市/时区/来源/检测时间写入环境并在列表、详情、运行栏展示；代理变更时自动清空旧 IP。
 - **界面修复**：修正 `Select` 组件宽度类作用在 `<select>` 而非外层容器导致的筛选区纵向堆叠；筛选区改为单行自适应并在第二行放置批量操作、环境计数与清除/分组管理。
 - **本轮 UI/接口验证**：
@@ -246,3 +246,10 @@ cargo test
   - ���Թ���ʦ��¼�� `env_list` ֻ���� A��`env_get(B)` �� `browser_open(B)` �����ؽ�ֹ���ʣ����� A ������`env_member_candidates(A)` ��ȱ�� `manage_env_members` ���ܾ���
   - WebView2 CDP ��ͼȷ�Ϲ���Ա�����ʳ�Ա��ҳǩչʾ��Ա������ѡ������/�Ƴ������Թ���ʦ�����б�ֻ��ʾ�����价����
   - `cargo fmt` / `cargo clippy --all-targets -- -D warnings` ͨ����ǰ�� typecheck/build ͨ����
+
+## 21. ��������ڿɵ���ϸ�߿�
+
+- **ʵ��**��`process/overlay.rs` �� Windows Chromium ���������ϴ��� `WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE` �Ĳ�ɫ�߿򴰿ڣ��� `border_width`��1-12px��������/��/��/�������߿��ڲ�ʹ�� magic color key ����͸���������͸���洰���ƶ�/����ˢ�£���С���򴰿ڹ�Сʱ���أ�������������������ӹ�ʱ������ `env.border_width`��
+- **UI**������/�༭�����ı�ʶɫȡɫ����ʹ�� 1-12px ���ˣ���ʾ�İ���ȷ����������ڱ߿�ʹ�ø���ɫ�ʹ�ϸ��Windows������
+- **��֤**������ `borderColor=#16A34A`��`borderWidth=10` �Ļ�����������ʵ�������ͼȷ�� Chromium �������ܳ���Լ 10px ��ɫ�߿��Ҵ��ڱ�����λ�����½ǣ��������������벻��Ӱ�죨`WS_EX_TRANSPARENT`����
+- **ƽ̨����**��ԭ�����Ǳ߿�� Windows��macOS/Linux ��ʹ������ʶɫ��DWM ��ɫ�� Windows 11 ֧�֡�

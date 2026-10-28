@@ -172,7 +172,7 @@ ok('CSS Token / 暗色 / 密度完整');
 console.log('\n[7] 需求文档关键能力');
 const requirement = read('docs/fin-env-requirement.md');
 const tech = read('docs/fin-env-tech.md');
-for (const phrase of ['指纹快照', '代理池', 'REST API', 'AES256', '审计日志', '主题配置', '资源管控', '环境模板', '多环境批量操作', '同步控制', '环境级权限']) {
+for (const phrase of ['指纹快照', '代理池', 'REST API', 'AES256', '审计日志', '主题配置', '资源管控', '环境模板', '多环境批量操作', '同步控制', '环境级权限', '边框粗细']) {
   if (!requirement.includes(phrase)) fail(`需求文档缺少「${phrase}」`);
 }
 for (const phrase of ['AES256-GCM', '主题自定义', 'CDP', 'Axum', 'rusqlite']) {

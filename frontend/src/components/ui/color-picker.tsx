@@ -85,7 +85,7 @@ export function ColorPicker({
             value={borderWidth}
             onChange={(event) => onWidthChange(Number(event.target.value))}
             className="h-1 w-32 cursor-pointer accent-[var(--color-primary)]"
-            aria-label="标识色粗细"
+            aria-label="环境标识色与浏览器窗口边框粗细"
           />
           <span className="w-8 text-[10px] tabular-nums text-content-weak">{borderWidth}px</span>
           <span className="h-4 rounded-sm" style={{ width: borderWidth, backgroundColor: swatch }} />

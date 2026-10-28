@@ -136,7 +136,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
 }
 ```
 
-`templateOs`：`win11` / `win10` / `mac` / `linux`。不传 `fingerprint` 时自动生成自洽模板；传入时按内置规则校验，存在冲突返回 `400 fingerprint_conflict`。`borderColor` 为 6 位十六进制（如 `#2563EB`），留空则按环境 ID 自动生成标识色；`borderWidth` 为 1-12px，默认 3px，控制面板中标识色色条的粗细。
+`templateOs`：`win11` / `win10` / `mac` / `linux`。不传 `fingerprint` 时自动生成自洽模板；传入时按内置规则校验，存在冲突返回 `400 fingerprint_conflict`。`borderColor` 为 6 位十六进制（如 `#2563EB`），留空则按环境 ID 自动生成标识色；`borderWidth` 为 1-12px，默认 3px，控制面板标识色色条和 Windows 浏览器窗口边框的粗细。
 
 成功：`201 Created` + `EnvironmentView`。
 

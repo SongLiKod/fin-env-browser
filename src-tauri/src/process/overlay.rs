@@ -14,18 +14,18 @@ use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
         BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-        EndPaint, FillRect, SelectObject, SetBkMode, SetTextColor, SetWindowRgn, UpdateWindow,
-        DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, HGDIOBJ,
-        PAINTSTRUCT, TRANSPARENT,
+        EndPaint, FillRect, InvalidateRect, SelectObject, SetBkMode, SetTextColor, SetWindowRgn,
+        UpdateWindow, DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER,
+        HGDIOBJ, PAINTSTRUCT, TRANSPARENT,
     },
     System::LibraryLoader::GetModuleHandleW,
     UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos, GetWindowLongPtrW,
-        GetWindowRect, IsIconic, IsWindow, IsWindowVisible, PeekMessageW, RegisterClassW,
-        SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
-        GWLP_USERDATA, LWA_ALPHA, MSG, PM_REMOVE, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE,
-        SW_SHOWNOACTIVATE, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-        WS_EX_TRANSPARENT, WS_POPUP,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos,
+        GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindow, IsWindowVisible, PeekMessageW,
+        RegisterClassW, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+        TranslateMessage, GWLP_USERDATA, LWA_ALPHA, LWA_COLORKEY, MSG, PM_REMOVE, SWP_NOACTIVATE,
+        SWP_NOZORDER, SW_HIDE, SW_SHOWNOACTIVATE, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
     },
 };
 
@@ -40,6 +40,14 @@ struct Badge {
     font: HGDIOBJ,
 }
 
+struct Frame {
+    color: u32,
+    color_key: u32,
+    width: i32,
+    height: i32,
+    thickness: i32,
+}
+
 impl Drop for Badge {
     fn drop(&mut self) {
         unsafe {
@@ -49,13 +57,14 @@ impl Drop for Badge {
 }
 
 static REGISTER_CLASS: Once = Once::new();
+static REGISTER_FRAME_CLASS: Once = Once::new();
 
-pub fn spawn(pid: u32, name: String, color: String) {
+pub fn spawn(pid: u32, name: String, color: String, border_width: u32) {
     let text = truncate(&format!("FinEnv · {name}"), 28);
-    thread::spawn(move || run(pid, text, color));
+    thread::spawn(move || run(pid, text, color, border_width));
 }
 
-fn run(pid: u32, text: String, color: String) {
+fn run(pid: u32, text: String, color: String, border_width: u32) {
     let chrome = wait_for_window(pid);
     let Some(chrome) = chrome else {
         return;
@@ -65,6 +74,22 @@ fn run(pid: u32, text: String, color: String) {
         let wc = WNDCLASSW {
             style: 0,
             lpfnWndProc: Some(window_proc),
+            cbClsExtra: 0,
+            cbWndExtra: 0,
+            hInstance: GetModuleHandleW(null()),
+            hIcon: null_mut(),
+            hCursor: null_mut(),
+            hbrBackground: null_mut(),
+            lpszMenuName: null(),
+            lpszClassName: class_name.as_ptr(),
+        };
+        RegisterClassW(&wc);
+    });
+    REGISTER_FRAME_CLASS.call_once(|| unsafe {
+        let class_name = wide("FinEnvEnvironmentFrame");
+        let wc = WNDCLASSW {
+            style: 0,
+            lpfnWndProc: Some(frame_proc),
             cbClsExtra: 0,
             cbWndExtra: 0,
             hInstance: GetModuleHandleW(null()),
@@ -148,6 +173,47 @@ fn run(pid: u32, text: String, color: String) {
         UpdateWindow(badge);
     }
 
+    let color_key = if background == 0x00FF_00FF {
+        0x00FE_00FE
+    } else {
+        0x00FF_00FF
+    };
+    let frame_state = Box::new(Frame {
+        color: background,
+        color_key,
+        width: 0,
+        height: 0,
+        thickness: border_width.min(12) as i32,
+    });
+    let frame_ptr = Box::into_raw(frame_state);
+    let frame_class = wide("FinEnvEnvironmentFrame");
+    let frame_name = wide("FinEnv Environment Border");
+    let frame = unsafe {
+        CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED,
+            frame_class.as_ptr(),
+            frame_name.as_ptr(),
+            WS_POPUP,
+            0,
+            0,
+            1,
+            1,
+            chrome,
+            null_mut(),
+            GetModuleHandleW(null()),
+            frame_ptr as *const _,
+        )
+    };
+    if frame.is_null() {
+        drop(unsafe { Box::from_raw(frame_ptr) });
+    } else {
+        unsafe {
+            SetWindowLongPtrW(frame, GWLP_USERDATA, frame_ptr as isize);
+            SetLayeredWindowAttributes(frame, color_key, 0, LWA_COLORKEY);
+            ShowWindow(frame, SW_HIDE);
+        }
+    }
+
     let mut message: MSG = unsafe { std::mem::zeroed() };
     let mut tick = 0u32;
     loop {
@@ -206,6 +272,9 @@ fn run(pid: u32, text: String, color: String) {
                 }
             }
         }
+        unsafe {
+            frame_sync(frame, frame_ptr, chrome);
+        }
         tick = tick.wrapping_add(1);
         thread::sleep(Duration::from_millis(60));
     }
@@ -213,7 +282,53 @@ fn run(pid: u32, text: String, color: String) {
     unsafe {
         SetWindowLongPtrW(badge, GWLP_USERDATA, 0);
         drop(Box::from_raw(state_ptr));
+        if !frame.is_null() {
+            DestroyWindow(frame);
+            drop(Box::from_raw(frame_ptr));
+        }
     }
+}
+
+unsafe fn frame_sync(frame: HWND, frame_ptr: *mut Frame, chrome: HWND) {
+    if frame.is_null() || frame_ptr.is_null() {
+        return;
+    }
+    let state = &mut *frame_ptr;
+    if state.thickness <= 0 || IsIconic(chrome) != 0 || IsWindowVisible(chrome) == 0 {
+        ShowWindow(frame, SW_HIDE);
+        return;
+    }
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    if GetWindowRect(chrome, &mut rect) == 0 {
+        ShowWindow(frame, SW_HIDE);
+        return;
+    }
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+    if width < 640 || height < 420 {
+        ShowWindow(frame, SW_HIDE);
+        return;
+    }
+    if state.width != width || state.height != height {
+        state.width = width;
+        state.height = height;
+        InvalidateRect(frame, null(), 1);
+    }
+    SetWindowPos(
+        frame,
+        null_mut(),
+        rect.left,
+        rect.top,
+        width,
+        height,
+        SWP_NOZORDER | SWP_NOACTIVATE,
+    );
+    ShowWindow(frame, SW_SHOWNOACTIVATE);
 }
 
 unsafe extern "system" fn window_proc(
@@ -255,6 +370,79 @@ unsafe extern "system" fn window_proc(
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
             );
             SelectObject(hdc, previous);
+            EndPaint(hwnd, &paint);
+            0
+        }
+        _ => DefWindowProcW(hwnd, message, wparam, lparam),
+    }
+}
+
+unsafe extern "system" fn frame_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    const WM_PAINT: u32 = 0x000F;
+    const WM_ERASEBKGND: u32 = 0x0014;
+
+    match message {
+        WM_ERASEBKGND => 1,
+        WM_PAINT => {
+            let pointer = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const Frame;
+            if pointer.is_null() {
+                return DefWindowProcW(hwnd, message, wparam, lparam);
+            }
+            let frame = &*pointer;
+            let mut paint: PAINTSTRUCT = std::mem::zeroed();
+            let hdc = BeginPaint(hwnd, &mut paint);
+            let width = frame.width.max(1);
+            let height = frame.height.max(1);
+            let thickness = frame.thickness.clamp(0, 12).min(width / 2).min(height / 2);
+            let key_brush = CreateSolidBrush(frame.color_key);
+            FillRect(
+                hdc,
+                &RECT {
+                    left: 0,
+                    top: 0,
+                    right: width,
+                    bottom: height,
+                },
+                key_brush,
+            );
+            DeleteObject(key_brush as HGDIOBJ);
+            if thickness > 0 {
+                let brush = CreateSolidBrush(frame.color);
+                for rect in [
+                    RECT {
+                        left: 0,
+                        top: 0,
+                        right: width,
+                        bottom: thickness,
+                    },
+                    RECT {
+                        left: 0,
+                        top: height - thickness,
+                        right: width,
+                        bottom: height,
+                    },
+                    RECT {
+                        left: 0,
+                        top: 0,
+                        right: thickness,
+                        bottom: height,
+                    },
+                    RECT {
+                        left: width - thickness,
+                        top: 0,
+                        right: width,
+                        bottom: height,
+                    },
+                ] {
+                    FillRect(hdc, &rect, brush);
+                }
+                DeleteObject(brush as HGDIOBJ);
+            }
             EndPaint(hwnd, &paint);
             0
         }
