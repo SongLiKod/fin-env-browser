@@ -749,7 +749,7 @@ export function SettingsPage() {
                     ))}
                   </div>
                   <p className="mt-2 text-[10px] leading-5 text-content-hint">
-                    每个环境还会自动追加 profile 目录、随机调试端口、代理、窗口尺寸、语言、Hosts 与扩展参数；这些隔离参数不可覆盖。
+                    每个环境还会自动追加 profile 目录、随机调试端口、代理、语言、Hosts 与扩展参数；这些隔离参数不可覆盖。窗口尺寸可用 --window-size 自定义，环境参数优先于全局最大化设置。
                   </p>
                 </div>
                 <Field
