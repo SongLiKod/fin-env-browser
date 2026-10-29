@@ -11,19 +11,20 @@ use std::thread;
 use std::time::Duration;
 
 use windows::{
-    core::PCWSTR,
+    core::{w, PCWSTR},
     Win32::{
         Foundation::{COLORREF, HWND as WinHWND, RECT as WinRECT, TRUE},
         Graphics::Gdi::{
-            CreateBitmap, CreateCompatibleDC, CreateDIBSection,
+            CreateBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontW as WinCreateFontW,
             CreateSolidBrush as WinCreateSolidBrush, DeleteDC, DeleteObject as DeleteGdiObject,
             DrawTextW as WinDrawTextW, Ellipse as WinEllipse, GetStockObject,
             SelectObject as WinSelectObject, SetBkMode as WinSetBkMode,
             SetTextColor as WinSetTextColor, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
-            DEFAULT_GUI_FONT, DIB_RGB_COLORS, DT_CENTER as WIN_DT_CENTER,
+            CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET as WIN_DEFAULT_CHARSET,
+            DEFAULT_PITCH, DIB_RGB_COLORS, DT_CENTER as WIN_DT_CENTER,
             DT_END_ELLIPSIS as WIN_DT_END_ELLIPSIS, DT_SINGLELINE as WIN_DT_SINGLELINE,
-            DT_VCENTER as WIN_DT_VCENTER, HGDIOBJ as WinHGDIOBJ, NULL_PEN,
-            TRANSPARENT as WIN_TRANSPARENT,
+            DT_VCENTER as WIN_DT_VCENTER, FF_DONTCARE, HGDIOBJ as WinHGDIOBJ, NULL_PEN,
+            OUT_DEFAULT_PRECIS, TRANSPARENT as WIN_TRANSPARENT,
         },
         System::Com::{
             CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
@@ -611,7 +612,35 @@ unsafe fn create_overlay_icon(color: u32, badge_text: &str) -> Option<HICON> {
     let _ = WinEllipse(hdc, 2, 2, SIZE - 2, SIZE - 2);
 
     if !badge_text.is_empty() {
-        let old_font = WinSelectObject(hdc, GetStockObject(DEFAULT_GUI_FONT));
+        let count = badge_text.chars().count();
+        let has_wide_glyph = !badge_text.is_ascii();
+        let font_height = match (count, has_wide_glyph) {
+            (1, true) => 23,
+            (2, true) => 16,
+            (3, true) => 13,
+            (_, true) => 11,
+            (1, false) => 24,
+            (2, false) => 19,
+            (3, false) => 15,
+            _ => 12,
+        };
+        let font = WinCreateFontW(
+            -font_height,
+            0,
+            0,
+            0,
+            700,
+            0,
+            0,
+            0,
+            WIN_DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            (FF_DONTCARE.0 | DEFAULT_PITCH.0) as u32,
+            w!("Microsoft YaHei"),
+        );
+        let old_font = WinSelectObject(hdc, WinHGDIOBJ(font.0));
         WinSetBkMode(hdc, WIN_TRANSPARENT);
         WinSetTextColor(hdc, COLORREF(0x00FF_FFFF));
         let mut text: Vec<u16> = badge_text.encode_utf16().collect();
@@ -628,6 +657,7 @@ unsafe fn create_overlay_icon(color: u32, badge_text: &str) -> Option<HICON> {
             WIN_DT_CENTER | WIN_DT_VCENTER | WIN_DT_SINGLELINE | WIN_DT_END_ELLIPSIS,
         );
         WinSelectObject(hdc, old_font);
+        let _ = DeleteGdiObject(WinHGDIOBJ(font.0));
     }
 
     let _ = DeleteGdiObject(WinHGDIOBJ(white.0));
