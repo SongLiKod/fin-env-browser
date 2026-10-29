@@ -64,7 +64,7 @@ export function Sidebar({
 
   return (
     <aside
-      className="flex h-full shrink-0 flex-col overflow-hidden border-r border-border bg-surface-base transition-[width] duration-200 ease-out"
+      className="sidebar-shell flex h-full shrink-0 flex-col overflow-hidden border-r border-border bg-surface-base transition-[width] duration-200 ease-out"
       style={{ width: collapsed ? '4rem' : 'var(--sidebar-width)' }}
       data-collapsed={collapsed ? 'true' : 'false'}
     >
@@ -78,7 +78,7 @@ export function Sidebar({
           src="/logo.png"
           alt="FinEnv"
           title={collapsed ? 'FinEnv 指纹环境' : undefined}
-          className="h-8 w-8 shrink-0 rounded-md"
+          className="sidebar-logo h-8 w-8 shrink-0 rounded-lg"
         />
         {!collapsed ? (
           <div className="min-w-0">
@@ -144,7 +144,7 @@ export function Sidebar({
       </nav>
 
       {!collapsed ? (
-        <div className="mx-3 mt-4 rounded-lg border border-border bg-surface-secondary p-3">
+        <div className="resource-card mx-3 mt-4 rounded-xl border border-border bg-surface-secondary p-3">
           <div className="flex items-center gap-2 text-xs font-medium text-content-main">
             <Activity className="h-3.5 w-3.5 text-primary" />
             资源管控

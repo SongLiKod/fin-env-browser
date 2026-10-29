@@ -2,7 +2,7 @@ name: Gitea CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, main-2]
   pull_request:
 
 jobs:

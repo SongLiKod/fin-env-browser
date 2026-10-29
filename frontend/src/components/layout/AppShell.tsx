@@ -29,7 +29,7 @@ export function AppShell() {
   };
 
   return (
-    <div className="flex h-full overflow-hidden bg-surface-secondary text-content-main">
+    <div className="app-shell flex h-full overflow-hidden bg-surface-secondary text-content-main">
       <Sidebar collapsed={sidebarCollapsed} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar sidebarCollapsed={sidebarCollapsed} onToggleSidebar={toggleSidebar} />

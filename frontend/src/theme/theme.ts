@@ -37,6 +37,14 @@ export function loadCachedTheme(): ThemeConfig {
   }
 }
 
+export function primaryLightFor(primary: string, resolved: 'light' | 'dark'): string {
+  return resolved === 'dark' ? darken(primary, 0.72) : lighten(primary, 0.9);
+}
+
+export function primaryDarkFor(primary: string, resolved: 'light' | 'dark'): string {
+  return resolved === 'dark' ? lighten(primary, 0.12) : darken(primary, 0.16);
+}
+
 export function applyTheme(theme: ThemeConfig): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
@@ -45,8 +53,8 @@ export function applyTheme(theme: ThemeConfig): void {
   root.setAttribute('data-theme', resolved);
   root.setAttribute('data-density', theme.density);
   root.style.setProperty('--color-primary', primary);
-  root.style.setProperty('--color-primary-light', lighten(primary, 0.9));
-  root.style.setProperty('--color-primary-dark', darken(primary, 0.16));
+  root.style.setProperty('--color-primary-light', primaryLightFor(primary, resolved));
+  root.style.setProperty('--color-primary-dark', primaryDarkFor(primary, resolved));
   root.style.setProperty('--text-on-primary', readableOn(primary));
   root.style.colorScheme = resolved;
   try {
