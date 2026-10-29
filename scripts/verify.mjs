@@ -47,6 +47,7 @@ for (const file of [
   'src-tauri/migrations/005_environment_templates.sql',
   'src-tauri/migrations/006_environment_members.sql',
   'src-tauri/migrations/007_environment_launch_args.sql',
+  'src-tauri/migrations/008_taskbar_badge_text.sql',
   'src-tauri/src/process/mod.rs',
   'src-tauri/src/process/overlay.rs',
   'src-tauri/src/process/broadcast.rs',

@@ -166,6 +166,7 @@ pub fn create_environment(
         kernel,
         chromium_path: input.chromium_path.filter(|p| !p.trim().is_empty()),
         chromium_launch_args: sanitize_launch_args(&input.chromium_launch_args)?,
+        taskbar_badge_text: normalize_badge_text(&input.taskbar_badge_text)?,
         auto_restart: input.auto_restart.unwrap_or(false),
         memory_limit_mb: valid_memory_limit(input.memory_limit_mb)?,
         idle_timeout_min: valid_idle(input.idle_timeout_min)?,
@@ -285,6 +286,9 @@ pub async fn update_environment(
     if let Some(args) = input.chromium_launch_args {
         env.chromium_launch_args = sanitize_launch_args(&args)?;
     }
+    if let Some(text) = input.taskbar_badge_text {
+        env.taskbar_badge_text = normalize_badge_text(&text)?;
+    }
     if let Some(auto_restart) = input.auto_restart {
         env.auto_restart = auto_restart;
     }
@@ -347,6 +351,7 @@ pub fn create_template_from_env(
         kernel: env.kernel.clone(),
         chromium_path: env.chromium_path.clone(),
         chromium_launch_args: env.chromium_launch_args.clone(),
+        taskbar_badge_text: env.taskbar_badge_text.clone(),
         auto_restart: env.auto_restart,
         memory_limit_mb: env.memory_limit_mb,
         idle_timeout_min: env.idle_timeout_min,
@@ -543,6 +548,7 @@ pub fn batch_create_from_template(
             kernel: Some(template.kernel.clone()),
             chromium_path: template.chromium_path.clone(),
             chromium_launch_args: template.chromium_launch_args.clone(),
+            taskbar_badge_text: template.taskbar_badge_text.clone(),
             template_os: None,
             fingerprint: Some(template.fingerprint.clone()),
             auto_restart: Some(template.auto_restart),
@@ -1404,6 +1410,20 @@ const RESERVED_LAUNCH_ARGS: &[&str] = &[
     "--lang",
     "--accept-lang",
 ];
+
+fn normalize_badge_text(value: &str) -> Result<String> {
+    let text = value.trim();
+    if text.chars().count() > 4 {
+        return Err(AppError::bad_request("任务栏标识文字不能超过 4 个字符"));
+    }
+    if text
+        .chars()
+        .any(|value| matches!(value, '\0' | '\r' | '\n'))
+    {
+        return Err(AppError::bad_request("任务栏标识文字不能包含控制字符"));
+    }
+    Ok(text.to_string())
+}
 
 fn sanitize_launch_args(args: &[String]) -> Result<Vec<String>> {
     if args.len() > 64 {

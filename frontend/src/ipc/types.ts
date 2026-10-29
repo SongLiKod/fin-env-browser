@@ -150,6 +150,7 @@ export interface Environment {
   kernel: string;
   chromiumPath: string | null;
   chromiumLaunchArgs: string[];
+  taskbarBadgeText: string;
   autoRestart: boolean;
   memoryLimitMb: number | null;
   idleTimeoutMin: number | null;
@@ -264,6 +265,7 @@ export interface EnvironmentTemplate {
   kernel: string;
   chromiumPath: string | null;
   chromiumLaunchArgs: string[];
+  taskbarBadgeText: string;
   autoRestart: boolean;
   memoryLimitMb: number | null;
   idleTimeoutMin: number | null;
@@ -355,6 +357,7 @@ export interface CreateEnvironmentInput {
   kernel?: string | null;
   chromiumPath?: string | null;
   chromiumLaunchArgs?: string[];
+  taskbarBadgeText?: string;
   templateOs?: string | null;
   fingerprint?: Fingerprint | null;
   autoRestart?: boolean | null;
@@ -379,6 +382,7 @@ export interface UpdateEnvironmentInput {
   kernel?: string;
   chromiumPath?: string | null;
   chromiumLaunchArgs?: string[];
+  taskbarBadgeText?: string;
   autoRestart?: boolean;
   memoryLimitMb?: number | null;
   idleTimeoutMin?: number | null;

@@ -716,6 +716,7 @@ mod tests {
             kernel: "chromium".into(),
             chromium_path: None,
             chromium_launch_args: Vec::new(),
+            taskbar_badge_text: String::new(),
             auto_restart: false,
             memory_limit_mb: None,
             idle_timeout_min: None,

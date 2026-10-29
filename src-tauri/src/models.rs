@@ -57,6 +57,8 @@ pub struct Environment {
     pub chromium_path: Option<String>,
     #[serde(default)]
     pub chromium_launch_args: Vec<String>,
+    #[serde(default)]
+    pub taskbar_badge_text: String,
     pub auto_restart: bool,
     pub memory_limit_mb: Option<u32>,
     pub idle_timeout_min: Option<u32>,
@@ -153,6 +155,7 @@ pub struct EnvironmentTemplate {
     pub proxy_id: Option<String>,
     pub extension_ids: Vec<String>,
     pub chromium_launch_args: Vec<String>,
+    pub taskbar_badge_text: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -285,6 +288,8 @@ pub struct CreateEnvironmentInput {
     #[serde(default)]
     pub chromium_launch_args: Vec<String>,
     #[serde(default)]
+    pub taskbar_badge_text: String,
+    #[serde(default)]
     pub template_os: Option<String>,
     #[serde(default)]
     pub fingerprint: Option<Fingerprint>,
@@ -331,6 +336,8 @@ pub struct UpdateEnvironmentInput {
     pub chromium_path: Option<Option<String>>,
     #[serde(default)]
     pub chromium_launch_args: Option<Vec<String>>,
+    #[serde(default)]
+    pub taskbar_badge_text: Option<String>,
     #[serde(default)]
     pub auto_restart: Option<bool>,
     #[serde(default, deserialize_with = "double_option")]

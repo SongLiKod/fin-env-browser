@@ -12,7 +12,7 @@ const ENV_COLUMNS: &str = "id, name, group_id, status, profile_dir, proxy_id, fi
     project, test_env, account_role, version, case_id, tags, notes, kernel, chromium_path, \
     auto_restart, memory_limit_mb, idle_timeout_min, fingerprint_json, created_at, updated_at, last_opened_at, \
     border_color, ip_address, ip_country, ip_country_code, ip_city, ip_timezone, ip_source, ip_checked_at, \
-    border_width, chromium_launch_args";
+    border_width, chromium_launch_args, taskbar_badge_text";
 
 fn decrypt_fingerprint(
     stored: &str,
@@ -90,6 +90,7 @@ fn row_to_env(row: &Row<'_>, crypto: Option<&CryptoManager>) -> rusqlite::Result
         ip_checked_at: row.get(30)?,
         border_width: row.get::<_, i64>(31)? as u32,
         chromium_launch_args: serde_json::from_str(&launch_args).unwrap_or_default(),
+        taskbar_badge_text: row.get(33)?,
         created_at: row.get(20)?,
         updated_at: row.get(21)?,
         last_opened_at: row.get(22)?,
@@ -190,8 +191,8 @@ impl Db {
                  notes, kernel, chromium_path, auto_restart, memory_limit_mb, idle_timeout_min,
                  fingerprint_json, created_at, updated_at, last_opened_at, border_color, ip_address,
                  ip_country, ip_country_code, ip_city, ip_timezone, ip_source, ip_checked_at, border_width,
-                 chromium_launch_args)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33)",
+                 chromium_launch_args, taskbar_badge_text)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34)",
                 params![
                     env.id,
                     env.name,
@@ -226,6 +227,7 @@ impl Db {
                     env.ip_checked_at,
                     env.border_width,
                     launch_args,
+                    env.taskbar_badge_text,
                 ],
             )?;
             Ok(())
@@ -244,7 +246,8 @@ impl Db {
                  auto_restart=?17, memory_limit_mb=?18, idle_timeout_min=?19, fingerprint_json=?20,
                  updated_at=?21, last_opened_at=?22, border_color=?23, ip_address=?24,
                  ip_country=?25, ip_country_code=?26, ip_city=?27, ip_timezone=?28, ip_source=?29,
-                 ip_checked_at=?30, border_width=?31, chromium_launch_args=?32 WHERE id=?1",
+                 ip_checked_at=?30, border_width=?31, chromium_launch_args=?32,
+                 taskbar_badge_text=?33 WHERE id=?1",
                 params![
                     env.id,
                     env.name,
@@ -278,6 +281,7 @@ impl Db {
                     env.ip_checked_at,
                     env.border_width,
                     launch_args,
+                    env.taskbar_badge_text,
                 ],
             )?;
             if changed == 0 {

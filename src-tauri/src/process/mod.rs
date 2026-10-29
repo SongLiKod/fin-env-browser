@@ -316,7 +316,13 @@ impl BrowserManager {
             let color = effective_border_color(env);
             let border_color = color.clone();
             tokio::spawn(async move { apply_window_border(pid, &border_color).await });
-            overlay::spawn(pid, env.name.clone(), color, env.border_width);
+            overlay::spawn(
+                pid,
+                env.name.clone(),
+                env.taskbar_badge_text.clone(),
+                color,
+                env.border_width,
+            );
         }
         let tx = self.exit_tx.clone();
         let env_id_for_wait = env.id.clone();
@@ -863,6 +869,7 @@ impl BrowserManager {
             overlay::spawn(
                 session.pid,
                 env.name.clone(),
+                env.taskbar_badge_text.clone(),
                 effective_border_color(&env),
                 env.border_width,
             );

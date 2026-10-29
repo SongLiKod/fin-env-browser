@@ -13,10 +13,17 @@ use std::time::Duration;
 use windows::{
     core::PCWSTR,
     Win32::{
-        Foundation::{HWND as WinHWND, TRUE},
+        Foundation::{COLORREF, HWND as WinHWND, RECT as WinRECT, TRUE},
         Graphics::Gdi::{
-            CreateBitmap, CreateDIBSection, DeleteObject as DeleteGdiObject, BITMAPINFO,
-            BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ as WinHGDIOBJ,
+            CreateBitmap, CreateCompatibleDC, CreateDIBSection,
+            CreateSolidBrush as WinCreateSolidBrush, DeleteDC, DeleteObject as DeleteGdiObject,
+            DrawTextW as WinDrawTextW, Ellipse as WinEllipse, GetStockObject,
+            SelectObject as WinSelectObject, SetBkMode as WinSetBkMode,
+            SetTextColor as WinSetTextColor, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+            DEFAULT_GUI_FONT, DIB_RGB_COLORS, DT_CENTER as WIN_DT_CENTER,
+            DT_END_ELLIPSIS as WIN_DT_END_ELLIPSIS, DT_SINGLELINE as WIN_DT_SINGLELINE,
+            DT_VCENTER as WIN_DT_VCENTER, HGDIOBJ as WinHGDIOBJ, NULL_PEN,
+            TRANSPARENT as WIN_TRANSPARENT,
         },
         System::Com::{
             CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
@@ -92,12 +99,12 @@ impl Drop for Badge {
 static REGISTER_CLASS: Once = Once::new();
 static REGISTER_FRAME_CLASS: Once = Once::new();
 
-pub fn spawn(pid: u32, name: String, color: String, border_width: u32) {
+pub fn spawn(pid: u32, name: String, badge_text: String, color: String, border_width: u32) {
     let text = truncate(&format!("FinEnv · {name}"), 28);
-    thread::spawn(move || run(pid, text, color, border_width));
+    thread::spawn(move || run(pid, text, badge_text, color, border_width));
 }
 
-fn run(pid: u32, text: String, color: String, border_width: u32) {
+fn run(pid: u32, text: String, badge_text: String, color: String, border_width: u32) {
     let chrome = wait_for_window(pid);
     let Some(chrome) = chrome else {
         return;
@@ -213,7 +220,7 @@ fn run(pid: u32, text: String, color: String, border_width: u32) {
     };
     let com_initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
     let taskbar = if com_initialized {
-        unsafe { create_taskbar_badge(&text, background) }
+        unsafe { create_taskbar_badge(&text, &badge_text, background) }
     } else {
         None
     };
@@ -547,23 +554,27 @@ fn wait_for_window(pid: u32) -> Option<HWND> {
     None
 }
 
-unsafe fn create_taskbar_badge(name: &str, color: u32) -> Option<TaskbarBadge> {
+unsafe fn create_taskbar_badge(name: &str, badge_text: &str, color: u32) -> Option<TaskbarBadge> {
     let list: ITaskbarList3 = CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER).ok()?;
     list.HrInit().ok()?;
-    let icon = create_overlay_icon(color)?;
+    let icon = create_overlay_icon(color, badge_text.trim())?;
+    let description = if badge_text.trim().is_empty() {
+        name.to_string()
+    } else {
+        format!("{} · {name}", badge_text.trim())
+    };
     Some(TaskbarBadge {
         list,
         icon,
-        description: wide(name),
+        description: wide(&description),
         applied: false,
     })
 }
 
-unsafe fn create_overlay_icon(color: u32) -> Option<HICON> {
+unsafe fn create_overlay_icon(color: u32, badge_text: &str) -> Option<HICON> {
     const SIZE: i32 = 32;
     const CENTER: f32 = 15.5;
     const OUTER_SQ: f32 = 15.0 * 15.0;
-    const INNER_SQ: f32 = 12.2 * 12.2;
 
     let bmi = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
@@ -584,9 +595,47 @@ unsafe fn create_overlay_icon(color: u32) -> Option<HICON> {
         return None;
     }
 
-    let r = (color & 0xFF) as u8;
-    let g = ((color >> 8) & 0xFF) as u8;
-    let b = ((color >> 16) & 0xFF) as u8;
+    let hdc = CreateCompatibleDC(None);
+    if hdc.is_invalid() {
+        let _ = DeleteGdiObject(WinHGDIOBJ(color_bitmap.0));
+        return None;
+    }
+    let old_bitmap = WinSelectObject(hdc, WinHGDIOBJ(color_bitmap.0));
+    let old_pen = WinSelectObject(hdc, GetStockObject(NULL_PEN));
+
+    let white = WinCreateSolidBrush(COLORREF(0x00FF_FFFF));
+    let fill = WinCreateSolidBrush(COLORREF(color));
+    WinSelectObject(hdc, WinHGDIOBJ(white.0));
+    let _ = WinEllipse(hdc, 0, 0, SIZE, SIZE);
+    WinSelectObject(hdc, WinHGDIOBJ(fill.0));
+    let _ = WinEllipse(hdc, 2, 2, SIZE - 2, SIZE - 2);
+
+    if !badge_text.is_empty() {
+        let old_font = WinSelectObject(hdc, GetStockObject(DEFAULT_GUI_FONT));
+        WinSetBkMode(hdc, WIN_TRANSPARENT);
+        WinSetTextColor(hdc, COLORREF(0x00FF_FFFF));
+        let mut text: Vec<u16> = badge_text.encode_utf16().collect();
+        let mut rect = WinRECT {
+            left: 0,
+            top: 0,
+            right: SIZE,
+            bottom: SIZE,
+        };
+        WinDrawTextW(
+            hdc,
+            &mut text,
+            &mut rect,
+            WIN_DT_CENTER | WIN_DT_VCENTER | WIN_DT_SINGLELINE | WIN_DT_END_ELLIPSIS,
+        );
+        WinSelectObject(hdc, old_font);
+    }
+
+    let _ = DeleteGdiObject(WinHGDIOBJ(white.0));
+    let _ = DeleteGdiObject(WinHGDIOBJ(fill.0));
+    WinSelectObject(hdc, old_pen);
+    WinSelectObject(hdc, old_bitmap);
+    let _ = DeleteDC(hdc);
+
     let pixels = std::slice::from_raw_parts_mut(bits as *mut u8, (SIZE * SIZE * 4) as usize);
     let mut mask_bits = vec![0u8; (SIZE * SIZE / 8) as usize];
     for y in 0..SIZE {
@@ -596,13 +645,9 @@ unsafe fn create_overlay_icon(color: u32) -> Option<HICON> {
             let distance = dx * dx + dy * dy;
             let offset = ((y * SIZE + x) * 4) as usize;
             if distance <= OUTER_SQ {
-                let pixel = if distance > INNER_SQ {
-                    [255, 255, 255, 255]
-                } else {
-                    [b, g, r, 255]
-                };
-                pixels[offset..offset + 4].copy_from_slice(&pixel);
+                pixels[offset + 3] = 255;
             } else {
+                pixels[offset..offset + 4].fill(0);
                 let mask_index = (y * (SIZE / 8) + x / 8) as usize;
                 mask_bits[mask_index] |= 1 << (7 - (x % 8));
             }

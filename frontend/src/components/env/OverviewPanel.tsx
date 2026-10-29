@@ -44,6 +44,7 @@ export function OverviewPanel({
     idleTimeoutMin: env.idleTimeoutMin?.toString() ?? '',
     chromiumPath: env.chromiumPath ?? '',
     launchArgs: env.chromiumLaunchArgs.join('\n'),
+    badgeText: env.taskbarBadgeText,
   });
 
   React.useEffect(() => {
@@ -65,6 +66,7 @@ export function OverviewPanel({
       idleTimeoutMin: env.idleTimeoutMin?.toString() ?? '',
       chromiumPath: env.chromiumPath ?? '',
       launchArgs: env.chromiumLaunchArgs.join('\n'),
+      badgeText: env.taskbarBadgeText,
     });
   }, [env.id, env.updatedAt]);
 
@@ -96,6 +98,7 @@ export function OverviewPanel({
         idleTimeoutMin: form.idleTimeoutMin ? Number(form.idleTimeoutMin) : null,
         chromiumPath: form.chromiumPath.trim() || null,
         chromiumLaunchArgs: form.launchArgs.split('\n'),
+        taskbarBadgeText: form.badgeText,
       });
       onUpdated(updated);
       toast.success('环境信息已保存');
@@ -175,6 +178,15 @@ export function OverviewPanel({
                   {form.borderColor || '自动标识色'} · {form.borderWidth}px
                 </div>
               )}
+            </Field>
+            <Field label="任务栏标识文字" className="col-span-2 md:col-span-3" hint="最多 4 个字符；留空时任务栏显示颜色圆点">
+              <Input
+                value={form.badgeText}
+                onChange={(event) => update('badgeText', event.target.value)}
+                maxLength={4}
+                disabled={!canEdit}
+                placeholder="例如：A1 / 支付"
+              />
             </Field>
             <Field label="标签" className="col-span-2 md:col-span-3" hint="逗号或空格分隔">              <Input value={form.tags} onChange={(event) => update('tags', event.target.value)} disabled={!canEdit} />
             </Field>

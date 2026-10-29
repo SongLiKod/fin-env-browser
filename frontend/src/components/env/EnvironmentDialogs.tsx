@@ -48,6 +48,7 @@ export function CreateEnvironmentDialog({
     tags: '',
     notes: '',
     launchArgs: '',
+    badgeText: '',
     borderColor: '',
     borderWidth: 3,
     templateOs: 'win11',
@@ -79,6 +80,7 @@ export function CreateEnvironmentDialog({
         tags: parseTags(form.tags),
         notes: form.notes,
         chromiumLaunchArgs: form.launchArgs.split('\n'),
+        taskbarBadgeText: form.badgeText,
         borderColor: form.borderColor,
         borderWidth: form.borderWidth,
         templateOs: form.templateOs,
@@ -90,7 +92,7 @@ export function CreateEnvironmentDialog({
       toast.success('环境已创建', `${env.name} 已生成自洽指纹模板`);
       onCreated(env);
       onOpenChange(false);
-      setForm((current) => ({ ...current, name: '', project: '', caseId: '', tags: '', notes: '', launchArgs: '' }));
+      setForm((current) => ({ ...current, name: '', project: '', caseId: '', tags: '', notes: '', launchArgs: '', badgeText: '' }));
     } catch (error) {
       toastError(error);
     } finally {
@@ -131,6 +133,14 @@ export function CreateEnvironmentDialog({
             onChange={(value) => update('borderColor', value)}
             width={form.borderWidth}
             onWidthChange={(value) => update('borderWidth', value)}
+          />
+        </Field>
+        <Field label="任务栏标识文字" hint="最多 4 个字符；留空时任务栏显示颜色圆点" className="col-span-2">
+          <Input
+            value={form.badgeText}
+            onChange={(event) => update('badgeText', event.target.value)}
+            maxLength={4}
+            placeholder="例如：A1 / 支付"
           />
         </Field>
         <Field label="分组">
