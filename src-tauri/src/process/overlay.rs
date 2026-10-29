@@ -10,6 +10,23 @@ use std::sync::Once;
 use std::thread;
 use std::time::Duration;
 
+use windows::{
+    core::PCWSTR,
+    Win32::{
+        Foundation::{HWND as WinHWND, TRUE},
+        Graphics::Gdi::{
+            CreateBitmap, CreateDIBSection, DeleteObject as DeleteGdiObject, BITMAPINFO,
+            BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ as WinHGDIOBJ,
+        },
+        System::Com::{
+            CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+            COINIT_APARTMENTTHREADED,
+        },
+        UI::Shell::{ITaskbarList3, TaskbarList},
+        UI::WindowsAndMessaging::{CreateIconIndirect, DestroyIcon, HICON, ICONINFO},
+    },
+};
+
 use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
@@ -46,6 +63,22 @@ struct Frame {
     width: i32,
     height: i32,
     thickness: i32,
+    taskbar: Option<TaskbarBadge>,
+}
+
+struct TaskbarBadge {
+    list: ITaskbarList3,
+    icon: HICON,
+    description: Vec<u16>,
+    applied: bool,
+}
+
+impl Drop for TaskbarBadge {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyIcon(self.icon);
+        }
+    }
 }
 
 impl Drop for Badge {
@@ -178,12 +211,19 @@ fn run(pid: u32, text: String, color: String, border_width: u32) {
     } else {
         0x00FF_00FF
     };
+    let com_initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
+    let taskbar = if com_initialized {
+        unsafe { create_taskbar_badge(&text, background) }
+    } else {
+        None
+    };
     let frame_state = Box::new(Frame {
         color: background,
         color_key,
         width: 0,
         height: 0,
         thickness: border_width.min(12) as i32,
+        taskbar,
     });
     let frame_ptr = Box::into_raw(frame_state);
     let frame_class = wide("FinEnvEnvironmentFrame");
@@ -206,6 +246,9 @@ fn run(pid: u32, text: String, color: String, border_width: u32) {
     };
     if frame.is_null() {
         drop(unsafe { Box::from_raw(frame_ptr) });
+        if com_initialized {
+            unsafe { CoUninitialize() };
+        }
     } else {
         unsafe {
             SetWindowLongPtrW(frame, GWLP_USERDATA, frame_ptr as isize);
@@ -286,6 +329,9 @@ fn run(pid: u32, text: String, color: String, border_width: u32) {
             DestroyWindow(frame);
             drop(Box::from_raw(frame_ptr));
         }
+        if com_initialized {
+            CoUninitialize();
+        }
     }
 }
 
@@ -338,6 +384,18 @@ unsafe fn frame_sync(frame: HWND, frame_ptr: *mut Frame, chrome: HWND) {
         SWP_NOZORDER | SWP_NOACTIVATE,
     );
     ShowWindow(frame, SW_SHOWNOACTIVATE);
+    if let Some(taskbar) = state.taskbar.as_mut() {
+        if !taskbar.applied {
+            let result = taskbar.list.SetOverlayIcon(
+                WinHWND(chrome),
+                taskbar.icon,
+                PCWSTR(taskbar.description.as_ptr()),
+            );
+            if result.is_ok() {
+                taskbar.applied = true;
+            }
+        }
+    }
 }
 
 unsafe extern "system" fn window_proc(
@@ -487,6 +545,92 @@ fn wait_for_window(pid: u32) -> Option<HWND> {
         thread::sleep(Duration::from_millis(200));
     }
     None
+}
+
+unsafe fn create_taskbar_badge(name: &str, color: u32) -> Option<TaskbarBadge> {
+    let list: ITaskbarList3 = CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER).ok()?;
+    list.HrInit().ok()?;
+    let icon = create_overlay_icon(color)?;
+    Some(TaskbarBadge {
+        list,
+        icon,
+        description: wide(name),
+        applied: false,
+    })
+}
+
+unsafe fn create_overlay_icon(color: u32) -> Option<HICON> {
+    const SIZE: i32 = 32;
+    const CENTER: f32 = 15.5;
+    const OUTER_SQ: f32 = 15.0 * 15.0;
+    const INNER_SQ: f32 = 12.2 * 12.2;
+
+    let bmi = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: SIZE,
+            biHeight: -SIZE,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut bits: *mut std::ffi::c_void = null_mut();
+    let color_bitmap = CreateDIBSection(None, &bmi, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
+    if bits.is_null() {
+        let _ = DeleteGdiObject(WinHGDIOBJ(color_bitmap.0));
+        return None;
+    }
+
+    let r = (color & 0xFF) as u8;
+    let g = ((color >> 8) & 0xFF) as u8;
+    let b = ((color >> 16) & 0xFF) as u8;
+    let pixels = std::slice::from_raw_parts_mut(bits as *mut u8, (SIZE * SIZE * 4) as usize);
+    let mut mask_bits = vec![0u8; (SIZE * SIZE / 8) as usize];
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let dx = x as f32 - CENTER;
+            let dy = y as f32 - CENTER;
+            let distance = dx * dx + dy * dy;
+            let offset = ((y * SIZE + x) * 4) as usize;
+            if distance <= OUTER_SQ {
+                let pixel = if distance > INNER_SQ {
+                    [255, 255, 255, 255]
+                } else {
+                    [b, g, r, 255]
+                };
+                pixels[offset..offset + 4].copy_from_slice(&pixel);
+            } else {
+                let mask_index = (y * (SIZE / 8) + x / 8) as usize;
+                mask_bits[mask_index] |= 1 << (7 - (x % 8));
+            }
+        }
+    }
+
+    let mask_bitmap = CreateBitmap(
+        SIZE,
+        SIZE,
+        1,
+        1,
+        Some(mask_bits.as_ptr() as *const std::ffi::c_void),
+    );
+    if mask_bitmap.is_invalid() {
+        let _ = DeleteGdiObject(WinHGDIOBJ(color_bitmap.0));
+        return None;
+    }
+    let icon = CreateIconIndirect(&ICONINFO {
+        fIcon: TRUE,
+        xHotspot: 0,
+        yHotspot: 0,
+        hbmMask: mask_bitmap,
+        hbmColor: color_bitmap,
+    })
+    .ok();
+    let _ = DeleteGdiObject(WinHGDIOBJ(color_bitmap.0));
+    let _ = DeleteGdiObject(WinHGDIOBJ(mask_bitmap.0));
+    icon
 }
 
 fn parse_color(value: &str) -> Option<u32> {

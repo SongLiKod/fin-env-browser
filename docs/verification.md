@@ -311,3 +311,9 @@ cargo test
 - **并集**：全局参数先加入合并结果；环境参数逐项追加，只有同名开关会移除全局值，因此环境没有设置的全局参数不会丢失。
 - **最大化**：Chromium 在收到显式 `--window-size` 时会忽略 `--start-maximized`。最终参数包含 `--start-maximized` / `--start-fullscreen` / `--kiosk` 时不再追加默认 `--window-size`。
 - **验证**：全局仅设置 `--start-maximized`、环境参数为空，启动命令包含 `--start-maximized` 且不包含 `--window-size`，真实 Chromium 窗口 `IsZoomed=true`。全局 `--test-global` + 环境 `--test-env` 同时出现在命令行，同名 `--disable-gpu` 仅保留环境值。
+
+## 31. 任务栏环境图标标识
+
+- **实现**：`process/overlay.rs` 在覆盖线程内初始化 COM，使用 `ITaskbarList3::SetOverlayIcon` 为主 Chromium 窗口的任务栏按钮设置 32×32 覆盖图标；图标为环境标识色圆点（白色描边、透明背景），描述使用环境名。
+- **生命周期**：覆盖图标随任务栏按钮建立后设置；窗口销毁时释放 HICON 并反初始化 COM。任务栏图标加载失败时不影响浏览器启动。
+- **验证（Windows 11）**：启动标识色为 `#16A34A` 的环境后，任务栏 Chrome 按钮右上角显示绿色圆点，与管理面板和窗口边框颜色一致；不同环境保留各自任务栏按钮。
