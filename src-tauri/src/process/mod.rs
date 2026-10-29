@@ -1710,10 +1710,12 @@ fn build_chromium_args(
         )
     });
     if !wants_maximized {
+        let min_width = if fp.client_hints.mobile { 320 } else { 800 };
+        let min_height = if fp.client_hints.mobile { 480 } else { 600 };
         args.push(format!(
             "--window-size={},{}",
-            fp.screen.avail_width.max(800),
-            fp.screen.avail_height.max(600)
+            fp.screen.avail_width.max(min_width),
+            fp.screen.avail_height.max(min_height)
         ));
     }
     args.push(format!(

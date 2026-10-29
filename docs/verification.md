@@ -333,3 +333,10 @@ cargo test
 - **兼容**：仅使用 CSS 变量与 `color-mix()`，不改变组件结构、路由或权限逻辑；窄屏/紧凑密度仍可正常使用。
 - **暗色 Token**：`primary-light` / `primary-dark` 在暗色模式下重新计算为深色 tint / 提亮色，修复徽标、统计图标、主题选中卡片和色板仍显示白底的问题。
 - **验证（WebView2，1440×900）**：亮色/暗色截图确认侧栏、统计卡片、环境表格、顶部状态与主按钮层级清晰，表格行高与信息密度不变；暗色环境下「已启用」徽标、主色浅色色板、选中主题卡片均为深色背景。
+
+## 34. Android 移动端指纹模板
+
+- **模板**：新增 `android` 模板：Android 14 / Pixel 8 UA（含 `Mobile`）、`navigator.platform=Linux armv8l`、Client Hints `platform=Android`、`mobile=true`、`model=Pixel 8`、ARM64、5 个触摸点、412×915 / DPR 2.625、Android 字体与 ARM Mali WebGL。
+- **校验**：移动端屏幕最小限制调整为 320×480；UA 含 Android 时按 Android 校验 platform/Client Hints；移动端缺少触摸点或设备型号给出提示。
+- **UI**：新建环境「指纹模板」和指纹编辑器模板按钮增加「Android 14 · 移动端」，Client Hints 增加 Android platform 与 model 输入。
+- **验证**：`fingerprint_template(android)` 返回移动端模板，`fingerprint_validate` 返回 `valid=true`、0 error；创建 Android 环境成功并可按移动端尺寸启动。
