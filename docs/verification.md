@@ -341,3 +341,9 @@ cargo test
 - **校验**：移动端屏幕最小限制调整为 320×480；UA 含 Android 时按 Android 校验 platform/Client Hints；移动端缺少触摸点或设备型号给出提示。
 - **UI**：新建环境「指纹模板」和指纹编辑器模板按钮增加「Android 14 · 移动端」，Client Hints 增加 Android platform 与 model 输入。
 - **验证**：`fingerprint_template(android)` 返回移动端模板，`fingerprint_validate` 返回 `valid=true`、0 error；创建 Android 环境成功并可按移动端尺寸启动。
+
+## 35. 窄窗口边框与任务栏标识
+
+- **问题**：移动端窗口宽度小于旧的 640px 阈值，边框层隐藏；任务栏覆盖图标在边框尺寸检查之后才设置，因此也一起消失；右下角悬浮名称同样被隐藏。
+- **修复**：任务栏覆盖图标改为在窗口尺寸检查前设置，独立于窄窗口；边框最小阈值降到 180×180，悬浮名称阈值降到 260×260，移动端窄窗口仍显示。
+- **验证**：Android 环境设置 `--window-size=412,915`（Chrome 实际客户区约 500×907），紫色边框完整显示、右下角显示「FinEnv · Android 测试」名称、任务栏 Chrome 按钮显示环境色圆点；全局 `--start-maximized` 不再覆盖环境窗口尺寸。
