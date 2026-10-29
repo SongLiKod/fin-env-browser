@@ -1405,7 +1405,6 @@ const RESERVED_LAUNCH_ARGS: &[&str] = &[
     "--proxy-bypass-list",
     "--host-resolver-rules",
     "--load-extension",
-    "--window-size",
     "--window-name",
     "--lang",
     "--accept-lang",

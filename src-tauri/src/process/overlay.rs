@@ -291,7 +291,7 @@ fn run(pid: u32, text: String, badge_text: String, color: String, border_width: 
                     if GetWindowRect(chrome, &mut rect) != 0 {
                         let width = rect.right - rect.left;
                         let height = rect.bottom - rect.top;
-                        if width < 640 || height < 420 {
+                        if width < 260 || height < 260 {
                             ShowWindow(badge, SW_HIDE);
                         } else {
                             let x = rect.right - BADGE_WIDTH - BADGE_MARGIN;
@@ -352,6 +352,9 @@ unsafe fn frame_sync(frame: HWND, frame_ptr: *mut Frame, chrome: HWND) {
         ShowWindow(frame, SW_HIDE);
         return;
     }
+    // Keep the taskbar badge active even when the window is too narrow for the
+    // in-window border and floating badge.
+    apply_taskbar_overlay(state, chrome);
     // Chromium's outer window rect includes the invisible Windows resize border
     // (8px on the sides and bottom at 100% DPI). Anchoring the overlay to the
     // client rect keeps the coloured frame flush with the visible page instead
@@ -373,7 +376,7 @@ unsafe fn frame_sync(frame: HWND, frame_ptr: *mut Frame, chrome: HWND) {
     }
     let width = client.right - client.left;
     let height = client.bottom - client.top;
-    if width < 640 || height < 420 {
+    if width < 180 || height < 180 {
         ShowWindow(frame, SW_HIDE);
         return;
     }
@@ -392,6 +395,9 @@ unsafe fn frame_sync(frame: HWND, frame_ptr: *mut Frame, chrome: HWND) {
         SWP_NOZORDER | SWP_NOACTIVATE,
     );
     ShowWindow(frame, SW_SHOWNOACTIVATE);
+}
+
+unsafe fn apply_taskbar_overlay(state: &mut Frame, chrome: HWND) {
     if let Some(taskbar) = state.taskbar.as_mut() {
         if !taskbar.applied {
             let result = taskbar.list.SetOverlayIcon(
@@ -545,7 +551,7 @@ fn wait_for_window(pid: u32) -> Option<HWND> {
         // and badge always attach to the actual browser frame.
         if let Some(handle) = super::window_handles(pid)
             .into_iter()
-            .filter(|hwnd| window_area(*hwnd) >= 640 * 420)
+            .filter(|hwnd| window_area(*hwnd) >= 180 * 180)
             .max_by_key(|hwnd| window_area(*hwnd))
         {
             return Some(handle);

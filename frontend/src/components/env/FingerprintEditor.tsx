@@ -413,6 +413,7 @@ export function FingerprintEditor({
                   <option value="Windows">Windows</option>
                   <option value="macOS">macOS</option>
                   <option value="Linux">Linux</option>
+                  <option value="Android">Android</option>
                 </Select>
               </Field>
               <Field label="platformVersion">
@@ -430,6 +431,9 @@ export function FingerprintEditor({
                   <option value="32">32</option>
                 </Select>
               </Field>
+              <Field label="model" hint="移动端设备型号，桌面留空">
+                <Input value={fp.clientHints.model} onChange={(e) => patchHints({ model: e.target.value })} placeholder="Pixel 8" />
+              </Field>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <BrandEditor title="brands" brands={fp.clientHints.brands} onChange={(brands) => patchHints({ brands })} />
@@ -439,7 +443,7 @@ export function FingerprintEditor({
               checked={fp.clientHints.mobile}
               onCheckedChange={(value) => patchHints({ mobile: value })}
               label="移动端 Client Hints"
-              description="桌面 UA 应保持关闭；开启时会与 UA 的 Mobile 标识共同校验。"
+              description="Android 移动端模板会自动开启；桌面 UA 请保持关闭，保存时会校验 UA 与 Client Hints 的 Mobile 标识。"
             />
           </CardBody>
         </Card>
@@ -602,6 +606,7 @@ export function FingerprintEditor({
               { key: 'win10', label: 'Windows 10 · Chrome' },
               { key: 'mac', label: 'macOS · Chrome' },
               { key: 'linux', label: 'Linux · Chrome' },
+              { key: 'android', label: 'Android 14 · 移动端' },
             ].map((item) => (
               <Button
                 key={item.key}

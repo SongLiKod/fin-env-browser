@@ -189,6 +189,7 @@ export function CreateEnvironmentDialog({
             <option value="win10">Windows 10 · Chrome</option>
             <option value="mac">macOS · Chrome</option>
             <option value="linux">Linux · Chrome</option>
+            <option value="android">Android 14 · Chrome 移动端</option>
           </Select>
         </Field>
         <Field label="标签" hint="逗号或空格分隔" className="col-span-2">

@@ -297,6 +297,21 @@ pub fn template(os: &str) -> Fingerprint {
                 "Google Inc. (Apple)",
                 "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)",
             ),
+            "android" | "android-14" => (
+                "android",
+                format!(
+                    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{full_version} Mobile Safari/537.36"
+                ),
+                "Linux armv8l",
+                "14.0.0",
+                "arm",
+                vec![
+                    "Roboto", "Noto Sans", "Noto Serif", "Droid Sans", "Droid Sans Mono",
+                    "Cutive Mono", "Roboto Condensed", "Coming Soon",
+                ],
+                "Google Inc. (ARM)",
+                "ANGLE (ARM, Mali-G715, OpenGL ES 3.2)",
+            ),
             "linux" | "ubuntu" => (
                 "linux",
                 format!(
@@ -340,6 +355,7 @@ pub fn template(os: &str) -> Fingerprint {
 
     let (screen_w, screen_h, dpr) = match os_key {
         "mac" => (1728u32, 1117u32, 2.0),
+        "android" => (412, 915, 2.625),
         "linux" => (1920, 1080, 1.0),
         _ => (1920, 1080, 1.0),
     };
@@ -347,6 +363,10 @@ pub fn template(os: &str) -> Fingerprint {
         "mac" => (
             "America/Los_Angeles".to_string(),
             vec!["en-US".to_string(), "en".to_string()],
+        ),
+        "android" => (
+            "Asia/Shanghai".to_string(),
+            vec!["zh-CN".to_string(), "zh".to_string(), "en".to_string()],
         ),
         "linux" => (
             "Europe/Berlin".to_string(),
@@ -371,12 +391,14 @@ pub fn template(os: &str) -> Fingerprint {
         device_memory: 8,
         do_not_track: false,
         color_scheme: if rng.gen_bool(0.5) { "light" } else { "dark" }.into(),
-        touch_points: 0,
+        touch_points: if os_key == "android" { 5 } else { 0 },
         screen: ScreenFingerprint {
             width: screen_w,
             height: screen_h,
             avail_width: screen_w,
-            avail_height: if os_key == "mac" {
+            avail_height: if os_key == "android" {
+                screen_h
+            } else if os_key == "mac" {
                 screen_h - 25
             } else {
                 screen_h - 48
@@ -407,14 +429,19 @@ pub fn template(os: &str) -> Fingerprint {
             full_version_list: chrome_brands(&full_version),
             platform: match os_key {
                 "mac" => "macOS".into(),
+                "android" => "Android".into(),
                 "linux" => "Linux".into(),
                 _ => "Windows".into(),
             },
             platform_version: platform_version.into(),
             architecture: architecture.into(),
             bitness: "64".into(),
-            model: String::new(),
-            mobile: false,
+            model: if os_key == "android" {
+                "Pixel 8".into()
+            } else {
+                String::new()
+            },
+            mobile: os_key == "android",
         },
         plugins: chrome_plugin_info(),
     }
@@ -502,6 +529,8 @@ pub fn validate(fp: &Fingerprint) -> FingerprintValidation {
             ("Win32", "Windows")
         } else if fp.user_agent.contains("Macintosh") {
             ("MacIntel", "macOS")
+        } else if fp.user_agent.contains("Android") {
+            ("Linux armv8l", "Android")
         } else if fp.user_agent.contains("Linux") {
             ("Linux x86_64", "Linux")
         } else {
@@ -575,8 +604,17 @@ pub fn validate(fp: &Fingerprint) -> FingerprintValidation {
         ));
     }
 
-    if fp.screen.width < 800 || fp.screen.height < 600 {
-        errors.push(issue("screen", "屏幕分辨率过小（最小 800x600）", "error"));
+    let (min_width, min_height) = if fp.client_hints.mobile {
+        (320, 480)
+    } else {
+        (800, 600)
+    };
+    if fp.screen.width < min_width || fp.screen.height < min_height {
+        errors.push(issue(
+            "screen",
+            format!("屏幕分辨率过小（最小 {min_width}x{min_height}）"),
+            "error",
+        ));
     }
     if fp.screen.width > 7680 || fp.screen.height > 4320 {
         errors.push(issue("screen", "屏幕分辨率超出合理范围", "error"));
@@ -633,8 +671,25 @@ pub fn validate(fp: &Fingerprint) -> FingerprintValidation {
     if fp.client_hints.mobile != fp.user_agent.contains("Mobile") {
         errors.push(issue(
             "clientHints.mobile",
-            "Client Hints mobile 与 UA 的移动端标识不一致",
+            "Client Hints mobile 与 UA 的移动端标识不一致；请使用移动端 UA 或关闭该开关",
             "error",
+        ));
+    }
+    if fp.client_hints.mobile && fp.touch_points == 0 {
+        warnings.push(issue(
+            "touchPoints",
+            "移动端指纹建议设置 touchPoints > 0",
+            "warning",
+        ));
+    }
+    if fp.client_hints.mobile
+        && fp.client_hints.platform == "Android"
+        && fp.client_hints.model.trim().is_empty()
+    {
+        warnings.push(issue(
+            "clientHints.model",
+            "Android 移动端建议填写设备型号",
+            "warning",
         ));
     }
 
@@ -1415,7 +1470,7 @@ mod tests {
 
     #[test]
     fn generated_templates_are_consistent() {
-        for os in ["win11", "win10", "mac", "linux"] {
+        for os in ["win11", "win10", "mac", "linux", "android"] {
             let fp = template(os);
             let report = validate(&fp);
             assert!(
@@ -1427,6 +1482,18 @@ mod tests {
             assert!(!fp.fonts.is_empty());
             assert!(!fp.client_hints.brands.is_empty());
         }
+    }
+
+    #[test]
+    fn android_template_is_mobile_and_consistent() {
+        let fp = template("android");
+        assert!(fp.user_agent.contains("Android"));
+        assert!(fp.user_agent.contains("Mobile"));
+        assert!(fp.client_hints.mobile);
+        assert_eq!(fp.client_hints.platform, "Android");
+        assert_eq!(fp.client_hints.model, "Pixel 8");
+        assert!(fp.touch_points > 0);
+        assert!(validate(&fp).valid);
     }
 
     #[test]

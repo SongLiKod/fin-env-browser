@@ -1670,8 +1670,26 @@ pub fn default_chromium_args() -> Vec<String> {
 /// Combine global and per-environment custom switches. A later environment
 /// value replaces an earlier global value with the same switch name, so the
 /// per-environment setting always wins.
+fn is_maximize_switch(name: &str) -> bool {
+    matches!(name, "--start-maximized" | "--start-fullscreen" | "--kiosk")
+}
+
 fn merge_launch_args(global: &[String], environment: &[String]) -> Vec<String> {
-    let mut merged = global.to_vec();
+    let environment_has_window_size = environment
+        .iter()
+        .any(|arg| arg.split('=').next() == Some("--window-size"));
+    let environment_has_maximize = environment
+        .iter()
+        .any(|arg| is_maximize_switch(arg.split('=').next().unwrap_or(arg)));
+    let mut merged = global
+        .iter()
+        .filter(|arg| {
+            let name = arg.split('=').next().unwrap_or(arg);
+            !(environment_has_window_size && is_maximize_switch(name))
+                && !(environment_has_maximize && name == "--window-size")
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     for arg in environment {
         let name = arg.split('=').next().unwrap_or(arg);
         merged.retain(|existing| existing.split('=').next() != Some(name));
@@ -1703,17 +1721,19 @@ fn build_chromium_args(
     args.extend(DEFAULT_CHROMIUM_ARGS.iter().map(|arg| (*arg).to_string()));
     // Chromium ignores --start-maximized when an explicit --window-size is
     // present. Let the user's maximize/fullscreen/kiosk request take priority.
-    let wants_maximized = extra_args.iter().any(|arg| {
-        matches!(
-            arg.split('=').next(),
-            Some("--start-maximized" | "--start-fullscreen" | "--kiosk")
-        )
-    });
-    if !wants_maximized {
+    let wants_maximized = extra_args
+        .iter()
+        .any(|arg| is_maximize_switch(arg.split('=').next().unwrap_or(arg)));
+    let has_window_size = extra_args
+        .iter()
+        .any(|arg| arg.split('=').next() == Some("--window-size"));
+    if !wants_maximized && !has_window_size {
+        let min_width = if fp.client_hints.mobile { 320 } else { 800 };
+        let min_height = if fp.client_hints.mobile { 480 } else { 600 };
         args.push(format!(
             "--window-size={},{}",
-            fp.screen.avail_width.max(800),
-            fp.screen.avail_height.max(600)
+            fp.screen.avail_width.max(min_width),
+            fp.screen.avail_height.max(min_height)
         ));
     }
     args.push(format!(
@@ -2223,6 +2243,36 @@ mod launch_args_tests {
         assert_eq!(
             merge_launch_args(&["--start-maximized".to_string()], &[]),
             vec!["--start-maximized".to_string()]
+        );
+    }
+
+    #[test]
+    fn environment_window_size_overrides_global_maximize() {
+        let merged = merge_launch_args(
+            &["--start-maximized".to_string(), "--lang=en-US".to_string()],
+            &["--window-size=800,600".to_string()],
+        );
+        assert_eq!(
+            merged,
+            vec![
+                "--lang=en-US".to_string(),
+                "--window-size=800,600".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn environment_maximize_overrides_global_window_size() {
+        let merged = merge_launch_args(
+            &[
+                "--window-size=1280,720".to_string(),
+                "--lang=en-US".to_string(),
+            ],
+            &["--start-maximized".to_string()],
+        );
+        assert_eq!(
+            merged,
+            vec!["--lang=en-US".to_string(), "--start-maximized".to_string()]
         );
     }
 }

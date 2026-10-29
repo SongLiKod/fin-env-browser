@@ -140,7 +140,7 @@ cargo test
   - Cookie 写入/读取/加密缓存落盘，应用重启后自动恢复
   - 连续录制 4 帧并生成 manifest；HAR 1.2 文件导出
   - 浏览器关闭与进程回收
-- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"3.1.0"}`。
+- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"4.0.0"}`。
 - Windows GNU 链接阶段会输出 `.rsrc merge failure: multiple non-default manifests` 警告（MinGW 默认清单与 Tauri 资源清单合并提示），构建退出码为 0，产物可正常启动；CI 使用 MSVC 工具链，不涉及该提示。
 - 完整 `cargo test` 的 Tauri 测试二进制在当前 MinGW 沙箱启动阶段报 `STATUS_ENTRYPOINT_NOT_FOUND`（WebView2/工具链运行环境限制）；`cargo check`、`clippy --all-targets` 已完整编译所有测试代码。`.github/workflows/build.yml` 在 Ubuntu 上执行完整单元测试，并在 Windows/macOS/Linux 矩阵中构建安装包。
 - 浏览器预览：登录页亮/暗主题渲染正常，无 console error。
@@ -296,7 +296,7 @@ cargo test
 
 - **默认参数**：`process/mod.rs` 的 `DEFAULT_CHROMIUM_ARGS` 是默认静态参数；`AppInfo.chromiumDefaultArgs` 返回给设置页展示，避免前端复制一份默认列表。
 - **用户附加参数**：设置 → 系统集成 → 浏览器启动参数新增文本域，每行一个 `--flag` / `--flag=value`，保存到 `Settings.chromiumLaunchArgs`，启动环境时追加到默认参数之后；留空恢复仅使用默认参数。
-- **安全边界**：附加参数不能覆盖 profile 目录、调试端口、调试来源、代理、Hosts、扩展、窗口尺寸、语言等隔离参数；单参数最长 512 字符、最多 64 项，拒绝控制字符和非 `--` 开头参数。
+- **安全边界**：附加参数不能覆盖 profile 目录、调试端口、调试来源、代理、Hosts、扩展、语言等隔离参数；窗口尺寸允许通过 `--window-size` 自定义。单参数最长 512 字符、最多 64 项，拒绝控制字符和非 `--` 开头参数。
 - **验证**：设置页显示默认参数列表与附加参数编辑框；保存后 `settings_get` 返回数组；启动环境的命令行包含附加参数且不包含被禁止的覆盖参数。
 
 ## 29. 环境级启动参数覆盖
@@ -309,8 +309,9 @@ cargo test
 ## 30. 启动参数并集与最大化
 
 - **并集**：全局参数先加入合并结果；环境参数逐项追加，只有同名开关会移除全局值，因此环境没有设置的全局参数不会丢失。
-- **最大化**：Chromium 在收到显式 `--window-size` 时会忽略 `--start-maximized`。最终参数包含 `--start-maximized` / `--start-fullscreen` / `--kiosk` 时不再追加默认 `--window-size`。
-- **验证**：全局仅设置 `--start-maximized`、环境参数为空，启动命令包含 `--start-maximized` 且不包含 `--window-size`，真实 Chromium 窗口 `IsZoomed=true`。全局 `--test-global` + 环境 `--test-env` 同时出现在命令行，同名 `--disable-gpu` 仅保留环境值。
+- **最大化**：Chromium 在收到显式 `--window-size` 时会忽略 `--start-maximized`。最终参数包含 `--start-maximized` / `--start-fullscreen` / `--kiosk` 或显式 `--window-size` 时不再追加默认 `--window-size`。
+- **窗口冲突**：环境设置 `--window-size` 会移除全局 `--start-maximized` / `--start-fullscreen` / `--kiosk`；环境设置最大化参数会移除全局 `--window-size`。
+- **验证**：全局仅设置 `--start-maximized`、环境参数为空，启动命令包含 `--start-maximized` 且不包含 `--window-size`，真实 Chromium 窗口 `IsZoomed=true`。全局 `--start-maximized` + 环境 `--window-size=800,600` 时窗口不最大化且尺寸为 800×600。全局 `--test-global` + 环境 `--test-env` 同时出现在命令行，同名 `--disable-gpu` 仅保留环境值。
 
 ## 31. 任务栏环境图标标识
 
@@ -333,3 +334,16 @@ cargo test
 - **兼容**：仅使用 CSS 变量与 `color-mix()`，不改变组件结构、路由或权限逻辑；窄屏/紧凑密度仍可正常使用。
 - **暗色 Token**：`primary-light` / `primary-dark` 在暗色模式下重新计算为深色 tint / 提亮色，修复徽标、统计图标、主题选中卡片和色板仍显示白底的问题。
 - **验证（WebView2，1440×900）**：亮色/暗色截图确认侧栏、统计卡片、环境表格、顶部状态与主按钮层级清晰，表格行高与信息密度不变；暗色环境下「已启用」徽标、主色浅色色板、选中主题卡片均为深色背景。
+
+## 34. Android 移动端指纹模板
+
+- **模板**：新增 `android` 模板：Android 14 / Pixel 8 UA（含 `Mobile`）、`navigator.platform=Linux armv8l`、Client Hints `platform=Android`、`mobile=true`、`model=Pixel 8`、ARM64、5 个触摸点、412×915 / DPR 2.625、Android 字体与 ARM Mali WebGL。
+- **校验**：移动端屏幕最小限制调整为 320×480；UA 含 Android 时按 Android 校验 platform/Client Hints；移动端缺少触摸点或设备型号给出提示。
+- **UI**：新建环境「指纹模板」和指纹编辑器模板按钮增加「Android 14 · 移动端」，Client Hints 增加 Android platform 与 model 输入。
+- **验证**：`fingerprint_template(android)` 返回移动端模板，`fingerprint_validate` 返回 `valid=true`、0 error；创建 Android 环境成功并可按移动端尺寸启动。
+
+## 35. 窄窗口边框与任务栏标识
+
+- **问题**：移动端窗口宽度小于旧的 640px 阈值，边框层隐藏；任务栏覆盖图标在边框尺寸检查之后才设置，因此也一起消失；右下角悬浮名称同样被隐藏。
+- **修复**：任务栏覆盖图标改为在窗口尺寸检查前设置，独立于窄窗口；边框最小阈值降到 180×180，悬浮名称阈值降到 260×260，移动端窄窗口仍显示。
+- **验证**：Android 环境设置 `--window-size=412,915`（Chrome 实际客户区约 500×907），紫色边框完整显示、右下角显示「FinEnv · Android 测试」名称、任务栏 Chrome 按钮显示环境色圆点；全局 `--start-maximized` 不再覆盖环境窗口尺寸。

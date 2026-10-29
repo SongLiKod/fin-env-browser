@@ -12,7 +12,7 @@ FinEnv 是面向研发测试团队的多账号独立指纹环境管理工具。�
 ## 功能
 
 - 环境与账号台账：分组、项目、dev/test/pre/prod、角色、版本、用例 ID、标签、搜索筛选
-- 指纹配置：UA、屏幕、时区、语言、Canvas、WebGL、Audio、字体、WebRTC、Client Hints、插件
+- 指纹配置：UA、屏幕、时区、语言、Canvas、WebGL、Audio、字体、WebRTC、Client Hints、插件；内置 Windows / macOS / Linux / Android 14 移动端模板
 - 内置一致性校验与检测面板：CDP 探针逐项对比实际值，评分 + 修复建议
 - 指纹快照：保存/一键还原全套配置
 - 环境标识：每个环境可设标识色与 1-12px 粗细，列表/详情/运行栏/浏览器窗口边框统一；Windows 下浏览器窗口使用可调厚度、紧贴内容区的点击穿透彩色边框；运行中环境常驻栏显示名称、IP、PID
