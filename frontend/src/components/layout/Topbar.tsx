@@ -42,7 +42,7 @@ export function Topbar({
     : titles[location.pathname] ?? 'FinEnv';
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-surface-base/90 px-5 backdrop-blur">
+    <header className="topbar-shell flex h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-surface-base/90 px-5 backdrop-blur">
       <div className="flex min-w-0 items-center gap-2">
         <Tooltip content={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'} side="bottom">
           <Button
@@ -75,7 +75,7 @@ export function Topbar({
       </div>
 
       <div className="flex items-center gap-2">
-        <div className="hidden items-center gap-3 rounded-full border border-border bg-surface-secondary px-3 py-1.5 text-[11px] text-content-weak md:flex">
+        <div className="status-pill hidden items-center gap-3 rounded-full border border-border bg-surface-secondary px-3 py-1.5 text-[11px] text-content-weak md:flex">
           <span className="inline-flex items-center gap-1.5">
             <Zap className="h-3 w-3 text-[var(--success)]" />
             <span className="tabular-nums">{running.length}</span> 运行

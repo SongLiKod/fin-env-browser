@@ -49,7 +49,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="relative flex min-h-full overflow-hidden bg-surface-secondary">
+    <div className="app-shell relative flex min-h-full overflow-hidden bg-surface-secondary">
       <div className="absolute right-4 top-4 z-10">
         <Button variant="secondary" size="icon" onClick={() => setMode(mode === 'dark' ? 'light' : 'dark')}>
           {mode === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}

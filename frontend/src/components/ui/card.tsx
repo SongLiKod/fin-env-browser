@@ -132,11 +132,11 @@ export function StatCard({
           ? 'bg-primary-light text-primary'
           : 'bg-surface-tertiary text-content-weak';
   return (
-    <Card className="flex items-center gap-3 p-4">
-      {icon ? <div className={cn('flex h-10 w-10 items-center justify-center rounded-lg', iconClass)}>{icon}</div> : null}
-      <div className="min-w-0">
-        <p className="text-xs text-content-weak">{label}</p>
-        <p className="mt-0.5 truncate text-xl font-semibold tracking-tight text-content-main">{value}</p>
+    <Card className="stat-card flex items-center gap-3 p-4">
+      {icon ? <div className={cn('stat-icon flex h-10 w-10 items-center justify-center rounded-xl', iconClass)}>{icon}</div> : null}
+      <div className="relative z-[1] min-w-0">
+        <p className="text-xs font-medium tracking-wide text-content-weak">{label}</p>
+        <p className="mt-0.5 truncate text-[22px] font-semibold tracking-tight text-content-main tabular-nums">{value}</p>
         {hint ? <p className="mt-0.5 truncate text-[11px] text-content-hint">{hint}</p> : null}
       </div>
     </Card>

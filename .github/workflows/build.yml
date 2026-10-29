@@ -14,10 +14,10 @@ on:
         type: boolean
         default: false
   push:
-    branches: [main]
+    branches: [main, main-2]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, main-2]
 
 permissions:
   contents: read
