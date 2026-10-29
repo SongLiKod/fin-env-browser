@@ -14,8 +14,14 @@ import { useThemeStore } from '@/store/theme';
 import { toastError, useToastStore } from '@/store/toast';
 import { cn } from '@/utils';
 import { jsonFilter, pickFile, saveFile } from '@/utils/dialog';
-import { darken, lighten, normalizeHex, readableOn } from '@/theme/color';
-import { densities, themeModes } from '@/theme/theme';
+import { normalizeHex, readableOn } from '@/theme/color';
+import {
+  densities,
+  primaryDarkFor,
+  primaryLightFor,
+  resolveThemeMode,
+  themeModes,
+} from '@/theme/theme';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -36,6 +42,7 @@ export function ThemePage() {
   const exportTheme = useThemeStore((state) => state.exportTheme);
   const importTheme = useThemeStore((state) => state.importTheme);
   const [hex, setHex] = React.useState(theme.primaryColor);
+  const resolved = resolveThemeMode(theme.mode);
 
   React.useEffect(() => {
     setHex(theme.primaryColor);
@@ -169,8 +176,8 @@ export function ThemePage() {
               <div className="grid grid-cols-3 gap-2">
                 {[
                   { label: 'primary', value: theme.primaryColor },
-                  { label: 'primary-light', value: lighten(theme.primaryColor, 0.9) },
-                  { label: 'primary-dark', value: darken(theme.primaryColor, 0.16) },
+                  { label: 'primary-light', value: primaryLightFor(theme.primaryColor, resolved) },
+                  { label: 'primary-dark', value: primaryDarkFor(theme.primaryColor, resolved) },
                 ].map((token) => (
                   <div key={token.label} className="overflow-hidden rounded-md border border-border">
                     <div className="flex h-14 items-center justify-center text-[10px] font-medium" style={{ background: token.value, color: readableOn(token.value) }}>
