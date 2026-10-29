@@ -276,6 +276,8 @@ impl BrowserManager {
             ));
         }
         let window_name = format!("FinEnv · {}", env.name);
+        let launch_args =
+            merge_launch_args(&settings.chromium_launch_args, &env.chromium_launch_args);
 
         let args = build_chromium_args(
             &env.fingerprint,
@@ -287,7 +289,7 @@ impl BrowserManager {
             &window_name,
             "about:blank",
             headless,
-            &settings.chromium_launch_args,
+            &launch_args,
         );
 
         let mut command = Command::new(&chrome);
@@ -1658,6 +1660,19 @@ pub fn default_chromium_args() -> Vec<String> {
         .collect()
 }
 
+/// Combine global and per-environment custom switches. A later environment
+/// value replaces an earlier global value with the same switch name, so the
+/// per-environment setting always wins.
+fn merge_launch_args(global: &[String], environment: &[String]) -> Vec<String> {
+    let mut merged = global.to_vec();
+    for arg in environment {
+        let name = arg.split('=').next().unwrap_or(arg);
+        merged.retain(|existing| existing.split('=').next() != Some(name));
+        merged.push(arg.clone());
+    }
+    merged
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_chromium_args(
     fp: &fingerprint::Fingerprint,
@@ -2164,4 +2179,29 @@ async fn handle_request_paused(instance: &Arc<BrowserInstance>, params: Value) -
             .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod launch_args_tests {
+    use super::merge_launch_args;
+
+    #[test]
+    fn environment_switch_replaces_global_switch() {
+        let global = vec!["--disable-gpu".to_string(), "--lang=en-US".to_string()];
+        let environment = vec![
+            "--disable-gpu=false".to_string(),
+            "--autoplay-policy=no-user-gesture-required".to_string(),
+        ];
+        let merged = merge_launch_args(&global, &environment);
+        assert!(merged.contains(&"--lang=en-US".to_string()));
+        assert!(merged.contains(&"--disable-gpu=false".to_string()));
+        assert!(!merged.contains(&"--disable-gpu".to_string()));
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|arg| arg.starts_with("--disable-gpu"))
+                .count(),
+            1
+        );
+    }
 }

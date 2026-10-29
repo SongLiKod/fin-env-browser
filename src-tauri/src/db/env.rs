@@ -12,7 +12,7 @@ const ENV_COLUMNS: &str = "id, name, group_id, status, profile_dir, proxy_id, fi
     project, test_env, account_role, version, case_id, tags, notes, kernel, chromium_path, \
     auto_restart, memory_limit_mb, idle_timeout_min, fingerprint_json, created_at, updated_at, last_opened_at, \
     border_color, ip_address, ip_country, ip_country_code, ip_city, ip_timezone, ip_source, ip_checked_at, \
-    border_width";
+    border_width, chromium_launch_args";
 
 fn decrypt_fingerprint(
     stored: &str,
@@ -56,6 +56,7 @@ fn decrypt_fingerprint(
 
 fn row_to_env(row: &Row<'_>, crypto: Option<&CryptoManager>) -> rusqlite::Result<Environment> {
     let tags: String = row.get(12)?;
+    let launch_args: String = row.get(32)?;
     let fp = decrypt_fingerprint(&row.get::<_, String>(19)?, crypto)?;
     Ok(Environment {
         id: row.get(0)?,
@@ -88,6 +89,7 @@ fn row_to_env(row: &Row<'_>, crypto: Option<&CryptoManager>) -> rusqlite::Result
         ip_source: row.get(29)?,
         ip_checked_at: row.get(30)?,
         border_width: row.get::<_, i64>(31)? as u32,
+        chromium_launch_args: serde_json::from_str(&launch_args).unwrap_or_default(),
         created_at: row.get(20)?,
         updated_at: row.get(21)?,
         last_opened_at: row.get(22)?,
@@ -179,6 +181,7 @@ impl Db {
 
     pub fn insert_environment(&self, env: &Environment) -> Result<()> {
         let tags = serde_json::to_string(&env.tags)?;
+        let launch_args = serde_json::to_string(&env.chromium_launch_args)?;
         let fp = self.encrypt_json(&serde_json::to_string(&env.fingerprint)?)?;
         self.with(|conn| {
             conn.execute(
@@ -186,8 +189,9 @@ impl Db {
                  fingerprint_snapshot_id, project, test_env, account_role, version, case_id, tags,
                  notes, kernel, chromium_path, auto_restart, memory_limit_mb, idle_timeout_min,
                  fingerprint_json, created_at, updated_at, last_opened_at, border_color, ip_address,
-                 ip_country, ip_country_code, ip_city, ip_timezone, ip_source, ip_checked_at, border_width)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)",
+                 ip_country, ip_country_code, ip_city, ip_timezone, ip_source, ip_checked_at, border_width,
+                 chromium_launch_args)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33)",
                 params![
                     env.id,
                     env.name,
@@ -221,6 +225,7 @@ impl Db {
                     env.ip_source,
                     env.ip_checked_at,
                     env.border_width,
+                    launch_args,
                 ],
             )?;
             Ok(())
@@ -229,6 +234,7 @@ impl Db {
 
     pub fn update_environment(&self, env: &Environment) -> Result<()> {
         let tags = serde_json::to_string(&env.tags)?;
+        let launch_args = serde_json::to_string(&env.chromium_launch_args)?;
         let fp = self.encrypt_json(&serde_json::to_string(&env.fingerprint)?)?;
         self.with(|conn| {
             let changed = conn.execute(
@@ -238,7 +244,7 @@ impl Db {
                  auto_restart=?17, memory_limit_mb=?18, idle_timeout_min=?19, fingerprint_json=?20,
                  updated_at=?21, last_opened_at=?22, border_color=?23, ip_address=?24,
                  ip_country=?25, ip_country_code=?26, ip_city=?27, ip_timezone=?28, ip_source=?29,
-                 ip_checked_at=?30, border_width=?31 WHERE id=?1",
+                 ip_checked_at=?30, border_width=?31, chromium_launch_args=?32 WHERE id=?1",
                 params![
                     env.id,
                     env.name,
@@ -271,6 +277,7 @@ impl Db {
                     env.ip_source,
                     env.ip_checked_at,
                     env.border_width,
+                    launch_args,
                 ],
             )?;
             if changed == 0 {

@@ -165,6 +165,7 @@ pub fn create_environment(
         border_width: valid_border_width(input.border_width)?,
         kernel,
         chromium_path: input.chromium_path.filter(|p| !p.trim().is_empty()),
+        chromium_launch_args: sanitize_launch_args(&input.chromium_launch_args)?,
         auto_restart: input.auto_restart.unwrap_or(false),
         memory_limit_mb: valid_memory_limit(input.memory_limit_mb)?,
         idle_timeout_min: valid_idle(input.idle_timeout_min)?,
@@ -281,6 +282,9 @@ pub async fn update_environment(
     if let Some(path) = input.chromium_path {
         env.chromium_path = path.filter(|p| !p.trim().is_empty());
     }
+    if let Some(args) = input.chromium_launch_args {
+        env.chromium_launch_args = sanitize_launch_args(&args)?;
+    }
     if let Some(auto_restart) = input.auto_restart {
         env.auto_restart = auto_restart;
     }
@@ -342,6 +346,7 @@ pub fn create_template_from_env(
         notes: env.notes.clone(),
         kernel: env.kernel.clone(),
         chromium_path: env.chromium_path.clone(),
+        chromium_launch_args: env.chromium_launch_args.clone(),
         auto_restart: env.auto_restart,
         memory_limit_mb: env.memory_limit_mb,
         idle_timeout_min: env.idle_timeout_min,
@@ -537,6 +542,7 @@ pub fn batch_create_from_template(
             border_width: Some(template.border_width),
             kernel: Some(template.kernel.clone()),
             chromium_path: template.chromium_path.clone(),
+            chromium_launch_args: template.chromium_launch_args.clone(),
             template_os: None,
             fingerprint: Some(template.fingerprint.clone()),
             auto_restart: Some(template.auto_restart),

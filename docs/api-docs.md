@@ -104,7 +104,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "http://127.0.0.1:17321/api/v1/envs?runningOnly=true"
 ```
 
-返回 `EnvironmentView[]`，包含 `fingerprint`、`proxy`、`runtime`、`accountCount`、`snapshotCount`、`accessLevel`，以及环境标识与最近一次出口 IP 检测字段：`borderColor`、`borderWidth`、`ipAddress`、`ipCountry`、`ipCountryCode`、`ipCity`、`ipTimezone`、`ipSource`、`ipCheckedAt`。`accessLevel` 是当前登录用户在该环境的权限（`view` / `operate` / `manage`）。
+返回 `EnvironmentView[]`，包含 `fingerprint`、`proxy`、`runtime`、`accountCount`、`snapshotCount`、`accessLevel`，以及环境标识、启动参数与最近一次出口 IP 检测字段：`borderColor`、`borderWidth`、`chromiumLaunchArgs`、`ipAddress`、`ipCountry`、`ipCountryCode`、`ipCity`、`ipTimezone`、`ipSource`、`ipCheckedAt`。`accessLevel` 是当前登录用户在该环境的权限（`view` / `operate` / `manage`）。
 
 ### POST /envs
 
@@ -130,6 +130,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "notes": "仅用于 staging 回归",
   "borderColor": "#2563EB",
   "borderWidth": 4,
+  "chromiumLaunchArgs": ["--autoplay-policy=no-user-gesture-required"],
   "templateOs": "win11",
   "autoRestart": false,
   "memoryLimitMb": 1500,
@@ -138,9 +139,11 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
 }
 ```
 
-`templateOs`：`win11` / `win10` / `mac` / `linux`。不传 `fingerprint` 时自动生成自洽模板；传入时按内置规则校验，存在冲突返回 `400 fingerprint_conflict`。`borderColor` 为 6 位十六进制（如 `#2563EB`），留空则按环境 ID 自动生成标识色；`borderWidth` 为 1-12px，默认 3px，控制面板标识色色条和 Windows 浏览器窗口边框的粗细。
+`templateOs`：`win11` / `win10` / `mac` / `linux`。不传 `fingerprint` 时自动生成自洽模板；传入时按内置规则校验，存在冲突返回 `400 fingerprint_conflict`。`borderColor` 为 6 位十六进制（如 `#2563EB`），留空则按环境 ID 自动生成标识色；`borderWidth` 为 1-12px，默认 3px，控制面板标识色色条和 Windows 浏览器窗口边框的粗细。`chromiumLaunchArgs` 是该环境追加的 Chromium 参数数组；与全局同名参数同时存在时环境值优先。
 
 成功：`201 Created` + `EnvironmentView`。
+
+启动参数每项必须以 `--` 开头，最多 64 项、单项 512 字符；不能覆盖 profile、调试端口、调试来源、代理、Hosts、扩展、窗口尺寸、语言等隔离参数。环境参数与全局参数同名时，以环境参数为准。
 
 ### GET /envs/{id}
 
@@ -179,6 +182,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "tags": ["回归"],
   "borderColor": "#16A34A",
   "borderWidth": 5,
+  "chromiumLaunchArgs": ["--disable-gpu"],
   "autoRestart": true,
   "memoryLimitMb": null,
   "idleTimeoutMin": 0
@@ -203,7 +207,7 @@ curl -X DELETE -H "Authorization: Bearer $FINENV_API_KEY" \
 
 ### GET /templates
 
-返回 `EnvironmentTemplate[]`。字段包括 `fingerprint`、`proxyMode`、`proxyId`、`extensionIds`、`borderColor`、`borderWidth`、`createdAt`、`updatedAt`。
+返回 `EnvironmentTemplate[]`。字段包括 `fingerprint`、`proxyMode`、`proxyId`、`extensionIds`、`chromiumLaunchArgs`、`borderColor`、`borderWidth`、`createdAt`、`updatedAt`。
 
 ### POST /templates
 

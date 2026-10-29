@@ -55,6 +55,8 @@ pub struct Environment {
     pub notes: String,
     pub kernel: String,
     pub chromium_path: Option<String>,
+    #[serde(default)]
+    pub chromium_launch_args: Vec<String>,
     pub auto_restart: bool,
     pub memory_limit_mb: Option<u32>,
     pub idle_timeout_min: Option<u32>,
@@ -150,6 +152,7 @@ pub struct EnvironmentTemplate {
     pub proxy_mode: String,
     pub proxy_id: Option<String>,
     pub extension_ids: Vec<String>,
+    pub chromium_launch_args: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -280,6 +283,8 @@ pub struct CreateEnvironmentInput {
     #[serde(default)]
     pub chromium_path: Option<String>,
     #[serde(default)]
+    pub chromium_launch_args: Vec<String>,
+    #[serde(default)]
     pub template_os: Option<String>,
     #[serde(default)]
     pub fingerprint: Option<Fingerprint>,
@@ -324,6 +329,8 @@ pub struct UpdateEnvironmentInput {
     pub kernel: Option<String>,
     #[serde(default, deserialize_with = "double_option")]
     pub chromium_path: Option<Option<String>>,
+    #[serde(default)]
+    pub chromium_launch_args: Option<Vec<String>>,
     #[serde(default)]
     pub auto_restart: Option<bool>,
     #[serde(default, deserialize_with = "double_option")]

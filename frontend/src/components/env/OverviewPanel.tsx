@@ -43,6 +43,7 @@ export function OverviewPanel({
     memoryLimitMb: env.memoryLimitMb?.toString() ?? '',
     idleTimeoutMin: env.idleTimeoutMin?.toString() ?? '',
     chromiumPath: env.chromiumPath ?? '',
+    launchArgs: env.chromiumLaunchArgs.join('\n'),
   });
 
   React.useEffect(() => {
@@ -63,6 +64,7 @@ export function OverviewPanel({
       memoryLimitMb: env.memoryLimitMb?.toString() ?? '',
       idleTimeoutMin: env.idleTimeoutMin?.toString() ?? '',
       chromiumPath: env.chromiumPath ?? '',
+      launchArgs: env.chromiumLaunchArgs.join('\n'),
     });
   }, [env.id, env.updatedAt]);
 
@@ -93,6 +95,7 @@ export function OverviewPanel({
         memoryLimitMb: form.memoryLimitMb ? Number(form.memoryLimitMb) : null,
         idleTimeoutMin: form.idleTimeoutMin ? Number(form.idleTimeoutMin) : null,
         chromiumPath: form.chromiumPath.trim() || null,
+        chromiumLaunchArgs: form.launchArgs.split('\n'),
       });
       onUpdated(updated);
       toast.success('环境信息已保存');
@@ -186,6 +189,20 @@ export function OverviewPanel({
             </Field>
             <Field label="Chromium 路径" hint="留空使用全局设置或内置内核">
               <Input value={form.chromiumPath} onChange={(event) => update('chromiumPath', event.target.value)} disabled={!canEdit} placeholder="C:\\...\\chrome.exe" />
+            </Field>
+            <Field
+              label="环境启动参数"
+              hint="每行一个 --flag / --flag=value；与全局同名参数时以此处为准。"
+              className="col-span-2 md:col-span-3"
+            >
+              <Textarea
+                value={form.launchArgs}
+                onChange={(event) => update('launchArgs', event.target.value)}
+                disabled={!canEdit}
+                rows={3}
+                spellCheck={false}
+                placeholder={'--autoplay-policy=no-user-gesture-required\n--disable-gpu'}
+              />
             </Field>
             <div className="col-span-2 rounded-md border border-border bg-surface-secondary p-3 md:col-span-3">
               <Switch

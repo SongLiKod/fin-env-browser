@@ -724,7 +724,7 @@ export function SettingsPage() {
             <Card>
               <CardHeader
                 title="浏览器启动参数"
-                description="默认参数由 FinEnv 固定；附加参数会追加到每个环境启动命令的末尾。"
+                description="默认参数由 FinEnv 固定；全局附加参数应用到所有环境，环境页中的同名参数优先。"
                 actions={
                   <Button
                     variant="secondary"
@@ -754,7 +754,7 @@ export function SettingsPage() {
                 </div>
                 <Field
                   label="附加启动参数"
-                  hint="每行一个，使用 --flag 或 --flag=value；留空仅使用默认参数。"
+                  hint="每行一个，使用 --flag 或 --flag=value；留空仅使用默认参数。环境级同名参数优先于全局参数。"
                 >
                   <Textarea
                     value={form.chromiumLaunchArgs.join('\n')}

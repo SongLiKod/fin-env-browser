@@ -149,6 +149,7 @@ export interface Environment {
   notes: string;
   kernel: string;
   chromiumPath: string | null;
+  chromiumLaunchArgs: string[];
   autoRestart: boolean;
   memoryLimitMb: number | null;
   idleTimeoutMin: number | null;
@@ -262,6 +263,7 @@ export interface EnvironmentTemplate {
   notes: string;
   kernel: string;
   chromiumPath: string | null;
+  chromiumLaunchArgs: string[];
   autoRestart: boolean;
   memoryLimitMb: number | null;
   idleTimeoutMin: number | null;
@@ -352,6 +354,7 @@ export interface CreateEnvironmentInput {
   borderWidth?: number | null;
   kernel?: string | null;
   chromiumPath?: string | null;
+  chromiumLaunchArgs?: string[];
   templateOs?: string | null;
   fingerprint?: Fingerprint | null;
   autoRestart?: boolean | null;
@@ -375,6 +378,7 @@ export interface UpdateEnvironmentInput {
   borderWidth?: number;
   kernel?: string;
   chromiumPath?: string | null;
+  chromiumLaunchArgs?: string[];
   autoRestart?: boolean;
   memoryLimitMb?: number | null;
   idleTimeoutMin?: number | null;

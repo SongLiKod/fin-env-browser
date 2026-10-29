@@ -715,6 +715,7 @@ mod tests {
             notes: "<script>alert(1)</script>".into(),
             kernel: "chromium".into(),
             chromium_path: None,
+            chromium_launch_args: Vec::new(),
             auto_restart: false,
             memory_limit_mb: None,
             idle_timeout_min: None,

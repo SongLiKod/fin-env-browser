@@ -47,6 +47,7 @@ export function CreateEnvironmentDialog({
     caseId: '',
     tags: '',
     notes: '',
+    launchArgs: '',
     borderColor: '',
     borderWidth: 3,
     templateOs: 'win11',
@@ -77,6 +78,7 @@ export function CreateEnvironmentDialog({
         caseId: form.caseId,
         tags: parseTags(form.tags),
         notes: form.notes,
+        chromiumLaunchArgs: form.launchArgs.split('\n'),
         borderColor: form.borderColor,
         borderWidth: form.borderWidth,
         templateOs: form.templateOs,
@@ -88,7 +90,7 @@ export function CreateEnvironmentDialog({
       toast.success('环境已创建', `${env.name} 已生成自洽指纹模板`);
       onCreated(env);
       onOpenChange(false);
-      setForm((current) => ({ ...current, name: '', project: '', caseId: '', tags: '', notes: '' }));
+      setForm((current) => ({ ...current, name: '', project: '', caseId: '', tags: '', notes: '', launchArgs: '' }));
     } catch (error) {
       toastError(error);
     } finally {
@@ -184,6 +186,19 @@ export function CreateEnvironmentDialog({
         </Field>
         <Field label="备注" className="col-span-2">
           <Textarea value={form.notes} onChange={(event) => update('notes', event.target.value)} placeholder="环境用途、注意事项…" />
+        </Field>
+        <Field
+          label="环境启动参数"
+          hint="每行一个 --flag / --flag=value；与全局参数同名时以此处为准，留空仅使用全局参数。"
+          className="col-span-2"
+        >
+          <Textarea
+            value={form.launchArgs}
+            onChange={(event) => update('launchArgs', event.target.value)}
+            rows={3}
+            spellCheck={false}
+            placeholder={'--autoplay-policy=no-user-gesture-required\n--disable-gpu'}
+          />
         </Field>
         <Field label="内存上限 MB" hint="留空使用全局阈值">
           <Input

@@ -54,6 +54,7 @@ mod tests {
             notes: String::new(),
             kernel: "chromium".into(),
             chromium_path: None,
+            chromium_launch_args: Vec::new(),
             auto_restart: false,
             memory_limit_mb: None,
             idle_timeout_min: None,
@@ -317,6 +318,10 @@ impl Db {
             (
                 "006_environment_members",
                 include_str!("../../migrations/006_environment_members.sql"),
+            ),
+            (
+                "007_environment_launch_args",
+                include_str!("../../migrations/007_environment_launch_args.sql"),
             ),
         ];
         let current: i64 =
