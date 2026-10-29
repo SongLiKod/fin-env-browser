@@ -4,7 +4,7 @@
 
 仓库名称：fin-env-browser
 
-文档版本：V3.1
+文档版本：V4.0
 
 基础框架：Tauri 2.0
 

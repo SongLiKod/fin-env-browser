@@ -140,7 +140,7 @@ cargo test
   - Cookie 写入/读取/加密缓存落盘，应用重启后自动恢复
   - 连续录制 4 帧并生成 manifest；HAR 1.2 文件导出
   - 浏览器关闭与进程回收
-- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"3.1.0"}`。
+- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"4.0.0"}`。
 - Windows GNU 链接阶段会输出 `.rsrc merge failure: multiple non-default manifests` 警告（MinGW 默认清单与 Tauri 资源清单合并提示），构建退出码为 0，产物可正常启动；CI 使用 MSVC 工具链，不涉及该提示。
 - 完整 `cargo test` 的 Tauri 测试二进制在当前 MinGW 沙箱启动阶段报 `STATUS_ENTRYPOINT_NOT_FOUND`（WebView2/工具链运行环境限制）；`cargo check`、`clippy --all-targets` 已完整编译所有测试代码。`.github/workflows/build.yml` 在 Ubuntu 上执行完整单元测试，并在 Windows/macOS/Linux 矩阵中构建安装包。
 - 浏览器预览：登录页亮/暗主题渲染正常，无 console error。

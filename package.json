@@ -1,7 +1,7 @@
 {
   "name": "finenv-browser",
   "private": true,
-  "version": "3.1.0",
+  "version": "4.0.0",
   "scripts": {
     "version:sync": "node scripts/sync-version.mjs",
     "version:check": "node scripts/sync-version.mjs --check",

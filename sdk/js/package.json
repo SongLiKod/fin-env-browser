@@ -1,6 +1,6 @@
 {
   "name": "@finenv/sdk",
-  "version": "3.1.0",
+  "version": "4.0.0",
   "description": "FinEnv fingerprint environment HTTP + CDP SDK",
   "type": "module",
   "main": "./dist/index.js",
