@@ -189,7 +189,7 @@ export function CreateEnvironmentDialog({
         </Field>
         <Field
           label="环境启动参数"
-          hint="每行一个 --flag / --flag=value；与全局参数同名时以此处为准，留空仅使用全局参数。"
+          hint="每行一个 --flag / --flag=value；与全局参数取并集，同名参数以环境为准。"
           className="col-span-2"
         >
           <Textarea

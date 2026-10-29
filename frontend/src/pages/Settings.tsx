@@ -754,7 +754,7 @@ export function SettingsPage() {
                 </div>
                 <Field
                   label="附加启动参数"
-                  hint="每行一个，使用 --flag 或 --flag=value；留空仅使用默认参数。环境级同名参数优先于全局参数。"
+                  hint="每行一个，使用 --flag 或 --flag=value；全局参数与环境参数取并集，环境同名参数优先。"
                 >
                   <Textarea
                     value={form.chromiumLaunchArgs.join('\n')}

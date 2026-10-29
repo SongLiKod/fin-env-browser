@@ -192,7 +192,7 @@ export function OverviewPanel({
             </Field>
             <Field
               label="环境启动参数"
-              hint="每行一个 --flag / --flag=value；与全局同名参数时以此处为准。"
+              hint="每行一个 --flag / --flag=value；与全局参数取并集，同名参数以环境为准。"
               className="col-span-2 md:col-span-3"
             >
               <Textarea

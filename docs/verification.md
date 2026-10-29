@@ -305,3 +305,9 @@ cargo test
 - **UI**：新建环境对话框和概览编辑增加「环境启动参数」文本域；全局设置页仍维护全局附加参数，并提示环境同名参数优先。
 - **合并顺序**：默认静态参数 → 全局附加参数 → 环境附加参数；同名开关先移除全局项再追加环境项，因此环境配置生效。环境级参数同样经过格式、数量和隔离参数校验。
 - **验证**：全局设置 `--disable-gpu`，环境设置 `--disable-gpu=false` 与 `--autoplay-policy=no-user-gesture-required`，启动命令只保留环境值；删除环境参数后恢复全局值。
+
+## 30. 启动参数并集与最大化
+
+- **并集**：全局参数先加入合并结果；环境参数逐项追加，只有同名开关会移除全局值，因此环境没有设置的全局参数不会丢失。
+- **最大化**：Chromium 在收到显式 `--window-size` 时会忽略 `--start-maximized`。最终参数包含 `--start-maximized` / `--start-fullscreen` / `--kiosk` 时不再追加默认 `--window-size`。
+- **验证**：全局仅设置 `--start-maximized`、环境参数为空，启动命令包含 `--start-maximized` 且不包含 `--window-size`，真实 Chromium 窗口 `IsZoomed=true`。全局 `--test-global` + 环境 `--test-env` 同时出现在命令行，同名 `--disable-gpu` 仅保留环境值。

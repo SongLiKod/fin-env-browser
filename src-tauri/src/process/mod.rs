@@ -1694,11 +1694,21 @@ fn build_chromium_args(
         "--remote-allow-origins=*".into(),
     ];
     args.extend(DEFAULT_CHROMIUM_ARGS.iter().map(|arg| (*arg).to_string()));
-    args.push(format!(
-        "--window-size={},{}",
-        fp.screen.avail_width.max(800),
-        fp.screen.avail_height.max(600)
-    ));
+    // Chromium ignores --start-maximized when an explicit --window-size is
+    // present. Let the user's maximize/fullscreen/kiosk request take priority.
+    let wants_maximized = extra_args.iter().any(|arg| {
+        matches!(
+            arg.split('=').next(),
+            Some("--start-maximized" | "--start-fullscreen" | "--kiosk")
+        )
+    });
+    if !wants_maximized {
+        args.push(format!(
+            "--window-size={},{}",
+            fp.screen.avail_width.max(800),
+            fp.screen.avail_height.max(600)
+        ));
+    }
     args.push(format!(
         "--lang={}",
         fp.languages
@@ -2202,6 +2212,10 @@ mod launch_args_tests {
                 .filter(|arg| arg.starts_with("--disable-gpu"))
                 .count(),
             1
+        );
+        assert_eq!(
+            merge_launch_args(&["--start-maximized".to_string()], &[]),
+            vec!["--start-maximized".to_string()]
         );
     }
 }
