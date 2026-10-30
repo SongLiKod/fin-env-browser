@@ -49,6 +49,7 @@ export function CreateEnvironmentDialog({
     notes: '',
     launchArgs: '',
     badgeText: '',
+    networkProfile: 'none',
     borderColor: '',
     borderWidth: 3,
     templateOs: 'win11',
@@ -81,6 +82,7 @@ export function CreateEnvironmentDialog({
         notes: form.notes,
         chromiumLaunchArgs: form.launchArgs.split('\n'),
         taskbarBadgeText: form.badgeText,
+        networkProfile: form.networkProfile,
         borderColor: form.borderColor,
         borderWidth: form.borderWidth,
         templateOs: form.templateOs,
@@ -189,7 +191,14 @@ export function CreateEnvironmentDialog({
             <option value="win10">Windows 10 · Chrome</option>
             <option value="mac">macOS · Chrome</option>
             <option value="linux">Linux · Chrome</option>
-            <option value="android">Android 14 · Chrome 移动端</option>
+            <option value="android-pixel8">Android · Pixel 8</option>
+            <option value="android-pixel8-landscape">Android · Pixel 8 横屏</option>
+            <option value="android-galaxy-s24">Android · Galaxy S24</option>
+            <option value="android-galaxy-s24-landscape">Android · Galaxy S24 横屏</option>
+            <option value="android-xiaomi-14">Android · Xiaomi 14</option>
+            <option value="android-xiaomi-14-landscape">Android · Xiaomi 14 横屏</option>
+            <option value="iphone-15-pro">iPhone 15 Pro</option>
+            <option value="iphone-15-pro-landscape">iPhone 15 Pro 横屏</option>
           </Select>
         </Field>
         <Field label="标签" hint="逗号或空格分隔" className="col-span-2">
@@ -210,6 +219,17 @@ export function CreateEnvironmentDialog({
             spellCheck={false}
             placeholder={'--autoplay-policy=no-user-gesture-required\n--disable-gpu'}
           />
+        </Field>
+        <Field label="网络模拟" hint="启动后对该环境当前页面生效" className="col-span-2">
+          <Select value={form.networkProfile} onChange={(event) => update('networkProfile', event.target.value)}>
+            <option value="none">不限制</option>
+            <option value="3g">3G · 400ms / 400Kbps</option>
+            <option value="4g">4G · 80ms / 4Mbps</option>
+            <option value="5g">5G · 20ms / 20Mbps</option>
+            <option value="slow">慢速 · 800ms / 200Kbps</option>
+            <option value="lossy">丢包 · 10%</option>
+            <option value="offline">离线</option>
+          </Select>
         </Field>
         <Field label="内存上限 MB" hint="留空使用全局阈值">
           <Input

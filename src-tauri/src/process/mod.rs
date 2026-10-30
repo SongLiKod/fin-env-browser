@@ -341,6 +341,30 @@ impl BrowserManager {
             let _ = client.call("Page.enable", json!({})).await;
             let _ = client.call("Runtime.enable", json!({})).await;
             let _ = client.call("Network.enable", json!({})).await;
+            let _ = client
+                .call(
+                    "Network.emulateNetworkConditions",
+                    network_emulation_params(&env.network_profile),
+                )
+                .await;
+            if let Some(geo) = &env.fingerprint.geolocation {
+                let _ = client
+                    .call(
+                        "Browser.grantPermissions",
+                        json!({ "permissions": ["geolocation"] }),
+                    )
+                    .await;
+                let _ = client
+                    .call(
+                        "Emulation.setGeolocationOverride",
+                        json!({
+                            "latitude": geo.latitude,
+                            "longitude": geo.longitude,
+                            "accuracy": geo.accuracy
+                        }),
+                    )
+                    .await;
+            }
             // Apply the encrypted cookie snapshot (if one exists) so a synced
             // database or a freshly recreated profile keeps its login state.
             if let Ok(Some(raw)) = self.db.load_cookie_cache(&env.id) {
@@ -816,6 +840,30 @@ impl BrowserManager {
             let _ = client.call("Page.enable", json!({})).await;
             let _ = client.call("Runtime.enable", json!({})).await;
             let _ = client.call("Network.enable", json!({})).await;
+            let _ = client
+                .call(
+                    "Network.emulateNetworkConditions",
+                    network_emulation_params(&env.network_profile),
+                )
+                .await;
+            if let Some(geo) = &env.fingerprint.geolocation {
+                let _ = client
+                    .call(
+                        "Browser.grantPermissions",
+                        json!({ "permissions": ["geolocation"] }),
+                    )
+                    .await;
+                let _ = client
+                    .call(
+                        "Emulation.setGeolocationOverride",
+                        json!({
+                            "latitude": geo.latitude,
+                            "longitude": geo.longitude,
+                            "accuracy": geo.accuracy
+                        }),
+                    )
+                    .await;
+            }
             let _ = client
                 .call(
                     "Fetch.enable",
@@ -1696,6 +1744,28 @@ fn merge_launch_args(global: &[String], environment: &[String]) -> Vec<String> {
         merged.push(arg.clone());
     }
     merged
+}
+
+fn network_emulation_params(profile: &str) -> Value {
+    let (offline, latency, download, upload, packet_loss) = match profile {
+        "offline" => (true, 0, 0, 0, None),
+        "3g" => (false, 400, 50_000, 50_000, None),
+        "4g" => (false, 80, 524_288, 393_216, None),
+        "5g" => (false, 20, 2_621_440, 1_310_720, None),
+        "slow" => (false, 800, 25_600, 12_800, None),
+        "lossy" => (false, 300, 131_072, 65_536, Some(10.0)),
+        _ => (false, 0, -1, -1, None),
+    };
+    let mut params = json!({
+        "offline": offline,
+        "latency": latency,
+        "downloadThroughput": download,
+        "uploadThroughput": upload
+    });
+    if let Some(loss) = packet_loss {
+        params["packetLoss"] = json!(loss);
+    }
+    params
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -104,7 +104,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "http://127.0.0.1:17321/api/v1/envs?runningOnly=true"
 ```
 
-返回 `EnvironmentView[]`，包含 `fingerprint`、`proxy`、`runtime`、`accountCount`、`snapshotCount`、`accessLevel`，以及环境标识、启动参数与最近一次出口 IP 检测字段：`borderColor`、`borderWidth`、`chromiumLaunchArgs`、`taskbarBadgeText`、`ipAddress`、`ipCountry`、`ipCountryCode`、`ipCity`、`ipTimezone`、`ipSource`、`ipCheckedAt`。`accessLevel` 是当前登录用户在该环境的权限（`view` / `operate` / `manage`）。
+返回 `EnvironmentView[]`，包含 `fingerprint`、`proxy`、`runtime`、`accountCount`、`snapshotCount`、`accessLevel`，以及环境标识、启动参数与最近一次出口 IP 检测字段：`borderColor`、`borderWidth`、`chromiumLaunchArgs`、`taskbarBadgeText`、`networkProfile`、`ipAddress`、`ipCountry`、`ipCountryCode`、`ipCity`、`ipTimezone`、`ipSource`、`ipCheckedAt`。`accessLevel` 是当前登录用户在该环境的权限（`view` / `operate` / `manage`）。
 
 ### POST /envs
 
@@ -132,6 +132,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "borderWidth": 4,
   "chromiumLaunchArgs": ["--autoplay-policy=no-user-gesture-required"],
   "taskbarBadgeText": "A1",
+  "networkProfile": "4g",
   "templateOs": "win11",
   "autoRestart": false,
   "memoryLimitMb": 1500,
@@ -140,7 +141,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
 }
 ```
 
-`templateOs`：`win11` / `win10` / `mac` / `linux` / `android`。不传 `fingerprint` 时自动生成自洽模板；传入时按内置规则校验，存在冲突返回 `400 fingerprint_conflict`。`borderColor` 为 6 位十六进制（如 `#2563EB`），留空则按环境 ID 自动生成标识色；`borderWidth` 为 1-12px，默认 3px，控制面板标识色色条和 Windows 浏览器窗口边框的粗细。`chromiumLaunchArgs` 是该环境追加的 Chromium 参数数组；与全局同名参数同时存在时环境值优先。`taskbarBadgeText` 是任务栏图标最多 4 个字符的标识文字，留空显示环境颜色圆点。
+`templateOs`：`win11` / `win10` / `mac` / `linux` / `android` / `android-pixel8` / `android-galaxy-s24` / `android-xiaomi-14` / `iphone-15-pro`；移动端设备可加 `-landscape` 后缀切换横屏。不传 `fingerprint` 时自动生成自洽模板；传入时按内置规则校验，存在冲突返回 `400 fingerprint_conflict`。`borderColor` 为 6 位十六进制（如 `#2563EB`），留空则按环境 ID 自动生成标识色；`borderWidth` 为 1-12px，默认 3px，控制面板标识色色条和 Windows 浏览器窗口边框的粗细。`chromiumLaunchArgs` 是该环境追加的 Chromium 参数数组；与全局同名参数同时存在时环境值优先。`taskbarBadgeText` 是任务栏图标最多 4 个字符的标识文字，留空显示环境颜色圆点。`networkProfile` 取 `none` / `3g` / `4g` / `5g` / `slow` / `lossy` / `offline`。
 
 成功：`201 Created` + `EnvironmentView`。
 
@@ -185,6 +186,7 @@ curl -H "Authorization: Bearer $FINENV_API_KEY" \
   "borderWidth": 5,
   "chromiumLaunchArgs": ["--disable-gpu"],
   "taskbarBadgeText": "B2",
+  "networkProfile": "3g",
   "autoRestart": true,
   "memoryLimitMb": null,
   "idleTimeoutMin": 0
@@ -209,7 +211,7 @@ curl -X DELETE -H "Authorization: Bearer $FINENV_API_KEY" \
 
 ### GET /templates
 
-返回 `EnvironmentTemplate[]`。字段包括 `fingerprint`、`proxyMode`、`proxyId`、`extensionIds`、`chromiumLaunchArgs`、`taskbarBadgeText`、`borderColor`、`borderWidth`、`createdAt`、`updatedAt`。
+返回 `EnvironmentTemplate[]`。字段包括 `fingerprint`、`proxyMode`、`proxyId`、`extensionIds`、`chromiumLaunchArgs`、`taskbarBadgeText`、`networkProfile`、`borderColor`、`borderWidth`、`createdAt`、`updatedAt`。
 
 ### POST /templates
 

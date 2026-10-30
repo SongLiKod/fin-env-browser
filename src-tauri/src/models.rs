@@ -36,6 +36,10 @@ fn default_border_width() -> u32 {
     3
 }
 
+fn default_network_profile() -> String {
+    "none".into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Environment {
@@ -59,6 +63,8 @@ pub struct Environment {
     pub chromium_launch_args: Vec<String>,
     #[serde(default)]
     pub taskbar_badge_text: String,
+    #[serde(default = "default_network_profile")]
+    pub network_profile: String,
     pub auto_restart: bool,
     pub memory_limit_mb: Option<u32>,
     pub idle_timeout_min: Option<u32>,
@@ -156,6 +162,7 @@ pub struct EnvironmentTemplate {
     pub extension_ids: Vec<String>,
     pub chromium_launch_args: Vec<String>,
     pub taskbar_badge_text: String,
+    pub network_profile: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -289,6 +296,8 @@ pub struct CreateEnvironmentInput {
     pub chromium_launch_args: Vec<String>,
     #[serde(default)]
     pub taskbar_badge_text: String,
+    #[serde(default = "default_network_profile")]
+    pub network_profile: String,
     #[serde(default)]
     pub template_os: Option<String>,
     #[serde(default)]
@@ -338,6 +347,8 @@ pub struct UpdateEnvironmentInput {
     pub chromium_launch_args: Option<Vec<String>>,
     #[serde(default)]
     pub taskbar_badge_text: Option<String>,
+    #[serde(default)]
+    pub network_profile: Option<String>,
     #[serde(default)]
     pub auto_restart: Option<bool>,
     #[serde(default, deserialize_with = "double_option")]

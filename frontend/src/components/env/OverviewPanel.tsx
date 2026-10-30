@@ -45,6 +45,7 @@ export function OverviewPanel({
     chromiumPath: env.chromiumPath ?? '',
     launchArgs: env.chromiumLaunchArgs.join('\n'),
     badgeText: env.taskbarBadgeText,
+    networkProfile: env.networkProfile,
   });
 
   React.useEffect(() => {
@@ -67,6 +68,7 @@ export function OverviewPanel({
       chromiumPath: env.chromiumPath ?? '',
       launchArgs: env.chromiumLaunchArgs.join('\n'),
       badgeText: env.taskbarBadgeText,
+      networkProfile: env.networkProfile,
     });
   }, [env.id, env.updatedAt]);
 
@@ -99,6 +101,7 @@ export function OverviewPanel({
         chromiumPath: form.chromiumPath.trim() || null,
         chromiumLaunchArgs: form.launchArgs.split('\n'),
         taskbarBadgeText: form.badgeText,
+        networkProfile: form.networkProfile,
       });
       onUpdated(updated);
       toast.success('环境信息已保存');
@@ -201,6 +204,17 @@ export function OverviewPanel({
             </Field>
             <Field label="Chromium 路径" hint="留空使用全局设置或内置内核">
               <Input value={form.chromiumPath} onChange={(event) => update('chromiumPath', event.target.value)} disabled={!canEdit} placeholder="C:\\...\\chrome.exe" />
+            </Field>
+            <Field label="网络模拟" hint="启动浏览器时应用；离线/丢包用于弱网测试" className="col-span-1">
+              <Select value={form.networkProfile} onChange={(event) => update('networkProfile', event.target.value)} disabled={!canEdit}>
+                <option value="none">不限制</option>
+                <option value="3g">3G · 400ms / 400Kbps</option>
+                <option value="4g">4G · 80ms / 4Mbps</option>
+                <option value="5g">5G · 20ms / 20Mbps</option>
+                <option value="slow">慢速 · 800ms / 200Kbps</option>
+                <option value="lossy">丢包 · 10%</option>
+                <option value="offline">离线</option>
+              </Select>
             </Field>
             <Field
               label="环境启动参数"

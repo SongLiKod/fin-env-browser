@@ -9,6 +9,7 @@ import {
   KeyRound,
   LayoutTemplate,
   MonitorPlay,
+  MonitorUp,
   Network,
   Radar,
   RefreshCw,
@@ -66,6 +67,7 @@ export function EnvironmentDetailPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [tab, setTab] = React.useState<TabId>('overview');
   const [busy, setBusy] = React.useState(false);
+  const [shortcutBusy, setShortcutBusy] = React.useState(false);
   const [ipChecking, setIpChecking] = React.useState(false);
   const [detecting, setDetecting] = React.useState(false);
   const [showClone, setShowClone] = React.useState(false);
@@ -197,6 +199,19 @@ export function EnvironmentDetailPage() {
       toastError(err);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const createShortcut = async () => {
+    if (!env) return;
+    setShortcutBusy(true);
+    try {
+      const path = await ipc.envCreateShortcut(env.id);
+      toast.success('桌面快捷方式已创建', path);
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setShortcutBusy(false);
     }
   };
 
@@ -337,6 +352,11 @@ export function EnvironmentDetailPage() {
           {can('open_close') && canOperateEnv ? (
             <Button variant="secondary" onClick={() => void detect()} loading={detecting}>
               <Radar className="h-4 w-4" /> 检测指纹
+            </Button>
+          ) : null}
+          {can('open_close') && canOperateEnv ? (
+            <Button variant="secondary" loading={shortcutBusy} onClick={() => void createShortcut()}>
+              <MonitorUp className="h-4 w-4" /> 桌面快捷方式
             </Button>
           ) : null}
           {can('export_sensitive') ? (

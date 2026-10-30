@@ -717,6 +717,7 @@ mod tests {
             chromium_path: None,
             chromium_launch_args: Vec::new(),
             taskbar_badge_text: String::new(),
+            network_profile: "none".into(),
             auto_restart: false,
             memory_limit_mb: None,
             idle_timeout_min: None,

@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Dices,
   Fingerprint as FingerprintIcon,
+  MapPin,
   RotateCcw,
   Save,
   Sparkles,
@@ -152,6 +153,18 @@ export function FingerprintEditor({
 
   const patchWebgl = (partial: Partial<Fingerprint['webgl']>) =>
     setFp((current) => ({ ...current, webgl: { ...current.webgl, ...partial } }));
+
+  const patchGeolocation = (partial: Partial<NonNullable<Fingerprint['geolocation']>>) =>
+    setFp((current) => ({
+      ...current,
+      geolocation: {
+        latitude: 31.2304,
+        longitude: 121.4737,
+        accuracy: 30,
+        ...current.geolocation,
+        ...partial,
+      },
+    }));
 
   React.useEffect(() => {
     if (advanced) {
@@ -348,7 +361,72 @@ export function FingerprintEditor({
               <Field label="DPR">
                 <Input type="number" step="0.25" min={0.5} max={4} value={fp.screen.pixelRatio} onChange={(e) => patchScreen({ pixelRatio: Number(e.target.value) })} />
               </Field>
+              <Field label="屏幕方向" hint="切换会交换宽高并同步方向 API">
+                <Select
+                  value={fp.screen.width > fp.screen.height ? 'landscape' : 'portrait'}
+                  onChange={(e) => {
+                    const landscape = e.target.value === 'landscape';
+                    if (landscape === (fp.screen.width > fp.screen.height)) return;
+                    patchScreen({
+                      width: fp.screen.height,
+                      height: fp.screen.width,
+                      availWidth: fp.screen.availHeight,
+                      availHeight: fp.screen.availWidth,
+                    });
+                  }}
+                >
+                  <option value="portrait">竖屏</option>
+                  <option value="landscape">横屏</option>
+                </Select>
+              </Field>
             </div>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader title="地理定位" description="覆盖 navigator.geolocation，并通过 CDP 设置坐标；用于 LBS / 地图 / 门店类测试。" />
+          <CardBody className="space-y-4">
+            <Switch
+              checked={!!fp.geolocation}
+              onCheckedChange={(value) =>
+                patch({ geolocation: value ? { latitude: 31.2304, longitude: 121.4737, accuracy: 30 } : null })
+              }
+              label="模拟地理定位"
+              description="开启后页面获取到的经纬度固定为下方配置。"
+            />
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+              <Field label="纬度" hint="-90 ~ 90">
+                <Input
+                  type="number"
+                  step="0.0001"
+                  value={fp.geolocation?.latitude ?? ''}
+                  disabled={!fp.geolocation}
+                  onChange={(e) => patchGeolocation({ latitude: Number(e.target.value) })}
+                />
+              </Field>
+              <Field label="经度" hint="-180 ~ 180">
+                <Input
+                  type="number"
+                  step="0.0001"
+                  value={fp.geolocation?.longitude ?? ''}
+                  disabled={!fp.geolocation}
+                  onChange={(e) => patchGeolocation({ longitude: Number(e.target.value) })}
+                />
+              </Field>
+              <Field label="精度（米）">
+                <Input
+                  type="number"
+                  min={1}
+                  value={fp.geolocation?.accuracy ?? ''}
+                  disabled={!fp.geolocation}
+                  onChange={(e) => patchGeolocation({ accuracy: Number(e.target.value) })}
+                />
+              </Field>
+            </div>
+            <p className="flex items-center gap-1.5 text-[10px] text-content-hint">
+              <MapPin className="h-3 w-3 text-primary" />
+              建议与代理出口 IP、时区保持一致。
+            </p>
           </CardBody>
         </Card>
 
@@ -414,6 +492,7 @@ export function FingerprintEditor({
                   <option value="macOS">macOS</option>
                   <option value="Linux">Linux</option>
                   <option value="Android">Android</option>
+                  <option value="iOS">iOS</option>
                 </Select>
               </Field>
               <Field label="platformVersion">
@@ -606,7 +685,10 @@ export function FingerprintEditor({
               { key: 'win10', label: 'Windows 10 · Chrome' },
               { key: 'mac', label: 'macOS · Chrome' },
               { key: 'linux', label: 'Linux · Chrome' },
-              { key: 'android', label: 'Android 14 · 移动端' },
+              { key: 'android-pixel8', label: 'Pixel 8 · 移动端' },
+              { key: 'android-galaxy-s24', label: 'Galaxy S24 · 移动端' },
+              { key: 'android-xiaomi-14', label: 'Xiaomi 14 · 移动端' },
+              { key: 'iphone-15-pro', label: 'iPhone 15 Pro · 移动端' },
             ].map((item) => (
               <Button
                 key={item.key}
