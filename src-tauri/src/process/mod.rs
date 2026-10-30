@@ -1145,6 +1145,20 @@ impl BrowserManager {
         Ok(())
     }
 
+    pub async fn apply_network_profile(&self, env_id: &str, profile: &str) -> Result<()> {
+        let instance = self.instance(env_id)?;
+        let _ = instance.client.call("Network.enable", json!({})).await;
+        instance
+            .client
+            .call(
+                "Network.emulateNetworkConditions",
+                network_emulation_params(profile),
+            )
+            .await?;
+        self.touch(&instance);
+        Ok(())
+    }
+
     pub async fn set_mocks(&self, env_id: &str, rules: Vec<MockRule>) -> Result<()> {
         let instance = self.instance(env_id)?;
         let mut guard = instance.mocks.write().await;

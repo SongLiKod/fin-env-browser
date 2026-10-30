@@ -214,6 +214,8 @@ const TEMPLATE: &str = r#"<!doctype html>
         <div><span>指纹平台</span><b>@@FP_PLATFORM@@</b></div>
         <div><span>时区</span><b>@@TZ@@</b></div>
         <div><span>屏幕</span><b>@@SCREEN@@</b></div>
+        <div><span>地理定位</span><b title="@@GEO_TITLE@@">@@GEO@@</b></div>
+        <div><span>网络模拟</span><b>@@NETWORK@@</b></div>
       </div>
       <div class="runtime">@@RUNTIME@@</div>
     </aside>
@@ -242,6 +244,7 @@ const TEMPLATE: &str = r#"<!doctype html>
         <div class="row"><dt>语言</dt><dd data-live="languages">-</dd></div>
         <div class="row"><dt>时区</dt><dd data-live="timezone">-</dd></div>
         <div class="row"><dt>屏幕</dt><dd data-live="screen">-</dd></div>
+        <div class="row"><dt>地理定位</dt><dd data-live="geolocation">-</dd></div>
         <div class="row"><dt>CPU / 内存</dt><dd data-live="hardware">-</dd></div>
         <div class="row"><dt>WebGL</dt><dd class="mono" data-live="webgl">-</dd></div>
         <div class="row"><dt>自动化标记</dt><dd data-live="webdriver">-</dd></div>
@@ -273,6 +276,17 @@ const TEMPLATE: &str = r#"<!doctype html>
   set('languages', (navigator.languages || [navigator.language]).join(', '));
   try { set('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone); } catch (_) {}
   set('screen', screen.width + ' × ' + screen.height + ' @ ' + (window.devicePixelRatio || 1) + 'x');
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      function (position) {
+        set('geolocation', position.coords.latitude.toFixed(4) + ', ' + position.coords.longitude.toFixed(4) + ' · 精度 ' + Math.round(position.coords.accuracy) + ' m');
+      },
+      function (error) { set('geolocation', '不可用 · ' + error.message); },
+      { timeout: 3000 }
+    );
+  } else {
+    set('geolocation', '浏览器未提供');
+  }
   set('hardware', (navigator.hardwareConcurrency || '?') + ' 核 / ' + (navigator.deviceMemory || '?') + ' GB');
   try {
     const canvas = document.createElement('canvas');
@@ -502,11 +516,32 @@ fn render(
     .concat();
 
     let fp = &env.fingerprint;
+    let geolocation = fp
+        .geolocation
+        .as_ref()
+        .map(|geo| {
+            format!(
+                "{:.4}, {:.4} · 精度 {:.0} m",
+                geo.latitude, geo.longitude, geo.accuracy
+            )
+        })
+        .unwrap_or_else(|| "未启用".into());
+    let network_label = match env.network_profile.as_str() {
+        "3g" => "3G · 400ms / 400Kbps",
+        "4g" => "4G · 80ms / 4Mbps",
+        "5g" => "5G · 20ms / 20Mbps",
+        "slow" => "慢速 · 800ms / 200Kbps",
+        "lossy" => "丢包 · 10%",
+        "offline" => "离线",
+        "none" | "" => "不限制",
+        other => other,
+    };
     let fp_rows = [
         row("User Agent", &fp.user_agent, true),
         row("Platform", &fp.platform, false),
         row("语言", &fp.languages.join(", "), false),
         row("时区", &fp.timezone, false),
+        row("地理定位", &geolocation, false),
         row(
             "屏幕",
             &format!(
@@ -550,9 +585,10 @@ fn render(
     let net_rows = [
         row("代理", &proxy_label, false),
         row("代理地址", &proxy_title, true),
+        row("网络模拟", network_label, false),
         row("出口 IP", ip, true),
         row(
-            "位置",
+            "IP 位置",
             if ip_location.is_empty() {
                 "尚未检测"
             } else {
@@ -616,6 +652,16 @@ fn render(
             "@@SCREEN@@",
             &esc(&format!("{}×{}", fp.screen.width, fp.screen.height)),
         )
+        .replace(
+            "@@GEO@@",
+            &esc(&fp
+                .geolocation
+                .as_ref()
+                .map(|geo| format!("{:.4}, {:.4}", geo.latitude, geo.longitude))
+                .unwrap_or_else(|| "未启用".into())),
+        )
+        .replace("@@GEO_TITLE@@", &esc(&geolocation))
+        .replace("@@NETWORK@@", &esc(network_label))
         .replace("@@RUNTIME@@", &runtime_text)
         .replace("@@STATS@@", &stats)
         .replace("@@ENV_ROWS@@", &env_rows)

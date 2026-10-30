@@ -1,8 +1,9 @@
-use std::str::FromStr;
+use std::{str::FromStr, sync::LazyLock};
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tzf_rs::EmbeddedFinder;
 
 // ---------------------------------------------------------------------------
 // Data model
@@ -996,6 +997,31 @@ pub fn locale_for_country(country: &str) -> (&'static str, &'static [&'static st
         "BR" => ("America/Sao_Paulo", &["pt-BR", "pt", "en"]),
         "CA" => ("America/Toronto", &["en-CA", "en", "fr"]),
         "US" => ("America/New_York", &["en-US", "en"]),
+        "PK" => ("Asia/Karachi", &["en-PK", "en", "ur"]),
+        "BD" => ("Asia/Dhaka", &["bn-BD", "bn", "en"]),
+        "TH" => ("Asia/Bangkok", &["th-TH", "th", "en"]),
+        "ID" => ("Asia/Jakarta", &["id-ID", "id", "en"]),
+        "PH" => ("Asia/Manila", &["en-PH", "en", "fil"]),
+        "MY" => ("Asia/Kuala_Lumpur", &["ms-MY", "ms", "en"]),
+        "VN" => ("Asia/Ho_Chi_Minh", &["vi-VN", "vi", "en"]),
+        "ES" => ("Europe/Madrid", &["es-ES", "es", "en"]),
+        "IT" => ("Europe/Rome", &["it-IT", "it", "en"]),
+        "PT" => ("Europe/Lisbon", &["pt-PT", "pt", "en"]),
+        "PL" => ("Europe/Warsaw", &["pl-PL", "pl", "en"]),
+        "UA" => ("Europe/Kyiv", &["uk-UA", "uk", "en"]),
+        "TR" => ("Europe/Istanbul", &["tr-TR", "tr", "en"]),
+        "MX" => ("America/Mexico_City", &["es-MX", "es", "en"]),
+        "AR" => ("America/Argentina/Buenos_Aires", &["es-AR", "es", "en"]),
+        "CL" => ("America/Santiago", &["es-CL", "es", "en"]),
+        "CO" => ("America/Bogota", &["es-CO", "es", "en"]),
+        "NG" => ("Africa/Lagos", &["en-NG", "en"]),
+        "GQ" => ("Africa/Malabo", &["es-GQ", "es", "fr"]),
+        "ST" => ("Africa/Sao_Tome", &["pt-ST", "pt"]),
+        "EG" => ("Africa/Cairo", &["ar-EG", "ar", "en"]),
+        "ZA" => ("Africa/Johannesburg", &["en-ZA", "en"]),
+        "KE" => ("Africa/Nairobi", &["en-KE", "en", "sw"]),
+        "MA" => ("Africa/Casablanca", &["fr-MA", "fr", "ar"]),
+        "NZ" => ("Pacific/Auckland", &["en-NZ", "en"]),
         "ZZ" | "" => ("UTC", &["en-US", "en"]),
         _ => ("UTC", &["en-US", "en"]),
     }
@@ -1009,6 +1035,93 @@ pub fn apply_country_locale(fp: &mut Fingerprint, country: &str) {
     let (tz, languages) = locale_for_country(country);
     fp.timezone = tz.to_string();
     fp.languages = languages.iter().map(|value| value.to_string()).collect();
+}
+
+static TIMEZONE_FINDER: LazyLock<EmbeddedFinder> = LazyLock::new(EmbeddedFinder::new);
+
+pub fn timezone_for_coordinates(latitude: f64, longitude: f64) -> Option<String> {
+    if !(-90.0..=90.0).contains(&latitude) || !(-180.0..=180.0).contains(&longitude) {
+        return None;
+    }
+    let timezone = TIMEZONE_FINDER.get_tz_name(longitude, latitude);
+    if timezone.is_empty() || timezone.starts_with("Etc/") {
+        return None;
+    }
+    chrono_tz::Tz::from_str(timezone)
+        .ok()
+        .map(|_| timezone.to_string())
+}
+
+/// Keep the location-dependent fingerprint fields consistent with the
+/// configured geolocation. IP address/geo-IP is deliberately not touched:
+/// it follows the real egress or the selected proxy.
+pub fn apply_geolocation_context(fp: &mut Fingerprint) -> Option<String> {
+    let geolocation = fp.geolocation.as_ref()?;
+    let timezone = timezone_for_coordinates(geolocation.latitude, geolocation.longitude)?;
+    fp.timezone = timezone.clone();
+    if let Some(country) = country_for_timezone(&timezone) {
+        let (_, languages) = locale_for_country(country);
+        fp.languages = languages.iter().map(|value| value.to_string()).collect();
+    }
+    Some(timezone)
+}
+
+fn country_for_timezone(timezone: &str) -> Option<&'static str> {
+    match timezone {
+        "Asia/Shanghai" | "Asia/Chongqing" | "Asia/Harbin" | "Asia/Urumqi" => Some("CN"),
+        "Asia/Hong_Kong" => Some("HK"),
+        "Asia/Taipei" => Some("TW"),
+        "Asia/Tokyo" => Some("JP"),
+        "Asia/Seoul" => Some("KR"),
+        "Asia/Singapore" => Some("SG"),
+        "Asia/Kolkata" | "Asia/Calcutta" => Some("IN"),
+        "Asia/Karachi" => Some("PK"),
+        "Asia/Dhaka" => Some("BD"),
+        "Asia/Bangkok" => Some("TH"),
+        "Asia/Jakarta" => Some("ID"),
+        "Asia/Manila" => Some("PH"),
+        "Asia/Kuala_Lumpur" => Some("MY"),
+        "Asia/Ho_Chi_Minh" | "Asia/Saigon" => Some("VN"),
+        "Europe/London" => Some("GB"),
+        "Europe/Berlin" | "Europe/Busingen" => Some("DE"),
+        "Europe/Paris" => Some("FR"),
+        "Europe/Amsterdam" => Some("NL"),
+        "Europe/Moscow" => Some("RU"),
+        "Europe/Madrid" => Some("ES"),
+        "Europe/Rome" => Some("IT"),
+        "Europe/Lisbon" => Some("PT"),
+        "Europe/Warsaw" => Some("PL"),
+        "Europe/Kyiv" | "Europe/Kiev" => Some("UA"),
+        "Europe/Istanbul" => Some("TR"),
+        "America/New_York"
+        | "America/Chicago"
+        | "America/Denver"
+        | "America/Los_Angeles"
+        | "America/Phoenix"
+        | "America/Anchorage"
+        | "Pacific/Honolulu" => Some("US"),
+        "America/Toronto" | "America/Vancouver" | "America/Edmonton" | "America/Winnipeg"
+        | "America/Halifax" => Some("CA"),
+        "America/Sao_Paulo" => Some("BR"),
+        "America/Mexico_City" => Some("MX"),
+        "America/Argentina/Buenos_Aires" => Some("AR"),
+        "America/Santiago" => Some("CL"),
+        "America/Bogota" => Some("CO"),
+        "Africa/Lagos" => Some("NG"),
+        "Africa/Malabo" => Some("GQ"),
+        "Africa/Sao_Tome" => Some("ST"),
+        "Africa/Cairo" => Some("EG"),
+        "Africa/Johannesburg" => Some("ZA"),
+        "Africa/Nairobi" => Some("KE"),
+        "Africa/Casablanca" => Some("MA"),
+        "Australia/Sydney"
+        | "Australia/Melbourne"
+        | "Australia/Brisbane"
+        | "Australia/Perth"
+        | "Australia/Adelaide" => Some("AU"),
+        "Pacific/Auckland" => Some("NZ"),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------

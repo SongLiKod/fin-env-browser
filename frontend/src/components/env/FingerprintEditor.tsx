@@ -384,7 +384,7 @@ export function FingerprintEditor({
         </Card>
 
         <Card>
-          <CardHeader title="地理定位" description="覆盖 navigator.geolocation，并通过 CDP 设置坐标；用于 LBS / 地图 / 门店类测试。" />
+          <CardHeader title="地理定位" description="覆盖 navigator.geolocation 并通过 CDP 设置坐标；保存定位变化时自动同步时区与语言。IP 位置仍由代理出口决定。" />
           <CardBody className="space-y-4">
             <Switch
               checked={!!fp.geolocation}
@@ -425,7 +425,7 @@ export function FingerprintEditor({
             </div>
             <p className="flex items-center gap-1.5 text-[10px] text-content-hint">
               <MapPin className="h-3 w-3 text-primary" />
-              建议与代理出口 IP、时区保持一致。
+              保存定位后会按坐标同步时区与语言；如需 IP 也显示为该地区，请绑定对应地区代理。
             </p>
           </CardBody>
         </Card>

@@ -106,6 +106,17 @@ fn refresh_start_page(state: &SharedState, env: &Environment) -> bool {
     .is_ok()
 }
 
+pub async fn reload_start_page_if_active(state: &SharedState, env_id: &str) {
+    let is_start_page = state
+        .browsers
+        .get_runtime(env_id)
+        .map(|runtime| runtime.current_url.contains("/start-pages/"))
+        .unwrap_or(false);
+    if is_start_page {
+        let _ = state.browsers.reload(env_id).await;
+    }
+}
+
 pub fn create_environment(
     state: &SharedState,
     input: CreateEnvironmentInput,
@@ -206,6 +217,7 @@ pub async fn update_environment(
     actor: &str,
 ) -> Result<Environment> {
     let mut env = state.db.get_environment(id)?;
+    let previous_network = env.network_profile.clone();
     if let Some(name) = input.name {
         let name = name.trim();
         if name.is_empty() {
@@ -304,7 +316,14 @@ pub async fn update_environment(
     }
     env.updated_at = now_iso();
     state.db.update_environment(&env)?;
+    if previous_network != env.network_profile && state.browsers.is_running(&env.id) {
+        let _ = state
+            .browsers
+            .apply_network_profile(&env.id, &env.network_profile)
+            .await;
+    }
     let _ = refresh_start_page(state, &env);
+    reload_start_page_if_active(state, &env.id).await;
     if env.status == "disabled" && state.browsers.is_running(&env.id) {
         state
             .browsers
@@ -979,15 +998,29 @@ pub fn update_fingerprint(
     fp: fingerprint::Fingerprint,
     actor: &str,
 ) -> Result<Environment> {
+    let mut env = state.db.get_environment(env_id)?;
+    let geolocation_changed = match (&env.fingerprint.geolocation, &fp.geolocation) {
+        (Some(previous), Some(next)) => {
+            previous.latitude != next.latitude
+                || previous.longitude != next.longitude
+                || previous.accuracy != next.accuracy
+        }
+        (None, None) => false,
+        _ => true,
+    };
+    let mut fp = fp;
+    if geolocation_changed {
+        let _ = fingerprint::apply_geolocation_context(&mut fp);
+    }
     let validation = fingerprint::validate(&fp);
     if !validation.valid {
         return Err(validation_error(&validation, "指纹参数冲突"));
     }
-    let mut env = state.db.get_environment(env_id)?;
     env.fingerprint = fp;
     env.fingerprint_snapshot_id = None;
     env.updated_at = now_iso();
     state.db.update_environment(&env)?;
+    let _ = refresh_start_page(state, &env);
     Audit::env(
         &state.db,
         actor,
@@ -1009,6 +1042,7 @@ pub async fn apply_fingerprint_if_running(state: &SharedState, env: &Environment
             .browsers
             .apply_fingerprint(&env.id, &env.fingerprint)
             .await?;
+        reload_start_page_if_active(state, &env.id).await;
     }
     Ok(())
 }
@@ -1362,6 +1396,7 @@ pub async fn align_proxy(
             .browsers
             .apply_fingerprint(env_id, &updated.fingerprint)
             .await?;
+        reload_start_page_if_active(state, env_id).await;
     }
     Audit::env(
         &state.db,
