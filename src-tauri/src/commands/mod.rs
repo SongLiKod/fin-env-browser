@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde_json::{json, Value};
 use tauri::State;
