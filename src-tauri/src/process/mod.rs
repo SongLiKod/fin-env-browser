@@ -1171,10 +1171,20 @@ impl BrowserManager {
     }
 
     pub fn video_list(&self, env_id: &str) -> Vec<crate::models::SniffedVideo> {
-        self.videos
+        let current_url = self
+            .get_runtime(env_id)
+            .map(|runtime| runtime.current_url)
+            .unwrap_or_default();
+        let mut items = self
+            .videos
             .lock()
             .map(|store| store.list(env_id))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if !current_url.is_empty() {
+            items
+                .retain(|item| item.page_url.is_empty() || same_page(&item.page_url, &current_url));
+        }
+        items
     }
 
     pub fn clear_videos(&self, env_id: &str) {
@@ -1874,6 +1884,14 @@ impl BrowserManager {
                                     .and_then(|f| f.get("url"))
                                     .and_then(|v| v.as_str())
                                 {
+                                    let previous = instance
+                                        .current_url
+                                        .lock()
+                                        .map(|current| current.clone())
+                                        .unwrap_or_default();
+                                    if !previous.is_empty() && previous != url {
+                                        manager.clear_videos(&instance.env_id);
+                                    }
                                     if let Ok(mut current) = instance.current_url.lock() {
                                         *current = url.to_string();
                                     }
@@ -2107,6 +2125,22 @@ const VIDEO_SCAN_SCRIPT: &str = r#"(() => {
   });
   return Array.from(urls).slice(0, 300);
 })()"#;
+
+fn same_page(left: &str, right: &str) -> bool {
+    let normalize = |value: &str| {
+        url::Url::parse(value)
+            .ok()
+            .map(|url| {
+                format!(
+                    "{}{}",
+                    url.origin().ascii_serialization(),
+                    url.path().trim_end_matches('/')
+                )
+            })
+            .unwrap_or_else(|| value.trim_end_matches('/').to_string())
+    };
+    normalize(left) == normalize(right)
+}
 
 fn cookie_domain_matches(domain: &str, host: &str) -> bool {
     if domain.is_empty() || host.is_empty() {

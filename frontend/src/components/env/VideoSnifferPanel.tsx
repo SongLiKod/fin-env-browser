@@ -92,6 +92,14 @@ export function VideoSnifferPanel({ env }: { env: EnvironmentView }) {
         }
       />
       <CardBody>
+        <div className="mb-3 rounded-md border border-border bg-surface-secondary px-3 py-2 text-[10px] leading-5 text-content-hint">
+          只检测当前环境受控标签页。当前页面：
+          <span className="ml-1 break-all font-mono text-content-weak">
+            {env.runtime?.currentUrl || '环境未运行'}
+          </span>
+          <br />
+          切换页面后旧页面视频会自动清空；如果在新标签页打开视频，FinEnv 当前不会自动接管该标签页。
+        </div>
         {!enabled ? (
           <EmptyState
             icon={<Film className="h-5 w-5" />}
