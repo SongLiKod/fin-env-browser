@@ -1172,6 +1172,150 @@ impl BrowserManager {
         Ok(())
     }
 
+    fn video_sniffer_enabled(&self) -> bool {
+        self.settings
+            .read()
+            .map(|settings| crate::plugins::is_enabled(&settings, crate::plugins::VIDEO_SNIFFER))
+            .unwrap_or(false)
+    }
+
+    fn record_video_request(&self, env_id: &str, params: &Value) {
+        if let Ok(mut store) = self.videos.lock() {
+            store.record_request(env_id, params);
+        }
+    }
+
+    fn record_video_response(&self, instance: &Arc<BrowserInstance>, params: &Value) {
+        let page_url = instance
+            .current_url
+            .lock()
+            .map(|url| url.clone())
+            .unwrap_or_default();
+        self.record_video_response_for_page(&instance.env_id, &page_url, params);
+    }
+
+    fn record_video_response_for_page(&self, env_id: &str, page_url: &str, params: &Value) {
+        let detected = self
+            .videos
+            .lock()
+            .ok()
+            .and_then(|mut store| store.record_response(env_id, page_url, params));
+        if let Some(video) = detected {
+            self.emit("video://detected", video);
+        }
+    }
+
+    fn record_video_finished(&self, env_id: &str, params: &Value) {
+        if let Ok(mut store) = self.videos.lock() {
+            store.record_finished(env_id, params);
+        }
+    }
+
+    pub async fn download_video(&self, env_id: &str, video_id: &str) -> Result<String> {
+        let video = self
+            .videos
+            .lock()
+            .ok()
+            .and_then(|store| store.get(env_id, video_id))
+            .ok_or_else(|| AppError::not_found("Video not found; refresh and try again"))?;
+        let env = self.db.get_environment(env_id)?;
+        let proxy = env
+            .proxy_id
+            .as_ref()
+            .map(|id| self.db.get_proxy(id))
+            .transpose()?;
+        let mut builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(180))
+            .user_agent(if video.user_agent.is_empty() {
+                env.fingerprint.user_agent.clone()
+            } else {
+                video.user_agent.clone()
+            });
+        if let Some(proxy) = &proxy {
+            let password = if proxy.password_enc.is_empty() {
+                String::new()
+            } else {
+                self.crypto.decrypt(&proxy.password_enc)?
+            };
+            let mut proxy_url = url::Url::parse(&format!(
+                "{}://{}:{}",
+                proxy.protocol, proxy.host, proxy.port
+            ))
+            .map_err(|error| AppError::bad_request(format!("Invalid proxy address: {error}")))?;
+            if !proxy.username.is_empty() {
+                let _ = proxy_url.set_username(&proxy.username);
+                let _ = proxy_url.set_password(Some(&password));
+            }
+            builder = builder.proxy(reqwest::Proxy::all(proxy_url.as_str()).map_err(|error| {
+                AppError::bad_request(format!("Invalid proxy address: {error}"))
+            })?);
+        }
+        let client = builder.build()?;
+        let resolved = if video.downloadable {
+            None
+        } else {
+            self.resolve_bilibili_video(&client, env_id, &video).await?
+        };
+        let (download_url, referer, title) = match resolved {
+            Some(resolved) => (
+                resolved.url,
+                "https://www.bilibili.com/".into(),
+                Some(resolved.title),
+            ),
+            None if video.downloadable => (video.url.clone(), video.referer.clone(), None),
+            None => {
+                return Err(AppError::bad_request(
+                    "? HLS/DASH ????????????????? B ???? MP4",
+                ))
+            }
+        };
+        let mut request = client.get(&download_url);
+        if !referer.is_empty() {
+            request = request.header(reqwest::header::REFERER, referer);
+        }
+        let cookie = self.video_cookie_header(env_id, &download_url).await;
+        if !cookie.is_empty() {
+            request = request.header(reqwest::header::COOKIE, cookie);
+        }
+        let response = request.send().await?;
+        if !response.status().is_success() {
+            return Err(AppError::bad_request(format!(
+                "Download failed, media server returned HTTP {}",
+                response.status()
+            )));
+        }
+        let dir = paths::downloads_dir(&self.data_dir);
+        paths::ensure_dir(&dir)?;
+        let name = title
+            .as_deref()
+            .map(|title| title_filename(title, "mp4"))
+            .unwrap_or_else(|| video_filename(&download_url, &video.mime_type));
+        let path = unique_download_path(&dir, &name);
+        let mut file = tokio::fs::File::create(&path).await?;
+        let mut stream = response.bytes_stream();
+        let mut total: u64 = 0;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            total += chunk.len() as u64;
+            if total > 4 * 1024 * 1024 * 1024 {
+                let _ = tokio::fs::remove_file(&path).await;
+                return Err(AppError::bad_request(
+                    "Media exceeds 4GB, download cancelled",
+                ));
+            }
+            file.write_all(&chunk).await?;
+        }
+        file.flush().await?;
+        drop(file);
+        if is_encrypted_media(&path) {
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(AppError::bad_request(
+                "This MP4 is CENC/DRM encrypted and cannot be played directly; use Record current video",
+            ));
+        }
+        Ok(path.to_string_lossy().to_string())
+    }
+
     pub fn video_list(&self, env_id: &str) -> Vec<crate::models::SniffedVideo> {
         let current_url = self
             .get_runtime(env_id)
@@ -1262,191 +1406,88 @@ impl BrowserManager {
         Ok(())
     }
 
-    fn video_sniffer_enabled(&self) -> bool {
-        self.settings
-            .read()
-            .map(|settings| crate::plugins::is_enabled(&settings, crate::plugins::VIDEO_SNIFFER))
-            .unwrap_or(false)
-    }
-
-    fn record_video_request(&self, env_id: &str, params: &Value) {
-        if let Ok(mut store) = self.videos.lock() {
-            store.record_request(env_id, params);
-        }
-    }
-
-    fn record_video_response(&self, instance: &Arc<BrowserInstance>, params: &Value) {
-        let page_url = instance
-            .current_url
-            .lock()
-            .map(|url| url.clone())
-            .unwrap_or_default();
-        self.record_video_response_for_page(&instance.env_id, &page_url, params);
-    }
-
-    fn record_video_response_for_page(&self, env_id: &str, page_url: &str, params: &Value) {
-        let detected = self
-            .videos
-            .lock()
-            .ok()
-            .and_then(|mut store| store.record_response(env_id, page_url, params));
-        if let Some(video) = detected {
-            self.emit("video://detected", video);
-        }
-    }
-
-    fn record_video_finished(&self, env_id: &str, params: &Value) {
-        if let Ok(mut store) = self.videos.lock() {
-            store.record_finished(env_id, params);
-        }
-    }
-
-    pub async fn download_video(&self, env_id: &str, video_id: &str) -> Result<String> {
-        let video = self
-            .videos
-            .lock()
-            .ok()
-            .and_then(|store| store.get(env_id, video_id))
-            .ok_or_else(|| AppError::not_found("视频已不存在，请刷新后重试"))?;
-        let env = self.db.get_environment(env_id)?;
-        let proxy = env
-            .proxy_id
-            .as_ref()
-            .map(|id| self.db.get_proxy(id))
-            .transpose()?;
-        let mut builder = reqwest::Client::builder()
-            .timeout(Duration::from_secs(180))
-            .user_agent(if video.user_agent.is_empty() {
-                env.fingerprint.user_agent.clone()
-            } else {
-                video.user_agent.clone()
-            });
-        if let Some(proxy) = &proxy {
-            let password = if proxy.password_enc.is_empty() {
-                String::new()
-            } else {
-                self.crypto.decrypt(&proxy.password_enc)?
-            };
-            let mut proxy_url = url::Url::parse(&format!(
-                "{}://{}:{}",
-                proxy.protocol, proxy.host, proxy.port
-            ))
-            .map_err(|error| AppError::bad_request(format!("代理地址无效: {error}")))?;
-            if !proxy.username.is_empty() {
-                let _ = proxy_url.set_username(&proxy.username);
-                let _ = proxy_url.set_password(Some(&password));
-            }
-            builder =
-                builder
-                    .proxy(reqwest::Proxy::all(proxy_url.as_str()).map_err(|error| {
-                        AppError::bad_request(format!("代理配置无效: {error}"))
-                    })?);
-        }
-        let client = builder.build()?;
-        let resolved = if video.downloadable {
-            None
-        } else {
-            self.resolve_bilibili_video(&client, env_id, &video).await?
-        };
-        let (download_url, referer, title) = match resolved {
-            Some(resolved) => (
-                resolved.url,
-                "https://www.bilibili.com/".into(),
-                Some(resolved.title),
-            ),
-            None if video.downloadable => (video.url.clone(), video.referer.clone(), None),
-            None => {
-                return Err(AppError::bad_request(
-                    "该 HLS/DASH 流暂不支持自动合并；当前会自动解析 B 站视频为 MP4",
-                ))
-            }
-        };
-        let mut request = client.get(&download_url);
-        if !referer.is_empty() {
-            request = request.header(reqwest::header::REFERER, referer);
-        }
-        let cookie = self.video_cookie_header(env_id, &download_url).await;
-        if !cookie.is_empty() {
-            request = request.header(reqwest::header::COOKIE, cookie);
-        }
-        let response = request.send().await?;
-        if !response.status().is_success() {
-            return Err(AppError::bad_request(format!(
-                "下载失败，媒体服务器返回 HTTP {}",
-                response.status()
-            )));
-        }
-        let dir = paths::downloads_dir(&self.data_dir);
-        paths::ensure_dir(&dir)?;
-        let name = title
-            .as_deref()
-            .map(|title| title_filename(title, "mp4"))
-            .unwrap_or_else(|| video_filename(&download_url, &video.mime_type));
-        let path = unique_download_path(&dir, &name);
-        let mut file = tokio::fs::File::create(&path).await?;
-        let mut stream = response.bytes_stream();
-        let mut total: u64 = 0;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            total += chunk.len() as u64;
-            if total > 4 * 1024 * 1024 * 1024 {
-                let _ = tokio::fs::remove_file(&path).await;
-                return Err(AppError::bad_request("媒体文件超过 4GB，已取消下载"));
-            }
-            file.write_all(&chunk).await?;
-        }
-        file.flush().await?;
-        drop(file);
-        if is_encrypted_media(&path) {
-            let _ = tokio::fs::remove_file(&path).await;
-            return Err(AppError::bad_request(
-                "该 MP4 是 CENC/DRM 加密视频，下载后无法直接播放；请使用「录制当前视频」生成可播放文件",
-            ));
-        }
-        Ok(path.to_string_lossy().to_string())
-    }
-
     pub async fn start_video_recording(&self, env_id: &str) -> Result<String> {
         let instance = self.instance(env_id)?;
         let dir = paths::downloads_dir(&self.data_dir);
         paths::ensure_dir(&dir)?;
-        let _ = instance
-            .client
-            .call(
-                "Page.setDownloadBehavior",
-                json!({
-                    "behavior": "allow",
-                    "downloadPath": dir.to_string_lossy()
-                }),
-            )
-            .await;
-        let value = instance.client.evaluate(RECORD_START_SCRIPT).await?;
-        if value.get("ok").and_then(Value::as_bool) != Some(true) {
-            return Err(AppError::bad_request(
-                value
-                    .get("error")
+        let ws = browser_ws_url(instance.debug_port).await?;
+        let client = CdpClient::connect(&ws).await?;
+        let value = client.call("Target.getTargets", json!({})).await?;
+        let targets = value
+            .get("targetInfos")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for info in targets {
+            if info.get("type").and_then(Value::as_str) != Some("page") {
+                continue;
+            }
+            let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                continue;
+            };
+            let Ok(session) = attach_video_session(&client, target_id).await else {
+                continue;
+            };
+            let _ = client
+                .call_on(
+                    "Page.setDownloadBehavior",
+                    json!({
+                        "behavior": "allow",
+                        "downloadPath": dir.to_string_lossy()
+                    }),
+                    Some(&session),
+                )
+                .await;
+            let Ok(value) = client
+                .evaluate_on(RECORD_START_SCRIPT, Some(&session))
+                .await
+            else {
+                continue;
+            };
+            if value.get("ok").and_then(Value::as_bool) == Some(true) {
+                self.touch(&instance);
+                return Ok(value
+                    .get("mime")
                     .and_then(Value::as_str)
-                    .unwrap_or("当前页面没有可录制的视频"),
-            ));
+                    .unwrap_or("video/mp4")
+                    .to_string());
+            }
         }
-        self.touch(&instance);
-        Ok(value
-            .get("mime")
-            .and_then(Value::as_str)
-            .unwrap_or("video/mp4")
-            .to_string())
+        Err(AppError::bad_request(
+            "No recordable video found on the current page",
+        ))
     }
 
     pub async fn stop_video_recording(&self, env_id: &str) -> Result<()> {
         let instance = self.instance(env_id)?;
-        let value = instance.client.evaluate(RECORD_STOP_SCRIPT).await?;
-        if value.get("ok").and_then(Value::as_bool) != Some(true) {
-            return Err(AppError::bad_request(
-                value
-                    .get("error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("当前没有正在进行的录制"),
-            ));
+        let ws = browser_ws_url(instance.debug_port).await?;
+        let client = CdpClient::connect(&ws).await?;
+        let value = client.call("Target.getTargets", json!({})).await?;
+        let targets = value
+            .get("targetInfos")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut stopped = false;
+        for info in targets {
+            if info.get("type").and_then(Value::as_str) != Some("page") {
+                continue;
+            }
+            let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                continue;
+            };
+            let Ok(session) = attach_video_session(&client, target_id).await else {
+                continue;
+            };
+            let Ok(result) = client.evaluate_on(RECORD_STOP_SCRIPT, Some(&session)).await else {
+                continue;
+            };
+            if result.get("ok").and_then(Value::as_bool) == Some(true) {
+                stopped = true;
+            }
+        }
+        if !stopped {
+            return Err(AppError::bad_request("当前没有正在进行的录制"));
         }
         sleep(Duration::from_millis(1500)).await;
         self.touch(&instance);
@@ -2370,7 +2411,7 @@ fn merge_launch_args(global: &[String], environment: &[String]) -> Vec<String> {
     merged
 }
 
-const RECORD_START_SCRIPT: &str = r#"(() => {
+const RECORD_START_SCRIPT: &str = r#"(async () => {
   if (window.__finEnvRecorder) return { ok: false, error: '当前页面已经在录制' };
   const video = document.querySelector('video');
   if (!video || !video.captureStream) return { ok: false, error: '当前页面没有支持录制的视频元素' };
@@ -2378,8 +2419,16 @@ const RECORD_START_SCRIPT: &str = r#"(() => {
     ? 'video/mp4;codecs=avc1'
     : (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus' : '');
   if (!mime) return { ok: false, error: '当前 Chromium 不支持 MP4/WebM 录制' };
-  let stream;
-  try { stream = video.captureStream(); } catch (error) { return { ok: false, error: String(error) }; }
+  let stream = null;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try { await video.play(); } catch (error) {}
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    try { stream = video.captureStream(); } catch (error) { stream = null; }
+    if (stream && stream.getTracks().length > 0) break;
+  }
+  if (!stream || stream.getTracks().length === 0) {
+    return { ok: false, error: '视频尚未开始播放，无法获取可录制轨道' };
+  }
   const chunks = [];
   const recorder = new MediaRecorder(stream, {
     mimeType: mime,
@@ -2400,7 +2449,6 @@ const RECORD_START_SCRIPT: &str = r#"(() => {
   };
   recorder.start(1000);
   window.__finEnvRecorder = { recorder, stream };
-  video.play().catch(() => {});
   return { ok: true, mime };
 })()"#;
 
