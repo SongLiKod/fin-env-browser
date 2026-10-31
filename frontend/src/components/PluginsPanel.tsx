@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Film, Puzzle, RefreshCw } from 'lucide-react';
-import type { PluginInfo } from '@/ipc/types';
+import type { BuiltinPluginInfo } from '@/ipc/types';
 import { ipc } from '@/ipc/client';
 import { toastError, useToastStore } from '@/store/toast';
 import { Badge } from '@/components/ui/badge';
@@ -14,7 +14,7 @@ const icons: Record<string, React.ReactNode> = {
 
 export function PluginsPanel() {
   const toast = useToastStore();
-  const [plugins, setPlugins] = React.useState<PluginInfo[]>([]);
+  const [plugins, setPlugins] = React.useState<BuiltinPluginInfo[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState<string | null>(null);
 
@@ -33,7 +33,7 @@ export function PluginsPanel() {
     void load();
   }, [load]);
 
-  const toggle = async (plugin: PluginInfo, enabled: boolean) => {
+  const toggle = async (plugin: BuiltinPluginInfo, enabled: boolean) => {
     setBusy(plugin.id);
     try {
       setPlugins(await ipc.pluginSetEnabled(plugin.id, enabled));
@@ -95,7 +95,7 @@ export function PluginsPanel() {
             ))
           )}
           <div className="rounded-lg border border-dashed border-border px-3.5 py-3 text-[11px] leading-5 text-content-hint">
-            当前插件为编译内置，只有启用后才会接收网络事件。视频嗅探捕获的是 FinEnv 受控标签页的媒体响应；手动新开的标签页不在当前受控范围内。
+            全局开关关闭后，环境详情不再显示对应插件页签；全局开启后，每个环境可在插件页签中单独启用或暂停。当前插件为编译内置，视频嗅探捕获的是 FinEnv 受控标签页的媒体响应。
           </div>
         </CardBody>
       </Card>

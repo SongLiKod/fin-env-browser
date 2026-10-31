@@ -483,6 +483,55 @@ impl Db {
             Ok(())
         })
     }
+
+    pub fn env_plugin_enabled(&self, env_id: &str, plugin_id: &str) -> Result<Option<bool>> {
+        self.with(|conn| {
+            match conn.query_row(
+                "SELECT enabled FROM env_plugins WHERE env_id = ?1 AND plugin_id = ?2",
+                params![env_id, plugin_id],
+                |row| row.get::<_, i64>(0),
+            ) {
+                Ok(value) => Ok(Some(int_bool(value))),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(error) => Err(error.into()),
+            }
+        })
+    }
+
+    pub fn set_env_plugin_enabled(
+        &self,
+        env_id: &str,
+        plugin_id: &str,
+        enabled: bool,
+    ) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "INSERT INTO env_plugins (env_id, plugin_id, enabled, updated_at)
+                 VALUES (?1,?2,?3,?4)
+                 ON CONFLICT(env_id, plugin_id) DO UPDATE SET
+                 enabled = excluded.enabled, updated_at = excluded.updated_at",
+                params![env_id, plugin_id, bool_int(enabled), now_iso()],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn delete_captcha(&self, id: &str) -> Result<Option<String>> {
+        self.with(|conn| {
+            let screenshot: Option<String> = conn
+                .query_row(
+                    "SELECT screenshot_path FROM captcha_events WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| match error {
+                    rusqlite::Error::QueryReturnedNoRows => AppError::not_found("验证码事件不存在"),
+                    other => other.into(),
+                })?;
+            conn.execute("DELETE FROM captcha_events WHERE id = ?1", params![id])?;
+            Ok(screenshot)
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------

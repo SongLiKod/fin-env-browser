@@ -7,6 +7,7 @@ import { formatBytes } from '@/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, EmptyState, Spinner } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
 
 const kindLabels: Record<string, string> = {
   video: '视频',
@@ -18,6 +19,8 @@ const kindLabels: Record<string, string> = {
 export function VideoSnifferPanel({ env }: { env: EnvironmentView }) {
   const toast = useToastStore();
   const [enabled, setEnabled] = React.useState(false);
+  const [envEnabled, setEnvEnabled] = React.useState(false);
+  const [toggleBusy, setToggleBusy] = React.useState(false);
   const [videos, setVideos] = React.useState<SniffedVideo[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [downloading, setDownloading] = React.useState<string | null>(null);
@@ -28,8 +31,19 @@ export function VideoSnifferPanel({ env }: { env: EnvironmentView }) {
     async (quiet = false) => {
       if (!quiet) setLoading(true);
       try {
-        const [plugins, items] = await Promise.all([ipc.pluginList(), ipc.videoList(env.id)]);
-        setEnabled(plugins.some((plugin) => plugin.id === 'video-sniffer' && plugin.enabled));
+        const [plugins, envPlugins, items] = await Promise.all([
+          ipc.pluginList(),
+          ipc.pluginEnvState(env.id),
+          ipc.videoList(env.id),
+        ]);
+        const globalEnabled = plugins.some(
+          (plugin) => plugin.id === 'video-sniffer' && plugin.enabled,
+        );
+        const environmentEnabled = envPlugins.some(
+          (plugin) => plugin.id === 'video-sniffer' && plugin.enabled,
+        );
+        setEnabled(globalEnabled && environmentEnabled);
+        setEnvEnabled(environmentEnabled);
         setVideos(items);
       } catch (error) {
         if (!quiet) toastError(error);
@@ -83,6 +97,21 @@ export function VideoSnifferPanel({ env }: { env: EnvironmentView }) {
     }
   };
 
+  const toggleEnvironmentPlugin = async (value: boolean) => {
+    setToggleBusy(true);
+    try {
+      await ipc.pluginSetEnvEnabled(env.id, 'video-sniffer', value);
+      setEnvEnabled(value);
+      setEnabled(value);
+      if (!value) setVideos([]);
+      toast.success(value ? '本环境已启用视频嗅探' : '本环境已暂停视频嗅探');
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setToggleBusy(false);
+    }
+  };
+
   const toggleRecording = async () => {
     setRecordingBusy(true);
     try {
@@ -118,6 +147,12 @@ export function VideoSnifferPanel({ env }: { env: EnvironmentView }) {
         description="捕获当前受控标签页的视频/音频响应；B 站 DASH 分片会自动解析并合并为 MP4，其他 HLS/DASH 可复制流地址。"
         actions={
           <div className="flex flex-wrap items-center gap-1.5">
+            <Switch
+              checked={envEnabled}
+              disabled={toggleBusy}
+              onCheckedChange={(value) => void toggleEnvironmentPlugin(value)}
+              label="本环境启用"
+            />
             <Button variant="ghost" size="sm" onClick={() => void openDownloads()}>
               <FolderOpen className="h-3.5 w-3.5" /> 下载目录
             </Button>
@@ -154,8 +189,12 @@ export function VideoSnifferPanel({ env }: { env: EnvironmentView }) {
         {!enabled ? (
           <EmptyState
             icon={<Film className="h-5 w-5" />}
-            title="视频嗅探未启用"
-            description="请到「设置 → 插件」启用视频嗅探。启用后会对当前环境正在加载的媒体请求进行采集。"
+            title={envEnabled ? '视频嗅探未启用' : '本环境已暂停视频嗅探'}
+            description={
+              envEnabled
+                ? '请到「设置 → 插件」启用视频嗅探。启用后会对当前环境正在加载的媒体请求进行采集。'
+                : '全局插件已开启，但当前环境被单独暂停。打开「本环境启用」后才会采集。'
+            }
           />
         ) : loading ? (
           <div className="flex justify-center py-10">

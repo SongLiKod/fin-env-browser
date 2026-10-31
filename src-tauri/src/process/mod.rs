@@ -75,6 +75,7 @@ pub struct BrowserInstance {
     captcha_last: Mutex<Option<Instant>>,
     memory_alert_last: Mutex<Option<Instant>>,
     current_url: Mutex<String>,
+    video_override: AtomicBool,
 }
 
 pub struct BrowserManager {
@@ -432,6 +433,12 @@ impl BrowserManager {
                 captcha_last: Mutex::new(None),
                 memory_alert_last: Mutex::new(None),
                 current_url: Mutex::new(start_url.clone()),
+                video_override: AtomicBool::new(
+                    self.db
+                        .env_plugin_enabled(&env.id, crate::plugins::VIDEO_SNIFFER)
+                        .unwrap_or(None)
+                        .unwrap_or(true),
+                ),
             });
             // Start handling CDP events before enabling Fetch interception,
             // otherwise a paused navigation would wait for a handler that is
@@ -921,6 +928,12 @@ impl BrowserManager {
                 captcha_last: Mutex::new(None),
                 memory_alert_last: Mutex::new(None),
                 current_url: Mutex::new(page_url),
+                video_override: AtomicBool::new(
+                    self.db
+                        .env_plugin_enabled(&env.id, crate::plugins::VIDEO_SNIFFER)
+                        .unwrap_or(None)
+                        .unwrap_or(true),
+                ),
             });
             if let Ok(mut map) = self.instances.write() {
                 map.insert(env.id.clone(), instance.clone());
@@ -1172,11 +1185,23 @@ impl BrowserManager {
         Ok(())
     }
 
-    fn video_sniffer_enabled(&self) -> bool {
+    fn video_sniffer_enabled(&self, instance: &Arc<BrowserInstance>) -> bool {
         self.settings
             .read()
             .map(|settings| crate::plugins::is_enabled(&settings, crate::plugins::VIDEO_SNIFFER))
             .unwrap_or(false)
+            && instance.video_override.load(Ordering::Relaxed)
+    }
+
+    pub fn set_video_override(&self, env_id: &str, enabled: bool) {
+        if let Some(instance) = self
+            .instances
+            .read()
+            .ok()
+            .and_then(|instances| instances.get(env_id).cloned())
+        {
+            instance.video_override.store(enabled, Ordering::Relaxed);
+        }
     }
 
     fn record_video_request(&self, env_id: &str, params: &Value) {
@@ -2051,7 +2076,7 @@ impl BrowserManager {
                     session_targets.retain(|_, id| id != target_id);
                 }
                 "Network.requestWillBeSent" => {
-                    if !self.video_sniffer_enabled() {
+                    if !self.video_sniffer_enabled(&instance) {
                         continue;
                     }
                     if let Some(session) = event.session_id.as_deref() {
@@ -2061,7 +2086,7 @@ impl BrowserManager {
                     }
                 }
                 "Network.responseReceived" => {
-                    if !self.video_sniffer_enabled() {
+                    if !self.video_sniffer_enabled(&instance) {
                         continue;
                     }
                     if let Some(session) = event.session_id.as_deref() {
@@ -2076,7 +2101,7 @@ impl BrowserManager {
                     }
                 }
                 "Network.loadingFinished" => {
-                    if !self.video_sniffer_enabled() {
+                    if !self.video_sniffer_enabled(&instance) {
                         continue;
                     }
                     if let Some(session) = event.session_id.as_deref() {
@@ -2168,7 +2193,7 @@ impl BrowserManager {
                             if let Ok(mut har) = instance.har.lock() {
                                 har.on_request(&event.params);
                             }
-                            if manager.video_sniffer_enabled() {
+                            if manager.video_sniffer_enabled(&instance) {
                                 manager.record_video_request(&instance.env_id, &event.params);
                             }
                         }
@@ -2176,7 +2201,7 @@ impl BrowserManager {
                             if let Ok(mut har) = instance.har.lock() {
                                 har.on_response(&event.params);
                             }
-                            if manager.video_sniffer_enabled() {
+                            if manager.video_sniffer_enabled(&instance) {
                                 manager.record_video_response(&instance, &event.params);
                             }
                         }
@@ -2184,7 +2209,7 @@ impl BrowserManager {
                             if let Ok(mut har) = instance.har.lock() {
                                 har.on_finished(&event.params);
                             }
-                            if manager.video_sniffer_enabled() {
+                            if manager.video_sniffer_enabled(&instance) {
                                 manager.record_video_finished(&instance.env_id, &event.params);
                             }
                         }
@@ -2265,6 +2290,14 @@ impl BrowserManager {
         }
         let parsed: Value =
             serde_json::from_str(payload).unwrap_or_else(|_| json!({ "hint": payload }));
+        if parsed
+            .get("visible")
+            .and_then(|value| value.as_str())
+            .map(|value| value != "visible")
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
         let url = parsed
             .get("url")
             .and_then(|v| v.as_str())

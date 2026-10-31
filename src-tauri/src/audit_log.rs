@@ -106,6 +106,7 @@ pub mod actions {
     pub const EXTENSION_UPDATE: &str = "extension.update";
     pub const EXTENSION_ASSIGN: &str = "extension.assign";
     pub const PLUGIN_UPDATE: &str = "plugin.update";
+    pub const CAPTCHA_DELETE: &str = "captcha.delete";
     pub const VIDEO_DOWNLOAD: &str = "video.download";
     pub const TEMPLATE_CREATE: &str = "template.create";
     pub const TEMPLATE_UPDATE: &str = "template.update";

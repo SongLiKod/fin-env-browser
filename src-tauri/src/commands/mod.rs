@@ -46,6 +46,41 @@ pub fn auth_logout(state: State<'_, SharedState>) -> Result<()> {
 }
 
 #[tauri::command]
+pub fn auth_remember_load(
+    state: State<'_, SharedState>,
+) -> Result<Option<crate::models::RememberedLogin>> {
+    let state = state.inner().clone();
+    let Some(encrypted) = state.db.get_meta("remembered_login")? else {
+        return Ok(None);
+    };
+    if encrypted.trim().is_empty() {
+        return Ok(None);
+    }
+    let plain = state.crypto.decrypt(&encrypted)?;
+    Ok(serde_json::from_str(&plain).ok())
+}
+
+#[tauri::command]
+pub fn auth_remember_save(
+    state: State<'_, SharedState>,
+    username: String,
+    password: String,
+) -> Result<()> {
+    let state = state.inner().clone();
+    let payload = serde_json::to_string(&crate::models::RememberedLogin { username, password })?;
+    let encrypted = state.crypto.encrypt(&payload)?;
+    state.db.set_meta("remembered_login", &encrypted)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn auth_remember_clear(state: State<'_, SharedState>) -> Result<()> {
+    let state = state.inner().clone();
+    state.db.set_meta("remembered_login", "")?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn auth_change_password(
     state: State<'_, SharedState>,
     old_password: String,
@@ -1599,6 +1634,73 @@ pub fn captcha_handle(state: State<'_, SharedState>, id: String, handled: bool) 
 }
 
 #[tauri::command]
+pub fn captcha_handle_all(
+    state: State<'_, SharedState>,
+    ids: Vec<String>,
+    handled: bool,
+) -> Result<u32> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::OpenClose)?;
+    let mut count = 0;
+    for id in ids {
+        let event = state.db.get_captcha(&id)?;
+        state.check_environment_access(&user, &event.env_id, EnvAccess::View)?;
+        state.db.mark_captcha_handled(&id, handled)?;
+        count += 1;
+    }
+    if count > 0 {
+        let _ = Audit::global(
+            &state.db,
+            &user.username,
+            actions::CAPTCHA_HANDLE,
+            format!(
+                "{} {} 条验证码事件",
+                if handled {
+                    "标记已处理"
+                } else {
+                    "标记未处理"
+                },
+                count
+            ),
+        );
+    }
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn captcha_delete(state: State<'_, SharedState>, ids: Vec<String>) -> Result<u32> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::OpenClose)?;
+    let screenshots = state.data_dir.join("screenshots");
+    let canonical_screenshots = screenshots.canonicalize().ok();
+    let mut count = 0;
+    for id in ids {
+        let event = state.db.get_captcha(&id)?;
+        state.check_environment_access(&user, &event.env_id, EnvAccess::Operate)?;
+        if let Some(path) = event.screenshot_path.as_deref() {
+            if let Some(root) = &canonical_screenshots {
+                if let Ok(file) = PathBuf::from(path).canonicalize() {
+                    if file.starts_with(root) {
+                        let _ = std::fs::remove_file(&file);
+                    }
+                }
+            }
+        }
+        state.db.delete_captcha(&id)?;
+        count += 1;
+    }
+    if count > 0 {
+        let _ = Audit::global(
+            &state.db,
+            &user.username,
+            actions::CAPTCHA_DELETE,
+            format!("删除 {} 条验证码事件及截图", count),
+        );
+    }
+    Ok(count)
+}
+
+#[tauri::command]
 pub async fn captcha_capture(
     state: State<'_, SharedState>,
     env_id: String,
@@ -1755,6 +1857,68 @@ pub fn plugin_set_enabled(
         format!("{} 插件 {}", if enabled { "启用" } else { "暂停" }, id),
     );
     Ok(crate::plugins::list(&settings))
+}
+
+#[tauri::command]
+pub fn plugin_env_state(
+    state: State<'_, SharedState>,
+    env_id: String,
+) -> Result<Vec<crate::models::PluginInfo>> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::ViewList)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::View)?;
+    plugin_states_for_env(&state, &env_id)
+}
+
+#[tauri::command]
+pub fn plugin_set_env_enabled(
+    state: State<'_, SharedState>,
+    env_id: String,
+    id: String,
+    enabled: bool,
+) -> Result<Vec<crate::models::PluginInfo>> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    if !crate::plugins::is_valid(&id) {
+        return Err(AppError::not_found("插件不存在"));
+    }
+    if !crate::plugins::is_enabled(&state.settings(), &id) {
+        return Err(AppError::bad_request(
+            "插件全局开关已关闭，无法在环境中启用",
+        ));
+    }
+    state.db.set_env_plugin_enabled(&env_id, &id, enabled)?;
+    if id == crate::plugins::VIDEO_SNIFFER {
+        state.browsers.set_video_override(&env_id, enabled);
+    }
+    let _ = Audit::global(
+        &state.db,
+        &user.username,
+        actions::PLUGIN_UPDATE,
+        format!(
+            "环境 {env_id} {} 插件 {}",
+            if enabled { "启用" } else { "暂停" },
+            id
+        ),
+    );
+    plugin_states_for_env(&state, &env_id)
+}
+
+fn plugin_states_for_env(
+    state: &SharedState,
+    env_id: &str,
+) -> Result<Vec<crate::models::PluginInfo>> {
+    let settings = state.settings();
+    let mut plugins = crate::plugins::list(&settings);
+    for plugin in &mut plugins {
+        plugin.enabled = plugin.enabled
+            && state
+                .db
+                .env_plugin_enabled(env_id, &plugin.id)?
+                .unwrap_or(true);
+    }
+    Ok(plugins)
 }
 
 #[tauri::command]

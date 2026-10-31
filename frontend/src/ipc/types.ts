@@ -676,7 +676,12 @@ export interface UpdateExtensionInput {
   enabled?: boolean;
 }
 
-export interface PluginInfo {
+export interface RememberedLogin {
+  username: string;
+  password: string;
+}
+
+export interface BuiltinPluginInfo {
   id: string;
   name: string;
   description: string;

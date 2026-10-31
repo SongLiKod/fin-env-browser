@@ -44,9 +44,10 @@ import {
   type MockRuleInput,
   type OpenOptions,
   type PermissionDef,
-  type PluginInfo,
+  type BuiltinPluginInfo,
   type Proxy,
   type ProxyCheckResult,
+  type RememberedLogin,
   type ProxyInput,
   type RecordingResult,
   type ResourceSnapshot,
@@ -105,6 +106,10 @@ export const ipc = {
   authLogin: (username: string, password: string) =>
     call<SessionInfo>('auth_login', { username, password }),
   authLogout: () => call<void>('auth_logout'),
+  authRememberLoad: () => call<RememberedLogin | null>('auth_remember_load'),
+  authRememberSave: (username: string, password: string) =>
+    call<void>('auth_remember_save', { username, password }),
+  authRememberClear: () => call<void>('auth_remember_clear'),
   authChangePassword: (oldPassword: string, newPassword: string) =>
     call<void>('auth_change_password', { oldPassword, newPassword }),
   userList: () => call<User[]>('user_list'),
@@ -280,6 +285,9 @@ export const ipc = {
   captchaList: (envId?: string) => call<CaptchaEvent[]>('captcha_list', { envId }),
   captchaHandle: (id: string, handled: boolean) =>
     call<void>('captcha_handle', { id, handled }),
+  captchaHandleAll: (ids: string[], handled: boolean) =>
+    call<number>('captcha_handle_all', { ids, handled }),
+  captchaDelete: (ids: string[]) => call<number>('captcha_delete', { ids }),
   captchaCapture: (envId: string) =>
     call<string | null>('captcha_capture', { envId }),
   readArtifact: (path: string) => call<string>('read_artifact', { path }),
@@ -288,9 +296,13 @@ export const ipc = {
 
   // settings / api / theme / audit
   settingsGet: () => call<Settings>('settings_get'),
-  pluginList: () => call<PluginInfo[]>('plugin_list'),
+  pluginList: () => call<BuiltinPluginInfo[]>('plugin_list'),
   pluginSetEnabled: (id: string, enabled: boolean) =>
-    call<PluginInfo[]>('plugin_set_enabled', { id, enabled }),
+    call<BuiltinPluginInfo[]>('plugin_set_enabled', { id, enabled }),
+  pluginEnvState: (envId: string) =>
+    call<BuiltinPluginInfo[]>('plugin_env_state', { envId }),
+  pluginSetEnvEnabled: (envId: string, id: string, enabled: boolean) =>
+    call<BuiltinPluginInfo[]>('plugin_set_env_enabled', { envId, id, enabled }),
   videoList: (envId: string) => call<SniffedVideo[]>('video_list', { envId }),
   videoClear: (envId: string) => call<void>('video_clear', { envId }),
   videoDownload: (envId: string, videoId: string) =>

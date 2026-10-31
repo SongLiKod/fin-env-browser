@@ -6,6 +6,7 @@ import { useThemeStore } from '@/store/theme';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
 import { toastError } from '@/store/toast';
 
 const onPrimary = 'text-[var(--text-on-primary)]';
@@ -18,6 +19,7 @@ export function LoginPage() {
   const [username, setUsername] = React.useState('admin');
   const [password, setPassword] = React.useState('');
   const [showPassword, setShowPassword] = React.useState(false);
+  const [remember, setRemember] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [version, setVersion] = React.useState<string>('—');
@@ -26,6 +28,18 @@ export function LoginPage() {
     ipc
       .appInfo()
       .then((info) => setVersion(info.version))
+      .catch(() => undefined);
+  }, []);
+
+  React.useEffect(() => {
+    ipc
+      .authRememberLoad()
+      .then((saved) => {
+        if (!saved) return;
+        setUsername(saved.username);
+        setPassword(saved.password);
+        setRemember(true);
+      })
       .catch(() => undefined);
   }, []);
 
@@ -39,6 +53,15 @@ export function LoginPage() {
     setError(null);
     try {
       await login(username.trim(), password);
+      try {
+        if (remember) {
+          await ipc.authRememberSave(username.trim(), password);
+        } else {
+          await ipc.authRememberClear();
+        }
+      } catch {
+        // Saving credentials is best-effort; a successful login must not fail.
+      }
       await useThemeStore.getState().initialize();
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败');
@@ -177,6 +200,14 @@ export function LoginPage() {
                   </button>
                 </div>
               </Field>
+              <div className="rounded-md border border-border bg-surface-secondary px-3 py-2.5">
+                <Switch
+                  checked={remember}
+                  onCheckedChange={setRemember}
+                  label="记住密码"
+                  description="登录成功后使用本机 AES 加密保存，下次自动填充。"
+                />
+              </div>
               {error ? (
                 <div className="rounded-md border border-[color-mix(in_srgb,var(--danger)_30%,transparent)] bg-[color-mix(in_srgb,var(--danger)_8%,transparent)] px-3 py-2 text-xs text-danger">
                   {error}

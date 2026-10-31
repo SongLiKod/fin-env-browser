@@ -333,6 +333,10 @@ impl Db {
                 "009_network_profile",
                 include_str!("../../migrations/009_network_profile.sql"),
             ),
+            (
+                "010_environment_plugins",
+                include_str!("../../migrations/010_environment_plugins.sql"),
+            ),
         ];
         let current: i64 =
             self.with(|c| Ok(c.query_row("PRAGMA user_version", [], |row| row.get(0))?))?;
