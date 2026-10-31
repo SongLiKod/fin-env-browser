@@ -1414,9 +1414,46 @@ impl BrowserManager {
                 }));
             }
         }
+        if let Some(url) = self.bilibili_mobile_mp4(client, env_id, &bvid).await? {
+            return Ok(Some(ResolvedVideo { url, title }));
+        }
         Err(AppError::bad_request(
             "B 站没有返回可直接合并的 MP4，可能需要登录、会员权限或该视频禁止下载",
         ))
+    }
+
+    async fn bilibili_mobile_mp4(
+        &self,
+        client: &reqwest::Client,
+        env_id: &str,
+        bvid: &str,
+    ) -> Result<Option<String>> {
+        let cookie = self
+            .video_cookie_header(env_id, "https://m.bilibili.com")
+            .await;
+        let mut request = client
+            .get(format!("https://m.bilibili.com/video/{bvid}"))
+            .header(
+                reqwest::header::USER_AGENT,
+                "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+            )
+            .header(reqwest::header::REFERER, "https://www.bilibili.com/");
+        if !cookie.is_empty() {
+            request = request.header(reqwest::header::COOKIE, cookie);
+        }
+        let html = request.send().await?.text().await?.replace("\\/", "/");
+        let Some(end) = html.find(".mp4") else {
+            return Ok(None);
+        };
+        let start = html[..end]
+            .rfind(['"', '\''])
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let url = html[start..end + 4].trim();
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Ok(None);
+        }
+        Ok(Some(url.to_string()))
     }
 
     async fn video_cookie_header(&self, env_id: &str, url: &str) -> String {
