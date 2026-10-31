@@ -344,6 +344,7 @@ pub fn run() {
             commands::theme_import,
             commands::audit_list,
             commands::audit_verify,
+            commands::audit_clear,
             commands::audit_export,
             commands::dashboard,
             commands::app_info,

@@ -323,6 +323,7 @@ export const ipc = {
   themeImport: (path: string) => call<ThemeConfig>('theme_import', { path }),
   auditList: (filter: AuditFilter = {}) => call<AuditLog[]>('audit_list', { filter }),
   auditVerify: () => call<AuditVerifyResult>('audit_verify'),
+  auditClear: (confirm: boolean) => call<number>('audit_clear', { confirm }),
   auditExport: (path: string, format: 'json' | 'csv', filter: AuditFilter = {}) =>
     call<number>('audit_export', { path, format, filter }),
 

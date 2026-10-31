@@ -2109,6 +2109,33 @@ pub fn audit_verify(state: State<'_, SharedState>) -> Result<crate::models::Audi
 }
 
 #[tauri::command]
+pub fn audit_clear(state: State<'_, SharedState>, confirm: bool) -> Result<u32> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::AuditView)?;
+    if user.role != "super_admin" {
+        return Err(AppError::forbidden("只有超级管理员可以清空审计日志"));
+    }
+    if !confirm {
+        return Err(AppError::code_with(
+            "confirmation_required",
+            "清空审计日志需要二次确认",
+        ));
+    }
+    let count = state.db.clear_audit_logs()?;
+    let _ = state.db.set_meta(
+        "audit_last_clear",
+        &json!({
+            "actor": user.username,
+            "count": count,
+            "clearedAt": now_iso()
+        })
+        .to_string(),
+    );
+    tracing::warn!(actor = %user.username, count, "audit logs cleared manually");
+    Ok(count)
+}
+
+#[tauri::command]
 pub fn audit_export(
     state: State<'_, SharedState>,
     path: String,

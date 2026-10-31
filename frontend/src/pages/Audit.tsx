@@ -10,6 +10,7 @@ import {
   Search,
   ShieldAlert,
   ShieldCheck,
+  Trash2,
 } from 'lucide-react';
 import type { AuditLog, AuditVerifyResult } from '@/ipc/types';
 import { ipc } from '@/ipc/client';
@@ -25,6 +26,7 @@ import { csvFilter, jsonFilter, saveFile } from '@/utils/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, EmptyState, Spinner } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { CopyButton } from '@/components/ui/misc';
 import { Input, Select } from '@/components/ui/input';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -35,6 +37,7 @@ export function AuditPage() {
   const toast = useToastStore();
   const envs = useEnvStore((state) => state.envs);
   const canExport = useAuthStore((state) => state.can('audit_view'));
+  const isSuperAdmin = useAuthStore((state) => state.session?.user?.role === 'super_admin');
   const [logs, setLogs] = React.useState<AuditLog[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [search, setSearch] = React.useState('');
@@ -45,6 +48,8 @@ export function AuditPage() {
   const [verify, setVerify] = React.useState<AuditVerifyResult | null>(null);
   const [verifying, setVerifying] = React.useState(false);
   const [exporting, setExporting] = React.useState(false);
+  const [clearOpen, setClearOpen] = React.useState(false);
+  const [clearing, setClearing] = React.useState(false);
 
   const filter = React.useMemo(
     () => ({
@@ -116,6 +121,21 @@ export function AuditPage() {
     }
   };
 
+  const clearLogs = async () => {
+    setClearing(true);
+    try {
+      const count = await ipc.auditClear(true);
+      setLogs([]);
+      setVerify(null);
+      setClearOpen(false);
+      toast.success('审计日志已清空', `${count} 条记录已删除，数据库空间已回收`);
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <div className="page-pad space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -136,6 +156,11 @@ export function AuditPage() {
           <Button variant="secondary" onClick={() => void exportLogs('csv')} loading={exporting} disabled={!canExport}>
             <Download className="h-4 w-4" /> 导出 CSV
           </Button>
+          {isSuperAdmin ? (
+            <Button variant="danger" onClick={() => setClearOpen(true)} disabled={logs.length === 0}>
+              <Trash2 className="h-4 w-4" /> 清空审计日志
+            </Button>
+          ) : null}
           <Button variant="secondary" onClick={() => void load()}>
             <RefreshCw className="h-4 w-4" /> 刷新
           </Button>
@@ -270,6 +295,17 @@ export function AuditPage() {
           哈希链采用 SHA-256(prevHash + 规范化字段)，数据库触发器禁止 UPDATE / DELETE；导出文件保留完整链信息，可在离线环境复核。
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={clearOpen}
+        onOpenChange={setClearOpen}
+        title="清空全部审计日志"
+        description="将删除所有审计记录并回收数据库空间。此操作无法撤销，建议先导出 JSON/CSV 归档。"
+        confirmLabel="确认清空"
+        requiredText="CLEAR"
+        busy={clearing}
+        onConfirm={clearLogs}
+      />
     </div>
   );
 }

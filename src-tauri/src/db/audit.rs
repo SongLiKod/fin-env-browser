@@ -178,6 +178,35 @@ impl Db {
         })
     }
 
+    pub fn clear_audit_logs(&self) -> Result<u32> {
+        self.with(|conn| {
+            let tx = conn.transaction()?;
+            let count: i64 =
+                tx.query_row("SELECT COUNT(*) FROM audit_logs", [], |row| row.get(0))?;
+            tx.execute_batch(
+                "DROP TRIGGER IF EXISTS audit_logs_no_update;
+                 DROP TRIGGER IF EXISTS audit_logs_no_delete;",
+            )?;
+            tx.execute("DELETE FROM audit_logs", [])?;
+            tx.execute_batch(
+                "CREATE TRIGGER IF NOT EXISTS audit_logs_no_update
+                 BEFORE UPDATE ON audit_logs
+                 BEGIN
+                     SELECT RAISE(ABORT, 'audit_logs is append-only');
+                 END;
+                 CREATE TRIGGER IF NOT EXISTS audit_logs_no_delete
+                 BEFORE DELETE ON audit_logs
+                 BEGIN
+                     SELECT RAISE(ABORT, 'audit_logs is append-only');
+                 END;",
+            )?;
+            tx.commit()?;
+            // Reclaim disk space after the append-only table is intentionally reset.
+            let _ = conn.execute("VACUUM", []);
+            Ok(count as u32)
+        })
+    }
+
     pub fn audit_count(&self) -> Result<u32> {
         self.with(|conn| {
             let count: i64 =
