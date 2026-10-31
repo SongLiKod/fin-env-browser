@@ -437,6 +437,7 @@ impl BrowserManager {
             // otherwise a paused navigation would wait for a handler that is
             // only installed later.
             self.start_event_handler(instance.clone());
+            self.start_video_tab_handler(instance.clone());
             let mut warnings = Vec::new();
             if let Err(e) = client
                 .call(
@@ -932,7 +933,8 @@ impl BrowserManager {
                 effective_border_color(&env),
                 env.border_width,
             );
-            self.start_event_handler(instance);
+            self.start_event_handler(instance.clone());
+            self.start_video_tab_handler(instance.clone());
             let _ = Audit::env(
                 &self.db,
                 "system",
@@ -1195,18 +1197,66 @@ impl BrowserManager {
 
     pub async fn scan_videos(&self, env_id: &str) -> Result<()> {
         let instance = self.instance(env_id)?;
-        let page_url = instance
-            .current_url
-            .lock()
-            .map(|url| url.clone())
+        let ws = browser_ws_url(instance.debug_port).await?;
+        let client = CdpClient::connect(&ws).await?;
+        let value = client.call("Target.getTargets", json!({})).await?;
+        let targets = value
+            .get("targetInfos")
+            .and_then(Value::as_array)
+            .cloned()
             .unwrap_or_default();
-        let value = instance.client.evaluate(VIDEO_SCAN_SCRIPT).await?;
-        let Some(urls) = value.as_array() else {
-            return Ok(());
-        };
+        let mut best: Option<(u8, String)> = None;
+        let mut found = Vec::new();
+        for info in targets {
+            if info.get("type").and_then(Value::as_str) != Some("page") {
+                continue;
+            }
+            let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                continue;
+            };
+            let Ok(session) = attach_video_session(&client, target_id).await else {
+                continue;
+            };
+            let Ok(page) = client
+                .evaluate_on(VIDEO_TAB_SCAN_SCRIPT, Some(&session))
+                .await
+            else {
+                continue;
+            };
+            let page_url = page
+                .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if page_url.is_empty() {
+                continue;
+            }
+            let visibility = page
+                .get("visibility")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let focus = page.get("focus").and_then(Value::as_bool).unwrap_or(false);
+            let score = u8::from(visibility == "visible") + u8::from(focus);
+            if score > 0
+                && best
+                    .as_ref()
+                    .map(|(value, _)| score > *value)
+                    .unwrap_or(true)
+            {
+                best = Some((score, page_url.clone()));
+            }
+            if let Some(urls) = page.get("media").and_then(Value::as_array) {
+                for url in urls.iter().filter_map(Value::as_str) {
+                    found.push((url.to_string(), page_url.clone()));
+                }
+            }
+        }
+        if let Some((_, active)) = &best {
+            update_video_tab_url(self, &instance, active);
+        }
         if let Ok(mut store) = self.videos.lock() {
-            for url in urls.iter().filter_map(Value::as_str) {
-                store.insert_external(env_id, url, &page_url);
+            for (url, page_url) in found {
+                store.insert_external(env_id, &url, &page_url);
             }
         }
         Ok(())
@@ -1231,11 +1281,15 @@ impl BrowserManager {
             .lock()
             .map(|url| url.clone())
             .unwrap_or_default();
+        self.record_video_response_for_page(&instance.env_id, &page_url, params);
+    }
+
+    fn record_video_response_for_page(&self, env_id: &str, page_url: &str, params: &Value) {
         let detected = self
             .videos
             .lock()
             .ok()
-            .and_then(|mut store| store.record_response(&instance.env_id, &page_url, params));
+            .and_then(|mut store| store.record_response(env_id, page_url, params));
         if let Some(video) = detected {
             self.emit("video://detected", video);
         }
@@ -1774,6 +1828,161 @@ impl BrowserManager {
     // CDP event handling
     // -----------------------------------------------------------------------
 
+    fn start_video_tab_handler(self: &Arc<Self>, instance: Arc<BrowserInstance>) {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            if let Err(error) = manager.run_video_tab_handler(instance).await {
+                tracing::debug!(error = %error, "video tab handler stopped");
+            }
+        });
+    }
+
+    async fn run_video_tab_handler(self: &Arc<Self>, instance: Arc<BrowserInstance>) -> Result<()> {
+        let ws = browser_ws_url(instance.debug_port).await?;
+        let client = Arc::new(CdpClient::connect(&ws).await?);
+        let mut events = client.subscribe();
+        let mut target_urls: HashMap<String, String> = HashMap::new();
+        let mut session_targets: HashMap<String, String> = HashMap::new();
+        let mut active_target = target_id_from_ws(&instance.page_ws);
+        let _ = client
+            .call("Target.setDiscoverTargets", json!({ "discover": true }))
+            .await;
+        let targets = client
+            .call("Target.getTargets", json!({}))
+            .await
+            .ok()
+            .and_then(|value| value.get("targetInfos").and_then(Value::as_array).cloned())
+            .unwrap_or_default();
+        if active_target.is_none() {
+            active_target = targets.iter().find_map(|info| {
+                (info.get("type").and_then(Value::as_str) == Some("page"))
+                    .then(|| {
+                        info.get("targetId")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string)
+                    })
+                    .flatten()
+            });
+        }
+        for info in &targets {
+            if info.get("type").and_then(Value::as_str) != Some("page") {
+                continue;
+            }
+            let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                continue;
+            };
+            let url = info.get("url").and_then(Value::as_str).unwrap_or_default();
+            target_urls.insert(target_id.to_string(), url.to_string());
+            if let Ok(session) = attach_video_session(&client, target_id).await {
+                session_targets.insert(session, target_id.to_string());
+            }
+        }
+        loop {
+            let event = match events.recv().await {
+                Ok(event) => event,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            match event.method.as_str() {
+                "Target.targetCreated" => {
+                    let Some(info) = event.params.get("targetInfo") else {
+                        continue;
+                    };
+                    if info.get("type").and_then(Value::as_str) != Some("page") {
+                        continue;
+                    }
+                    let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    if target_urls.contains_key(target_id) {
+                        continue;
+                    }
+                    let url = info.get("url").and_then(Value::as_str).unwrap_or_default();
+                    target_urls.insert(target_id.to_string(), url.to_string());
+                    if let Ok(session) = attach_video_session(&client, target_id).await {
+                        session_targets.insert(session, target_id.to_string());
+                    }
+                }
+                "Target.targetInfoChanged" => {
+                    let Some(info) = event.params.get("targetInfo") else {
+                        continue;
+                    };
+                    if info.get("type").and_then(Value::as_str) != Some("page") {
+                        continue;
+                    }
+                    let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let url = info.get("url").and_then(Value::as_str).unwrap_or_default();
+                    target_urls.insert(target_id.to_string(), url.to_string());
+                    if active_target.as_deref() == Some(target_id) {
+                        update_video_tab_url(self, &instance, url);
+                    }
+                }
+                "Target.targetActivated" => {
+                    let Some(info) = event.params.get("targetInfo") else {
+                        continue;
+                    };
+                    if info.get("type").and_then(Value::as_str) != Some("page") {
+                        continue;
+                    }
+                    let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    active_target = Some(target_id.to_string());
+                    let url = info.get("url").and_then(Value::as_str).unwrap_or_default();
+                    target_urls.insert(target_id.to_string(), url.to_string());
+                    update_video_tab_url(self, &instance, url);
+                }
+                "Target.targetDestroyed" => {
+                    let Some(target_id) = event.params.get("targetId").and_then(Value::as_str)
+                    else {
+                        continue;
+                    };
+                    target_urls.remove(target_id);
+                    session_targets.retain(|_, id| id != target_id);
+                }
+                "Network.requestWillBeSent" => {
+                    if !self.video_sniffer_enabled() {
+                        continue;
+                    }
+                    if let Some(session) = event.session_id.as_deref() {
+                        if session_targets.contains_key(session) {
+                            self.record_video_request(&instance.env_id, &event.params);
+                        }
+                    }
+                }
+                "Network.responseReceived" => {
+                    if !self.video_sniffer_enabled() {
+                        continue;
+                    }
+                    if let Some(session) = event.session_id.as_deref() {
+                        if let Some(target_id) = session_targets.get(session) {
+                            let page_url = target_urls.get(target_id).cloned().unwrap_or_default();
+                            self.record_video_response_for_page(
+                                &instance.env_id,
+                                &page_url,
+                                &event.params,
+                            );
+                        }
+                    }
+                }
+                "Network.loadingFinished" => {
+                    if !self.video_sniffer_enabled() {
+                        continue;
+                    }
+                    if let Some(session) = event.session_id.as_deref() {
+                        if session_targets.contains_key(session) {
+                            self.record_video_finished(&instance.env_id, &event.params);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     fn start_event_handler(self: &Arc<Self>, instance: Arc<BrowserInstance>) {
         let mut rx = instance.client.subscribe();
         let manager = self.clone();
@@ -2107,7 +2316,7 @@ fn merge_launch_args(global: &[String], environment: &[String]) -> Vec<String> {
     merged
 }
 
-const VIDEO_SCAN_SCRIPT: &str = r#"(() => {
+const VIDEO_TAB_SCAN_SCRIPT: &str = r#"(() => {
   const urls = new Set();
   const media = /\.(mp4|webm|mov|m4v|m4s|flv|mkv|avi|ts|m3u8|mpd|mp3|m4a|aac|ogg|wav)(?:[?#]|$)/i;
   const add = (value) => {
@@ -2123,8 +2332,75 @@ const VIDEO_SCAN_SCRIPT: &str = r#"(() => {
   performance.getEntriesByType('resource').forEach((entry) => {
     if (media.test(entry.name)) add(entry.name);
   });
-  return Array.from(urls).slice(0, 300);
+  return {
+    url: location.href,
+    visibility: document.visibilityState,
+    focus: document.hasFocus(),
+    media: Array.from(urls).slice(0, 300)
+  };
 })()"#;
+
+async fn browser_ws_url(debug_port: u16) -> Result<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(AppError::from)?;
+    let value: Value = client
+        .get(format!("http://127.0.0.1:{debug_port}/json/version"))
+        .send()
+        .await?
+        .json()
+        .await?;
+    value
+        .get("webSocketDebuggerUrl")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| AppError::internal("浏览器未返回 CDP WebSocket 地址"))
+}
+
+async fn attach_video_session(client: &CdpClient, target_id: &str) -> Result<String> {
+    let attached = client
+        .call(
+            "Target.attachToTarget",
+            json!({ "targetId": target_id, "flatten": true }),
+        )
+        .await?;
+    let session = attached
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppError::internal("无法附加视频标签页"))?
+        .to_string();
+    let _ = client
+        .call_on("Network.enable", json!({}), Some(&session))
+        .await;
+    let _ = client
+        .call_on("Page.enable", json!({}), Some(&session))
+        .await;
+    Ok(session)
+}
+
+fn target_id_from_ws(ws: &str) -> Option<String> {
+    ws.rsplit('/')
+        .next()
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn update_video_tab_url(manager: &BrowserManager, instance: &Arc<BrowserInstance>, url: &str) {
+    if url.is_empty() {
+        return;
+    }
+    if let Ok(mut current) = instance.current_url.lock() {
+        *current = url.to_string();
+    }
+    let runtime = instance.runtime.write().ok().map(|mut runtime| {
+        runtime.current_url = url.to_string();
+        runtime.clone()
+    });
+    if let Some(runtime) = runtime {
+        manager.emit("browser://runtime", runtime);
+    }
+}
 
 fn same_page(left: &str, right: &str) -> bool {
     let normalize = |value: &str| {

@@ -378,4 +378,5 @@ cargo test
 - B 站 DASH：桌面页面抓到 `.m4s` 分片后点击「合并下载」，后端通过 BVID/CID 调用 B 站 view/playurl 接口解析 progressive MP4；实测 `BV1BCnW6XEf9` 下载为 8,977,990 字节的 MP4 文件。
 - 懒加载页面：`hongguoduanju.com/player/...` 的 `<video preload="none" src=".../360p.mp4">` 在未播放时也能被 DOM 扫描发现，实测下载 23,524,803 字节 MP4。
 - 页面切换：同一环境从短视频页导航到 `example.com` 后，视频列表从 2 条变为 0 条；启动页会显示当前受控 URL，避免误把其他页面/标签页的结果当成当前页。
+- 多标签页：通过浏览器级 CDP 附着所有 page target，按可见/聚焦状态识别活动标签页。实测在启动页之外新开 `hongguoduanju` 标签页识别 1 条 MP4，再切到 B 站标签页识别 4 条 `.m4s`，当前 URL 随标签切换。
 - 限制：blob: 媒体、手动新开的标签页和通用（非 B 站）HLS/DASH 分片流不在当前 MVP 的自动合并范围内；通用流地址提供复制能力。
