@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde_json::{json, Value};
 use tauri::State;
 
@@ -260,6 +262,119 @@ pub fn env_clone(
     let env = services::clone_environment(&state, &id, name, &user.username)?;
     services::assign_environment_manager(&state, &env.id, &user.id)?;
     services::environment_view(&state, env)
+}
+
+#[tauri::command]
+pub fn env_create_shortcut(state: State<'_, SharedState>, id: String) -> Result<String> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &id, EnvAccess::Operate)?;
+    let env = state.db.get_environment(&id)?;
+    #[cfg(windows)]
+    {
+        create_windows_shortcut(&env)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = env;
+        Err(AppError::bad_request("桌面快捷方式目前仅支持 Windows"))
+    }
+}
+
+#[cfg(windows)]
+fn create_windows_shortcut(env: &crate::models::Environment) -> Result<String> {
+    let exe = std::env::current_exe()
+        .map_err(|error| AppError::internal(format!("无法定位 FinEnv 可执行文件: {error}")))?;
+    let working_dir = exe
+        .parent()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let safe_name: String = env
+        .name
+        .chars()
+        .map(|value| {
+            if matches!(value, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
+                '_'
+            } else {
+                value
+            }
+        })
+        .collect();
+    let safe_name = safe_name
+        .trim()
+        .trim_matches('.')
+        .chars()
+        .take(60)
+        .collect::<String>();
+    let shortcut_name = format!("FinEnv - {safe_name}.lnk");
+    let quote = |value: &str| value.replace('\'', "''");
+    let script = format!(
+        "$desktop = [Environment]::GetFolderPath('Desktop');\
+         $path = Join-Path $desktop '{shortcut}';\
+         $shell = New-Object -ComObject WScript.Shell;\
+         $link = $shell.CreateShortcut($path);\
+         $link.TargetPath = '{exe}';\
+         $link.Arguments = '--env={env_id}';\
+         $link.WorkingDirectory = '{work}';\
+         $link.IconLocation = '{exe},0';\
+         $link.Description = 'FinEnv 环境: {name}';\
+         $link.Save();\
+         Write-Output $path",
+        shortcut = quote(&shortcut_name),
+        exe = quote(&exe.to_string_lossy()),
+        env_id = quote(&env.id),
+        work = quote(&working_dir),
+        name = quote(&env.name),
+    );
+    let encoded: Vec<u8> = script
+        .encode_utf16()
+        .flat_map(|unit| unit.to_le_bytes())
+        .collect();
+    let output = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-EncodedCommand",
+            &B64.encode(encoded),
+        ])
+        .output()
+        .map_err(|error| AppError::internal(format!("创建桌面快捷方式失败: {error}")))?;
+    if !output.status.success() {
+        return Err(AppError::internal(format!(
+            "创建桌面快捷方式失败: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() {
+        return Err(AppError::internal("创建桌面快捷方式失败: 未返回路径"));
+    }
+    Ok(path)
+}
+
+pub fn startup_env_from(args: &[String]) -> Option<String> {
+    for (index, arg) in args.iter().enumerate() {
+        if let Some(value) = arg.strip_prefix("--env=") {
+            if !value.trim().is_empty() {
+                return Some(value.to_string());
+            }
+        }
+        if arg == "--env" {
+            if let Some(value) = args.get(index + 1) {
+                if !value.trim().is_empty() {
+                    return Some(value.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+pub fn startup_env() -> Option<String> {
+    startup_env_from(&std::env::args().collect::<Vec<_>>())
 }
 
 #[tauri::command]

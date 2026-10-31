@@ -56,6 +56,7 @@ mod tests {
             chromium_path: None,
             chromium_launch_args: Vec::new(),
             taskbar_badge_text: String::new(),
+            network_profile: "none".into(),
             auto_restart: false,
             memory_limit_mb: None,
             idle_timeout_min: None,
@@ -327,6 +328,10 @@ impl Db {
             (
                 "008_taskbar_badge_text",
                 include_str!("../../migrations/008_taskbar_badge_text.sql"),
+            ),
+            (
+                "009_network_profile",
+                include_str!("../../migrations/009_network_profile.sql"),
             ),
         ];
         let current: i64 =

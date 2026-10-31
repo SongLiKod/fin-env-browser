@@ -1,6 +1,6 @@
 [package]
 name = "fin-env-browser"
-version = "4.0.0"
+version = "4.1.0"
 description = "FinEnv fingerprint environment manager"
 authors = ["FinEnv Team"]
 edition = "2021"
@@ -21,6 +21,7 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
@@ -37,6 +38,7 @@ base64 = "0.22"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
+tzf-rs = { version = "2.1.3", default-features = false, features = ["bundled"] }
 thiserror = "2"
 sysinfo = "0.33"
 dirs = "5"

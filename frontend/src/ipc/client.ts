@@ -123,6 +123,8 @@ export const ipc = {
   envBulkDelete: (ids: string[], confirm: boolean) =>
     call<number>('env_bulk_delete', { ids, confirm }),
   envClone: (id: string, name?: string) => call<EnvironmentView>('env_clone', { id, name }),
+  envCreateShortcut: (id: string) => call<string>('env_create_shortcut', { id }),
+  startupEnv: () => call<string | null>('startup_env'),
   envExport: (
     ids: string[],
     path: string,

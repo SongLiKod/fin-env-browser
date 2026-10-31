@@ -1,8 +1,9 @@
-use std::str::FromStr;
+use std::{str::FromStr, sync::LazyLock};
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tzf_rs::EmbeddedFinder;
 
 // ---------------------------------------------------------------------------
 // Data model
@@ -30,6 +31,7 @@ pub struct Fingerprint {
     pub fonts: Vec<String>,
     pub webrtc: WebrtcFingerprint,
     pub client_hints: ClientHints,
+    pub geolocation: Option<GeolocationFingerprint>,
     pub plugins: Vec<PluginInfo>,
 }
 
@@ -87,6 +89,24 @@ pub struct ClientHints {
     pub bitness: String,
     pub model: String,
     pub mobile: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct GeolocationFingerprint {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub accuracy: f64,
+}
+
+impl Default for GeolocationFingerprint {
+    fn default() -> Self {
+        Self {
+            latitude: 31.2304,
+            longitude: 121.4737,
+            accuracy: 30.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -277,9 +297,16 @@ pub fn template(os: &str) -> Fingerprint {
     let full_version = format!("{major}.0.{build}.{patch}");
     let seed: u32 = rng.gen();
     let nav_seed = seed ^ 0x9E37_79B9;
+    let requested = os.to_ascii_lowercase();
+    let landscape = requested.contains("landscape");
+    let key = requested
+        .replace("-landscape", "")
+        .replace("_landscape", "")
+        .trim_end_matches('-')
+        .to_string();
 
     let (os_key, ua, platform, platform_version, architecture, fonts, gl_vendor, gl_renderer) =
-        match os.to_ascii_lowercase().as_str() {
+        match key.as_str() {
             "mac" | "macos" | "macos-arm" => (
                 "mac",
                 format!(
@@ -297,7 +324,7 @@ pub fn template(os: &str) -> Fingerprint {
                 "Google Inc. (Apple)",
                 "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)",
             ),
-            "android" | "android-14" => (
+            "android" | "android-14" | "android-pixel8" => (
                 "android",
                 format!(
                     "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{full_version} Mobile Safari/537.36"
@@ -311,6 +338,42 @@ pub fn template(os: &str) -> Fingerprint {
                 ],
                 "Google Inc. (ARM)",
                 "ANGLE (ARM, Mali-G715, OpenGL ES 3.2)",
+            ),
+            "android-galaxy-s24" => (
+                "android",
+                format!(
+                    "Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{full_version} Mobile Safari/537.36"
+                ),
+                "Linux armv8l",
+                "14.0.0",
+                "arm",
+                android_fonts(),
+                "Google Inc. (Qualcomm)",
+                "ANGLE (Qualcomm, Adreno (TM) 750, OpenGL ES 3.2)",
+            ),
+            "android-xiaomi-14" => (
+                "android",
+                format!(
+                    "Mozilla/5.0 (Linux; Android 14; 23127PN0CG) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{full_version} Mobile Safari/537.36"
+                ),
+                "Linux armv8l",
+                "14.0.0",
+                "arm",
+                android_fonts(),
+                "Google Inc. (Qualcomm)",
+                "ANGLE (Qualcomm, Adreno (TM) 750, OpenGL ES 3.2)",
+            ),
+            "iphone" | "iphone-15-pro" => (
+                "iphone",
+                format!(
+                    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/{full_version} Mobile/15E148 Safari/604.1"
+                ),
+                "iPhone",
+                "17.5.0",
+                "arm",
+                iphone_fonts(),
+                "Apple Inc.",
+                "ANGLE (Apple, Apple GPU, OpenGL ES 3.0)",
             ),
             "linux" | "ubuntu" => (
                 "linux",
@@ -353,18 +416,26 @@ pub fn template(os: &str) -> Fingerprint {
             ),
         };
 
-    let (screen_w, screen_h, dpr) = match os_key {
-        "mac" => (1728u32, 1117u32, 2.0),
-        "android" => (412, 915, 2.625),
-        "linux" => (1920, 1080, 1.0),
+    let (screen_width, screen_height, dpr) = match key.as_str() {
+        "mac" | "macos" | "macos-arm" => (1728u32, 1117u32, 2.0),
+        "android-galaxy-s24" => (360, 780, 3.0),
+        "android-xiaomi-14" => (393, 873, 2.75),
+        "iphone" | "iphone-15-pro" => (393, 852, 3.0),
+        "android" | "android-pixel8" => (412, 915, 2.625),
+        "linux" | "ubuntu" => (1920, 1080, 1.0),
         _ => (1920, 1080, 1.0),
+    };
+    let (screen_w, screen_h) = if landscape {
+        (screen_height, screen_width)
+    } else {
+        (screen_width, screen_height)
     };
     let (timezone, languages) = match os_key {
         "mac" => (
             "America/Los_Angeles".to_string(),
             vec!["en-US".to_string(), "en".to_string()],
         ),
-        "android" => (
+        "android" | "iphone" => (
             "Asia/Shanghai".to_string(),
             vec!["zh-CN".to_string(), "zh".to_string(), "en".to_string()],
         ),
@@ -377,6 +448,7 @@ pub fn template(os: &str) -> Fingerprint {
             vec!["zh-CN".to_string(), "zh".to_string(), "en".to_string()],
         ),
     };
+    let mobile = os_key == "android" || os_key == "iphone";
 
     let brands = chrome_brands(&full_version);
     Fingerprint {
@@ -391,12 +463,12 @@ pub fn template(os: &str) -> Fingerprint {
         device_memory: 8,
         do_not_track: false,
         color_scheme: if rng.gen_bool(0.5) { "light" } else { "dark" }.into(),
-        touch_points: if os_key == "android" { 5 } else { 0 },
+        touch_points: if mobile { 5 } else { 0 },
         screen: ScreenFingerprint {
             width: screen_w,
             height: screen_h,
             avail_width: screen_w,
-            avail_height: if os_key == "android" {
+            avail_height: if mobile {
                 screen_h
             } else if os_key == "mac" {
                 screen_h - 25
@@ -430,21 +502,55 @@ pub fn template(os: &str) -> Fingerprint {
             platform: match os_key {
                 "mac" => "macOS".into(),
                 "android" => "Android".into(),
+                "iphone" => "iOS".into(),
                 "linux" => "Linux".into(),
                 _ => "Windows".into(),
             },
             platform_version: platform_version.into(),
             architecture: architecture.into(),
             bitness: "64".into(),
-            model: if os_key == "android" {
-                "Pixel 8".into()
-            } else {
-                String::new()
+            model: match key.as_str() {
+                "android-galaxy-s24" => "SM-S921B".into(),
+                "android-xiaomi-14" => "Xiaomi 14".into(),
+                "iphone" | "iphone-15-pro" => "iPhone 15 Pro".into(),
+                "android" | "android-pixel8" => "Pixel 8".into(),
+                _ => String::new(),
             },
-            mobile: os_key == "android",
+            mobile,
         },
+        geolocation: mobile.then(GeolocationFingerprint::default),
         plugins: chrome_plugin_info(),
     }
+}
+
+fn android_fonts() -> Vec<&'static str> {
+    vec![
+        "Roboto",
+        "Noto Sans",
+        "Noto Serif",
+        "Droid Sans",
+        "Droid Sans Mono",
+        "Cutive Mono",
+        "Roboto Condensed",
+        "Coming Soon",
+    ]
+}
+
+fn iphone_fonts() -> Vec<&'static str> {
+    vec![
+        "Helvetica",
+        "Helvetica Neue",
+        "Avenir",
+        "Arial",
+        "Courier New",
+        "Georgia",
+        "Menlo",
+        "Optima",
+        "PingFang SC",
+        "SF Pro Display",
+        "Times New Roman",
+        "Verdana",
+    ]
 }
 
 fn windows_fonts() -> Vec<&'static str> {
@@ -484,8 +590,8 @@ fn issue(field: &str, message: impl Into<String>, severity: &str) -> Fingerprint
 }
 
 fn chrome_major(ua: &str) -> Option<u32> {
-    let marker = "Chrome/";
-    let start = ua.find(marker)? + marker.len();
+    let start = ua.find("Chrome/").or_else(|| ua.find("CriOS/"))?
+        + if ua.contains("Chrome/") { 7 } else { 6 };
     ua[start..].split('.').next()?.parse().ok()
 }
 
@@ -531,6 +637,8 @@ pub fn validate(fp: &Fingerprint) -> FingerprintValidation {
             ("MacIntel", "macOS")
         } else if fp.user_agent.contains("Android") {
             ("Linux armv8l", "Android")
+        } else if fp.user_agent.contains("iPhone") {
+            ("iPhone", "iOS")
         } else if fp.user_agent.contains("Linux") {
             ("Linux x86_64", "Linux")
         } else {
@@ -605,7 +713,7 @@ pub fn validate(fp: &Fingerprint) -> FingerprintValidation {
     }
 
     let (min_width, min_height) = if fp.client_hints.mobile {
-        (320, 480)
+        (320, 320)
     } else {
         (800, 600)
     };
@@ -809,6 +917,25 @@ pub fn validate(fp: &Fingerprint) -> FingerprintValidation {
             "error",
         ));
     }
+    if let Some(geo) = &fp.geolocation {
+        if !(-90.0..=90.0).contains(&geo.latitude) {
+            errors.push(issue(
+                "geolocation.latitude",
+                "纬度必须在 -90 到 90 之间",
+                "error",
+            ));
+        }
+        if !(-180.0..=180.0).contains(&geo.longitude) {
+            errors.push(issue(
+                "geolocation.longitude",
+                "经度必须在 -180 到 180 之间",
+                "error",
+            ));
+        }
+        if geo.accuracy <= 0.0 {
+            errors.push(issue("geolocation.accuracy", "定位精度必须大于 0", "error"));
+        }
+    }
 
     if fp.plugins.is_empty() {
         warnings.push(issue(
@@ -870,6 +997,31 @@ pub fn locale_for_country(country: &str) -> (&'static str, &'static [&'static st
         "BR" => ("America/Sao_Paulo", &["pt-BR", "pt", "en"]),
         "CA" => ("America/Toronto", &["en-CA", "en", "fr"]),
         "US" => ("America/New_York", &["en-US", "en"]),
+        "PK" => ("Asia/Karachi", &["en-PK", "en", "ur"]),
+        "BD" => ("Asia/Dhaka", &["bn-BD", "bn", "en"]),
+        "TH" => ("Asia/Bangkok", &["th-TH", "th", "en"]),
+        "ID" => ("Asia/Jakarta", &["id-ID", "id", "en"]),
+        "PH" => ("Asia/Manila", &["en-PH", "en", "fil"]),
+        "MY" => ("Asia/Kuala_Lumpur", &["ms-MY", "ms", "en"]),
+        "VN" => ("Asia/Ho_Chi_Minh", &["vi-VN", "vi", "en"]),
+        "ES" => ("Europe/Madrid", &["es-ES", "es", "en"]),
+        "IT" => ("Europe/Rome", &["it-IT", "it", "en"]),
+        "PT" => ("Europe/Lisbon", &["pt-PT", "pt", "en"]),
+        "PL" => ("Europe/Warsaw", &["pl-PL", "pl", "en"]),
+        "UA" => ("Europe/Kyiv", &["uk-UA", "uk", "en"]),
+        "TR" => ("Europe/Istanbul", &["tr-TR", "tr", "en"]),
+        "MX" => ("America/Mexico_City", &["es-MX", "es", "en"]),
+        "AR" => ("America/Argentina/Buenos_Aires", &["es-AR", "es", "en"]),
+        "CL" => ("America/Santiago", &["es-CL", "es", "en"]),
+        "CO" => ("America/Bogota", &["es-CO", "es", "en"]),
+        "NG" => ("Africa/Lagos", &["en-NG", "en"]),
+        "GQ" => ("Africa/Malabo", &["es-GQ", "es", "fr"]),
+        "ST" => ("Africa/Sao_Tome", &["pt-ST", "pt"]),
+        "EG" => ("Africa/Cairo", &["ar-EG", "ar", "en"]),
+        "ZA" => ("Africa/Johannesburg", &["en-ZA", "en"]),
+        "KE" => ("Africa/Nairobi", &["en-KE", "en", "sw"]),
+        "MA" => ("Africa/Casablanca", &["fr-MA", "fr", "ar"]),
+        "NZ" => ("Pacific/Auckland", &["en-NZ", "en"]),
         "ZZ" | "" => ("UTC", &["en-US", "en"]),
         _ => ("UTC", &["en-US", "en"]),
     }
@@ -883,6 +1035,93 @@ pub fn apply_country_locale(fp: &mut Fingerprint, country: &str) {
     let (tz, languages) = locale_for_country(country);
     fp.timezone = tz.to_string();
     fp.languages = languages.iter().map(|value| value.to_string()).collect();
+}
+
+static TIMEZONE_FINDER: LazyLock<EmbeddedFinder> = LazyLock::new(EmbeddedFinder::new);
+
+pub fn timezone_for_coordinates(latitude: f64, longitude: f64) -> Option<String> {
+    if !(-90.0..=90.0).contains(&latitude) || !(-180.0..=180.0).contains(&longitude) {
+        return None;
+    }
+    let timezone = TIMEZONE_FINDER.get_tz_name(longitude, latitude);
+    if timezone.is_empty() || timezone.starts_with("Etc/") {
+        return None;
+    }
+    chrono_tz::Tz::from_str(timezone)
+        .ok()
+        .map(|_| timezone.to_string())
+}
+
+/// Keep the location-dependent fingerprint fields consistent with the
+/// configured geolocation. IP address/geo-IP is deliberately not touched:
+/// it follows the real egress or the selected proxy.
+pub fn apply_geolocation_context(fp: &mut Fingerprint) -> Option<String> {
+    let geolocation = fp.geolocation.as_ref()?;
+    let timezone = timezone_for_coordinates(geolocation.latitude, geolocation.longitude)?;
+    fp.timezone = timezone.clone();
+    if let Some(country) = country_for_timezone(&timezone) {
+        let (_, languages) = locale_for_country(country);
+        fp.languages = languages.iter().map(|value| value.to_string()).collect();
+    }
+    Some(timezone)
+}
+
+fn country_for_timezone(timezone: &str) -> Option<&'static str> {
+    match timezone {
+        "Asia/Shanghai" | "Asia/Chongqing" | "Asia/Harbin" | "Asia/Urumqi" => Some("CN"),
+        "Asia/Hong_Kong" => Some("HK"),
+        "Asia/Taipei" => Some("TW"),
+        "Asia/Tokyo" => Some("JP"),
+        "Asia/Seoul" => Some("KR"),
+        "Asia/Singapore" => Some("SG"),
+        "Asia/Kolkata" | "Asia/Calcutta" => Some("IN"),
+        "Asia/Karachi" => Some("PK"),
+        "Asia/Dhaka" => Some("BD"),
+        "Asia/Bangkok" => Some("TH"),
+        "Asia/Jakarta" => Some("ID"),
+        "Asia/Manila" => Some("PH"),
+        "Asia/Kuala_Lumpur" => Some("MY"),
+        "Asia/Ho_Chi_Minh" | "Asia/Saigon" => Some("VN"),
+        "Europe/London" => Some("GB"),
+        "Europe/Berlin" | "Europe/Busingen" => Some("DE"),
+        "Europe/Paris" => Some("FR"),
+        "Europe/Amsterdam" => Some("NL"),
+        "Europe/Moscow" => Some("RU"),
+        "Europe/Madrid" => Some("ES"),
+        "Europe/Rome" => Some("IT"),
+        "Europe/Lisbon" => Some("PT"),
+        "Europe/Warsaw" => Some("PL"),
+        "Europe/Kyiv" | "Europe/Kiev" => Some("UA"),
+        "Europe/Istanbul" => Some("TR"),
+        "America/New_York"
+        | "America/Chicago"
+        | "America/Denver"
+        | "America/Los_Angeles"
+        | "America/Phoenix"
+        | "America/Anchorage"
+        | "Pacific/Honolulu" => Some("US"),
+        "America/Toronto" | "America/Vancouver" | "America/Edmonton" | "America/Winnipeg"
+        | "America/Halifax" => Some("CA"),
+        "America/Sao_Paulo" => Some("BR"),
+        "America/Mexico_City" => Some("MX"),
+        "America/Argentina/Buenos_Aires" => Some("AR"),
+        "America/Santiago" => Some("CL"),
+        "America/Bogota" => Some("CO"),
+        "Africa/Lagos" => Some("NG"),
+        "Africa/Malabo" => Some("GQ"),
+        "Africa/Sao_Tome" => Some("ST"),
+        "Africa/Cairo" => Some("EG"),
+        "Africa/Johannesburg" => Some("ZA"),
+        "Africa/Nairobi" => Some("KE"),
+        "Africa/Casablanca" => Some("MA"),
+        "Australia/Sydney"
+        | "Australia/Melbourne"
+        | "Australia/Brisbane"
+        | "Australia/Perth"
+        | "Australia/Adelaide" => Some("AU"),
+        "Pacific/Auckland" => Some("NZ"),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -959,11 +1198,46 @@ const INJECTION_TEMPLATE: &str = r#"(() => {
       availLeft: 0, availTop: 0
     };
     Object.keys(screenValues).forEach(k => define(Screen.prototype, k, screenValues[k]));
+    const landscape = FP.screen.width > FP.screen.height;
+    const orientation = {
+      type: landscape ? 'landscape-primary' : 'portrait-primary',
+      angle: landscape ? 90 : 0,
+      onchange: null,
+      lock: () => Promise.resolve(),
+      unlock: () => {}
+    };
+    define(Screen.prototype, 'orientation', orientation);
+    define(window, 'orientation', orientation.angle);
     define(window, 'devicePixelRatio', FP.screen.pixelRatio);
     define(window, 'innerWidth', FP.screen.availWidth);
     define(window, 'innerHeight', FP.screen.availHeight);
     define(window, 'outerWidth', FP.screen.availWidth);
     define(window, 'outerHeight', FP.screen.availHeight);
+  } catch (e) {}
+
+  try {
+    if (FP.geolocation && navigator.geolocation) {
+      const position = {
+        coords: {
+          latitude: FP.geolocation.latitude,
+          longitude: FP.geolocation.longitude,
+          accuracy: FP.geolocation.accuracy,
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null
+        },
+        timestamp: Date.now()
+      };
+      defineFn(navigator.geolocation, 'getCurrentPosition', function (success) {
+        try { success(position); } catch (e) {}
+      });
+      defineFn(navigator.geolocation, 'watchPosition', function (success) {
+        try { success(position); } catch (e) {}
+        return 1;
+      });
+      defineFn(navigator.geolocation, 'clearWatch', function () {});
+    }
   } catch (e) {}
 
   try {

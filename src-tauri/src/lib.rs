@@ -25,7 +25,7 @@ use std::sync::OnceLock;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -145,6 +145,27 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            let env_id = argv.iter().enumerate().find_map(|(index, arg)| {
+                if let Some(value) = arg.strip_prefix("--env=") {
+                    return (!value.trim().is_empty()).then(|| value.to_string());
+                }
+                if arg == "--env" {
+                    return argv
+                        .get(index + 1)
+                        .filter(|value| !value.trim().is_empty())
+                        .cloned();
+                }
+                None
+            });
+            if let Some(env_id) = env_id {
+                let _ = app.emit("shortcut://env", env_id);
+            }
+        }))
         .manage(state)
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -212,6 +233,8 @@ pub fn run() {
             commands::env_delete,
             commands::env_bulk_delete,
             commands::env_clone,
+            commands::env_create_shortcut,
+            commands::startup_env,
             commands::env_export,
             commands::env_import,
             commands::env_bulk_import,

@@ -140,7 +140,7 @@ cargo test
   - Cookie 写入/读取/加密缓存落盘，应用重启后自动恢复
   - 连续录制 4 帧并生成 manifest；HAR 1.2 文件导出
   - 浏览器关闭与进程回收
-- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"4.0.0"}`。
+- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"4.1.0"}`。
 - Windows GNU 链接阶段会输出 `.rsrc merge failure: multiple non-default manifests` 警告（MinGW 默认清单与 Tauri 资源清单合并提示），构建退出码为 0，产物可正常启动；CI 使用 MSVC 工具链，不涉及该提示。
 - 完整 `cargo test` 的 Tauri 测试二进制在当前 MinGW 沙箱启动阶段报 `STATUS_ENTRYPOINT_NOT_FOUND`（WebView2/工具链运行环境限制）；`cargo check`、`clippy --all-targets` 已完整编译所有测试代码。`.github/workflows/build.yml` 在 Ubuntu 上执行完整单元测试，并在 Windows/macOS/Linux 矩阵中构建安装包。
 - 浏览器预览：登录页亮/暗主题渲染正常，无 console error。
@@ -347,3 +347,24 @@ cargo test
 - **问题**：移动端窗口宽度小于旧的 640px 阈值，边框层隐藏；任务栏覆盖图标在边框尺寸检查之后才设置，因此也一起消失；右下角悬浮名称同样被隐藏。
 - **修复**：任务栏覆盖图标改为在窗口尺寸检查前设置，独立于窄窗口；边框最小阈值降到 180×180，悬浮名称阈值降到 260×260，移动端窄窗口仍显示。
 - **验证**：Android 环境设置 `--window-size=412,915`（Chrome 实际客户区约 500×907），紫色边框完整显示、右下角显示「FinEnv · Android 测试」名称、任务栏 Chrome 按钮显示环境色圆点；全局 `--start-maximized` 不再覆盖环境窗口尺寸。
+
+## 36. 移动设备、方向与地理定位
+
+- **设备模板**：Pixel 8 / Galaxy S24 / Xiaomi 14 / iPhone 15 Pro，均支持 `-landscape` 横屏模板；移动 UA、platform、Client Hints、model、触摸点、屏幕尺寸和 DPR 成套生成。
+- **方向**：模板横屏时交换屏幕宽高；注入 `screen.orientation` / `window.orientation`，竖屏为 0、横屏为 90。
+- **地理定位**：Fingerprint 新增 `geolocation`（纬度/经度/精度），模板默认上海坐标；注入 geolocation Hook，并通过 CDP 授予权限和 `Emulation.setGeolocationOverride`。
+- **验证**：6 个移动模板 `fingerprint_validate` 均返回 0 error；打开竖屏模板 `screen.orientation=portrait-primary/0`，横屏模板为 `landscape-primary/90`；页面 geolocation 返回配置坐标。
+
+## 37. 网络模拟与桌面快捷方式
+
+- **网络模拟**：环境新增 `networkProfile`（none/3g/4g/5g/slow/lossy/offline），新建与概览编辑均可设置；打开/恢复浏览器后通过 CDP Network 模拟生效。offline 下页面 `navigator.onLine=false`。
+- **快捷方式**：Windows 环境详情生成桌面 `.lnk`，目标为 FinEnv 可执行文件，参数 `--env=<id>`；登录后自动进入环境详情并打开浏览器。
+- **验证**：3G/4G/5G/慢速/丢包/离线配置可保存并应用；offline 下当前受控标签页的 `fetch` 失败、导航显示 `ERR_INTERNET_DISCONNECTED`。快捷方式目标、参数和图标正确；带 `--env=` 启动应用并登录后自动跳到环境详情、启动浏览器；应用已运行时再次带 `--env=` 启动会退出第二实例，并通过单实例事件在已有窗口打开目标环境。
+
+## 38. 启动页动态刷新
+
+- 保存指纹中的地理定位后，启动页 HTML 立即重写；若启动页正在当前受控标签页打开，则自动刷新并显示新的经纬度。
+- 概览中修改网络模拟后，启动页同步刷新；offline 配置保存后当前受控标签页的 HTTP(S) 请求被阻断。
+- 启动页新增「地理定位」「网络模拟」摘要与实时 geolocation 展示；设置变更不再需要手动关闭再打开环境。
+- 定位改到东京坐标后，时区自动变为 `Asia/Tokyo`、语言变为 `ja-JP, ja, en`；改回上海坐标恢复 `Asia/Shanghai`。海上坐标没有可映射的时区时保留用户当前时区配置。
+- IP 位置仍是真实出口/代理出口，不会被 geolocation 修改；页面上的「IP 位置」和「地理定位」分开展示。

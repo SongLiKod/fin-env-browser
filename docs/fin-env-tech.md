@@ -4,7 +4,7 @@
 
 仓库名称：fin-env-browser
 
-文档版本：V4.0
+文档版本：V4.1
 
 基础框架：Tauri 2.0
 
@@ -62,7 +62,9 @@
 
 \- 系统能力：托盘、全局快捷键、文件对话框、自动更新、系统通知
 
-\- 移动端模板：Android 14 / Pixel 8 模板使用移动 UA、`Linux armv8l`、Client Hints platform `Android`、`mobile=true`、`model=Pixel 8`、ARM64、5 个触摸点、412×915 / DPR 2.625 屏幕；校验允许移动端最小 320×480，并保持 UA / Client Hints / platform 一致。
+\- 移动端模板：提供 Pixel 8、Galaxy S24、Xiaomi 14、iPhone 15 Pro 模板，支持 `-landscape` 横屏变体；移动 UA、`navigator.platform`、Client Hints platform/model/mobile、触摸点和屏幕尺寸保持一致。屏幕方向通过 `screen.orientation` / `window.orientation` Hook 同步；地理定位通过 JS Hook 与 CDP `Emulation.setGeolocationOverride` 覆盖，并授予 geolocation 权限。移动端屏幕最小限制为 320×320。
+\- 网络模拟：环境级 `network_profile` 支持 3G / 4G / 5G / 慢速 / 10% 丢包 / 离线；浏览器启动或恢复后通过 CDP `Network.emulateNetworkConditions` 应用，运行中修改会立即应用到当前受控标签页。`offline` 是标签页级网络模拟，不切断操作系统网络，也不会影响新开标签页或其他浏览器。\n\- 启动页动态更新：指纹/环境设置保存后重新生成对应 `start-pages/<envId>.html`；若该启动页正在当前受控标签页中打开，则自动刷新，展示最新地理定位、网络模拟、IP 与指纹摘要。\n\- 定位上下文：地理定位变化时使用内置离线时区边界数据推导 IANA 时区，并同步语言；该同步只覆盖时区/语言类指纹，IP 与 IP 位置仍由真实出口或代理决定，无法由页面 geolocation 伪造。
+\- 桌面快捷方式：Windows 环境详情可生成 `.lnk`，目标为当前 FinEnv 可执行文件并带 `--env=<id>`；应用登录后读取启动参数，自动进入对应环境并打开浏览器。已运行时由单实例插件接管第二次启动，聚焦已有窗口并通过 `shortcut://env` 事件打开目标环境。
 \- 环境身份：Windows 下将环境标识色应用到 Chromium 窗口边框，并通过点击穿透的分层窗口叠加 1-12px 可调粗细彩色边框；面板、运行栏与浏览器窗口使用同一颜色。任务栏按钮通过 ITaskbarList3 叠加同色圆点徽标，悬停/辅助功能描述包含环境名；每个环境可配置最多 4 个字符的标识文字，留空时显示纯色圆点。
 \- 视觉层：界面使用极光渐变环境背景、玻璃质感卡片、深色渐变侧栏、渐变主按钮与统计卡片悬浮光效；所有颜色仍由主题主色和亮/暗模式驱动，不改变信息密度与操作路径。
 

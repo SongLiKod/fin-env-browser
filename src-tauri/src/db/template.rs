@@ -44,7 +44,7 @@ fn decrypt_fingerprint(
 const TEMPLATE_COLUMNS: &str = "id, name, description, project, test_env, account_role, version, \
     case_id, tags, notes, kernel, chromium_path, auto_restart, memory_limit_mb, idle_timeout_min, \
     fingerprint_json, border_color, border_width, group_id, proxy_mode, proxy_id, extension_ids, \
-    chromium_launch_args, taskbar_badge_text, created_at, updated_at";
+    chromium_launch_args, taskbar_badge_text, network_profile, created_at, updated_at";
 
 fn row_to_template(
     row: &Row<'_>,
@@ -55,6 +55,7 @@ fn row_to_template(
     let extension_ids: String = row.get(21)?;
     let launch_args: String = row.get(22)?;
     let taskbar_badge_text: String = row.get(23)?;
+    let network_profile: String = row.get(24)?;
     Ok(EnvironmentTemplate {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -81,8 +82,9 @@ fn row_to_template(
         extension_ids: serde_json::from_str(&extension_ids).unwrap_or_default(),
         chromium_launch_args: serde_json::from_str(&launch_args).unwrap_or_default(),
         taskbar_badge_text,
-        created_at: row.get(24)?,
-        updated_at: row.get(25)?,
+        network_profile,
+        created_at: row.get(25)?,
+        updated_at: row.get(26)?,
     })
 }
 
@@ -141,8 +143,8 @@ impl Db {
                  account_role, version, case_id, tags, notes, kernel, chromium_path, auto_restart,
                  memory_limit_mb, idle_timeout_min, fingerprint_json, border_color, border_width,
                  group_id, proxy_mode, proxy_id, extension_ids, chromium_launch_args,
-                 taskbar_badge_text, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26)",
+                 taskbar_badge_text, network_profile, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27)",
                 params![
                     template.id,
                     template.name,
@@ -168,6 +170,7 @@ impl Db {
                     extension_ids,
                     launch_args,
                     template.taskbar_badge_text,
+                    template.network_profile,
                     template.created_at,
                     template.updated_at,
                 ],
@@ -188,7 +191,8 @@ impl Db {
                  kernel=?11, chromium_path=?12, auto_restart=?13, memory_limit_mb=?14,
                  idle_timeout_min=?15, fingerprint_json=?16, border_color=?17, border_width=?18,
                  group_id=?19, proxy_mode=?20, proxy_id=?21, extension_ids=?22,
-                 chromium_launch_args=?23, taskbar_badge_text=?24, updated_at=?25
+                 chromium_launch_args=?23, taskbar_badge_text=?24, network_profile=?25,
+                 updated_at=?26
                  WHERE id=?1",
                 params![
                     template.id,
@@ -215,6 +219,7 @@ impl Db {
                     extension_ids,
                     launch_args,
                     template.taskbar_badge_text,
+                    template.network_profile,
                     template.updated_at,
                 ],
             )?;

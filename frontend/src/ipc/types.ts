@@ -94,6 +94,7 @@ export interface Fingerprint {
     model: string;
     mobile: boolean;
   };
+  geolocation: { latitude: number; longitude: number; accuracy: number } | null;
   plugins: PluginInfo[];
 }
 
@@ -151,6 +152,7 @@ export interface Environment {
   chromiumPath: string | null;
   chromiumLaunchArgs: string[];
   taskbarBadgeText: string;
+  networkProfile: string;
   autoRestart: boolean;
   memoryLimitMb: number | null;
   idleTimeoutMin: number | null;
@@ -266,6 +268,7 @@ export interface EnvironmentTemplate {
   chromiumPath: string | null;
   chromiumLaunchArgs: string[];
   taskbarBadgeText: string;
+  networkProfile: string;
   autoRestart: boolean;
   memoryLimitMb: number | null;
   idleTimeoutMin: number | null;
@@ -358,6 +361,7 @@ export interface CreateEnvironmentInput {
   chromiumPath?: string | null;
   chromiumLaunchArgs?: string[];
   taskbarBadgeText?: string;
+  networkProfile?: string;
   templateOs?: string | null;
   fingerprint?: Fingerprint | null;
   autoRestart?: boolean | null;
@@ -383,6 +387,7 @@ export interface UpdateEnvironmentInput {
   chromiumPath?: string | null;
   chromiumLaunchArgs?: string[];
   taskbarBadgeText?: string;
+  networkProfile?: string;
   autoRestart?: boolean;
   memoryLimitMb?: number | null;
   idleTimeoutMin?: number | null;

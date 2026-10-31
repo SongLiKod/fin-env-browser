@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { AlertTriangle } from 'lucide-react';
 
 import { LoginPage } from '@/pages/Login';
@@ -11,6 +12,7 @@ import { useEnvStore } from '@/store/env';
 import { useToastStore } from '@/store/toast';
 import { applyTheme } from '@/theme/theme';
 import {
+  ipc,
   onApiError,
   onBrowserExit,
   onBrowserRuntime,
@@ -81,6 +83,7 @@ function AppContent() {
   const initializeAuth = useAuthStore((state) => state.initialize);
   const initializeTheme = useThemeStore((state) => state.initialize);
   const [booted, setBooted] = React.useState(false);
+  const startupHandled = React.useRef(false);
 
   React.useEffect(() => {
     let active = true;
@@ -112,6 +115,49 @@ function AppContent() {
       .getState()
       .refresh(true)
       .catch(() => undefined);
+  }, [authenticated]);
+
+  React.useEffect(() => {
+    if (!authenticated || startupHandled.current) return;
+    startupHandled.current = true;
+    void (async () => {
+      try {
+        const envId = await ipc.startupEnv();
+        if (!envId) return;
+        window.location.hash = `#/envs/${envId}`;
+        await ipc.browserOpen(envId, {});
+        useToastStore.getState().success('已从桌面快捷方式启动环境');
+      } catch (error) {
+        useToastStore.getState().error(
+          '快捷方式启动失败',
+          error instanceof Error ? error.message : undefined,
+        );
+      }
+    })();
+  }, [authenticated]);
+
+  React.useEffect(() => {
+    if (!authenticated) return;
+    let unlisten: (() => void) | undefined;
+    listen<string>('shortcut://env', (event) => {
+      const envId = event.payload;
+      window.location.hash = `#/envs/${envId}`;
+      void ipc
+        .browserOpen(envId, {})
+        .then(() => useToastStore.getState().success('已从桌面快捷方式启动环境'))
+        .catch((error) =>
+          useToastStore
+            .getState()
+            .error('快捷方式启动失败', error instanceof Error ? error.message : undefined),
+        );
+    })
+      .then((dispose) => {
+        unlisten = dispose;
+      })
+      .catch(() => undefined);
+    return () => {
+      unlisten?.();
+    };
   }, [authenticated]);
 
   React.useEffect(() => {
