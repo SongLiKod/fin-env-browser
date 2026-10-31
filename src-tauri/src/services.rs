@@ -2010,6 +2010,101 @@ pub fn assign_extension_to_all(
     Ok(env_ids.len() as u32)
 }
 
+pub fn install_extension_archive(
+    state: &SharedState,
+    path: &str,
+    name: Option<String>,
+    env_ids: &[String],
+    actor: &str,
+) -> Result<Extension> {
+    let source = Path::new(path);
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if extension != "zip" && extension != "crx" {
+        return Err(AppError::bad_request("仅支持 .zip 或 .crx 扩展包"));
+    }
+    let metadata = std::fs::metadata(source)
+        .map_err(|error| AppError::bad_request(format!("无法读取扩展包: {error}")))?;
+    if !metadata.is_file() || metadata.len() == 0 {
+        return Err(AppError::bad_request("扩展包为空或不是文件"));
+    }
+    if metadata.len() > 512 * 1024 * 1024 {
+        return Err(AppError::bad_request("扩展包超过 120MB 限制"));
+    }
+    for env_id in env_ids {
+        state.db.get_environment(env_id)?;
+    }
+    let bytes = std::fs::read(source)?;
+    let target = paths::extension_store_dir(&state.data_dir).join(new_id());
+    let manifest = match extract_crx(&bytes, &target) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&target);
+            return Err(error);
+        }
+    };
+    let fallback_name = source
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("本地扩展")
+        .to_string();
+    let manifest_name = manifest
+        .get("name")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty() && !value.starts_with("__MSG_"))
+        .unwrap_or(&fallback_name)
+        .to_string();
+    let manifest_version = manifest
+        .get("manifest_version")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(3);
+    let mut description = manifest
+        .get("description")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty() && !value.starts_with("__MSG_"))
+        .unwrap_or("从 ZIP/CRX 安装的本地扩展")
+        .to_string();
+    if manifest_version < 3 {
+        description.push_str("（Manifest V2，Chrome 137+ 可能不再加载）");
+    }
+    let extension = Extension {
+        id: new_id(),
+        name: name
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(manifest_name),
+        path: target.to_string_lossy().to_string(),
+        enabled: true,
+        description,
+        created_at: now_iso(),
+        assigned_count: env_ids.len() as u32,
+    };
+    if let Err(error) = state.db.insert_extension(&extension) {
+        let _ = std::fs::remove_dir_all(&target);
+        return Err(error);
+    }
+    if let Err(error) = state.db.assign_extension(&extension.id, env_ids) {
+        let _ = state.db.delete_extension(&extension.id);
+        let _ = std::fs::remove_dir_all(&target);
+        return Err(error);
+    }
+    Audit::global(
+        &state.db,
+        actor,
+        actions::EXTENSION_ADD,
+        format!(
+            "安装本地扩展包 {}（{}，分配给 {} 个环境）",
+            extension.name,
+            path,
+            env_ids.len()
+        ),
+    )?;
+    Ok(extension)
+}
+
 pub async fn install_extension_online(
     state: &SharedState,
     source: &str,
@@ -2190,7 +2285,7 @@ fn crx_payload(bytes: &[u8]) -> Result<&[u8]> {
 }
 
 fn extract_crx(bytes: &[u8], target: &Path) -> Result<serde_json::Value> {
-    const MAX_EXTRACTED_BYTES: u64 = 120 * 1024 * 1024;
+    const MAX_EXTRACTED_BYTES: u64 = 512 * 1024 * 1024;
     const MAX_ENTRIES: usize = 6000;
 
     paths::ensure_dir(target)?;
@@ -2239,7 +2334,28 @@ fn extract_crx(bytes: &[u8], target: &Path) -> Result<serde_json::Value> {
             output.write_all(&buffer[..read])?;
         }
     }
-    let manifest_path = target.join("manifest.json");
+    let mut manifest_path = target.join("manifest.json");
+    if !manifest_path.is_file() {
+        // ZIP packages often contain one top-level folder. Flatten it so
+        // --load-extension can always point at the extension root.
+        let children = std::fs::read_dir(target)?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+            .filter(|entry| entry.file_name() != "__MACOSX")
+            .collect::<Vec<_>>();
+        if children.len() == 1 {
+            let nested = children[0].path();
+            if nested.join("manifest.json").is_file() {
+                for entry in std::fs::read_dir(&nested)? {
+                    let entry = entry?;
+                    let destination = target.join(entry.file_name());
+                    std::fs::rename(entry.path(), destination)?;
+                }
+                let _ = std::fs::remove_dir(&nested);
+                manifest_path = target.join("manifest.json");
+            }
+        }
+    }
     if !manifest_path.is_file() {
         return Err(AppError::bad_request("扩展包缺少 manifest.json"));
     }

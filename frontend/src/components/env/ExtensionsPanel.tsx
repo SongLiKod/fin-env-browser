@@ -1,6 +1,7 @@
 import * as React from 'react';
 import {
   CheckCheck,
+  FileArchive,
   FolderOpen,
   FolderPlus,
   Globe2,
@@ -13,7 +14,7 @@ import {
 } from 'lucide-react';
 import type { EnvironmentView, Extension } from '@/ipc/types';
 import { ipc } from '@/ipc/client';
-import { pickDirectory } from '@/utils/dialog';
+import { pickDirectory, pickFile } from '@/utils/dialog';
 import { useAuthStore } from '@/store/auth';
 import { toastError, useToastStore } from '@/store/toast';
 import { cn, formatDateShort } from '@/utils';
@@ -34,9 +35,10 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
   const [assigned, setAssigned] = React.useState<Extension[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [addOpen, setAddOpen] = React.useState(false);
-  const [addMode, setAddMode] = React.useState<'online' | 'local'>('online');
+  const [addMode, setAddMode] = React.useState<'online' | 'local' | 'archive'>('online');
   const [storeSource, setStoreSource] = React.useState('');
   const [path, setPath] = React.useState('');
+  const [archivePath, setArchivePath] = React.useState('');
   const [name, setName] = React.useState('');
   const [assignCurrent, setAssignCurrent] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
@@ -75,6 +77,7 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
   const resetAdd = () => {
     setStoreSource('');
     setPath('');
+    setArchivePath('');
     setName('');
     setAssignCurrent(true);
     setAddMode('online');
@@ -99,6 +102,20 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
           assignCurrent ? [env.id] : [],
         );
         toast.success('在线扩展已安装', assignCurrent ? '已分配到当前环境' : '可在扩展库中分配');
+      } else if (addMode === 'archive') {
+        if (!archivePath) {
+          toast.warning('请选择 ZIP 或 CRX 扩展包');
+          return;
+        }
+        extension = await ipc.extensionInstallArchive(
+          archivePath,
+          name.trim() || undefined,
+          assignCurrent ? [env.id] : [],
+        );
+        toast.success(
+          'ZIP/CRX 扩展已安装',
+          assignCurrent ? '已分配到当前环境' : '可在扩展库中分配',
+        );
       } else {
         if (!path) {
           toast.warning('请选择扩展目录');
@@ -212,6 +229,16 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
               }}
             >
               <FolderPlus className="h-3.5 w-3.5" /> 本地安装
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setAddMode('archive');
+                setAddOpen(true);
+              }}
+            >
+              <FileArchive className="h-3.5 w-3.5" /> ZIP / CRX
             </Button>
           </div>
         ) : null}
@@ -404,16 +431,26 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
             <Button
               variant="primary"
               loading={busy}
-              disabled={addMode === 'online' ? !storeSource.trim() : !path}
+              disabled={
+                addMode === 'online'
+                  ? !storeSource.trim()
+                  : addMode === 'archive'
+                    ? !archivePath
+                    : !path
+              }
               onClick={() => void install()}
             >
-              {addMode === 'online' ? '在线安装' : '安装本地扩展'}
+              {addMode === 'online'
+                ? '在线安装'
+                : addMode === 'archive'
+                  ? '安装 ZIP / CRX'
+                  : '安装本地扩展'}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-surface-secondary p-1">
+          <div className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-surface-secondary p-1">
             <button
               type="button"
               className={cn(
@@ -433,6 +470,16 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
               onClick={() => setAddMode('local')}
             >
               <FolderPlus className="h-3.5 w-3.5" /> 本地目录
+            </button>
+            <button
+              type="button"
+              className={cn(
+                'flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-colors',
+                addMode === 'archive' ? 'bg-surface-base text-content-main shadow-sm' : 'text-content-weak hover:text-content-main',
+              )}
+              onClick={() => setAddMode('archive')}
+            >
+              <FileArchive className="h-3.5 w-3.5" /> ZIP / CRX
             </button>
           </div>
 
@@ -460,7 +507,7 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
                 需本机能访问 Chrome 应用商店。
               </div>
             </>
-          ) : (
+          ) : addMode === 'local' ? (
             <>
               <Field label="扩展目录" required>
                 <div className="flex gap-2">
@@ -477,6 +524,32 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
                     }}
                   >
                     <FolderPlus className="h-4 w-4" /> 选择
+                  </Button>
+                </div>
+              </Field>
+              <Field label="显示名称" hint="留空时使用 manifest.json 中的 name">
+                <Input value={name} onChange={(event) => setName(event.target.value)} />
+              </Field>
+            </>
+          ) : (
+            <>
+              <Field label="ZIP / CRX 扩展包" required hint="支持 Chrome 扩展 ZIP 和 CRX2 / CRX3">
+                <div className="flex gap-2">
+                  <Input value={archivePath} readOnly placeholder="选择 .zip 或 .crx 文件" />
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      try {
+                        const files = await pickFile([
+                          { name: 'Chrome 扩展包', extensions: ['zip', 'crx'] },
+                        ]);
+                        if (files?.[0]) setArchivePath(files[0]);
+                      } catch (error) {
+                        toastError(error);
+                      }
+                    }}
+                  >
+                    <FileArchive className="h-4 w-4" /> 选择文件
                   </Button>
                 </div>
               </Field>

@@ -1411,6 +1411,22 @@ pub fn extension_add(
 }
 
 #[tauri::command]
+pub fn extension_install_archive(
+    state: State<'_, SharedState>,
+    path: String,
+    name: Option<String>,
+    env_ids: Option<Vec<String>>,
+) -> Result<crate::models::Extension> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::EditEnv)?;
+    let env_ids = env_ids.unwrap_or_default();
+    for id in &env_ids {
+        state.check_environment_access(&user, id, EnvAccess::Manage)?;
+    }
+    services::install_extension_archive(&state, &path, name, &env_ids, &user.username)
+}
+
+#[tauri::command]
 pub fn extension_delete(state: State<'_, SharedState>, id: String) -> Result<()> {
     let state = state.inner().clone();
     let actor = state.require(Permission::EditEnv)?.username;
