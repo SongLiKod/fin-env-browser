@@ -54,7 +54,10 @@ export function VideoSnifferPanel({ env }: { env: EnvironmentView }) {
       const path = await ipc.videoDownload(env.id, video.id);
       toast.success('视频下载完成', path);
     } catch (error) {
-      toastError(error);
+      toast.error(
+        video.downloadable ? '视频下载失败' : '合并下载失败',
+        error instanceof Error ? error.message : String(error),
+      );
     } finally {
       setDownloading(null);
     }

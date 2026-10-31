@@ -376,4 +376,5 @@ cargo test
 - 环境详情新增「视频嗅探」页签，每 2.5 秒刷新；直接 MP4/WebM 等可下载，文件保存到系统下载目录下的 `FinEnv/`，按环境代理/Cookie/Referer 请求。
 - 验证：打开 `flower.mp4` 测试页后识别到 `video/mp4`，下载文件大小 1,128,375 字节；清空列表返回空数组；暂停插件后不再接收新媒体。
 - B 站 DASH：桌面页面抓到 `.m4s` 分片后点击「合并下载」，后端通过 BVID/CID 调用 B 站 view/playurl 接口解析 progressive MP4；实测 `BV1BCnW6XEf9` 下载为 8,977,990 字节的 MP4 文件。
+- 懒加载页面：`hongguoduanju.com/player/...` 的 `<video preload="none" src=".../360p.mp4">` 在未播放时也能被 DOM 扫描发现，实测下载 23,524,803 字节 MP4。
 - 限制：blob: 媒体、手动新开的标签页和通用（非 B 站）HLS/DASH 分片流不在当前 MVP 的自动合并范围内；通用流地址提供复制能力。

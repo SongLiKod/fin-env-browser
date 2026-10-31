@@ -1757,13 +1757,14 @@ pub fn plugin_set_enabled(
 }
 
 #[tauri::command]
-pub fn video_list(
+pub async fn video_list(
     state: State<'_, SharedState>,
     env_id: String,
 ) -> Result<Vec<crate::models::SniffedVideo>> {
     let state = state.inner().clone();
     let user = state.require(Permission::OpenClose)?;
     state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    let _ = state.browsers.scan_videos(&env_id).await;
     Ok(state.browsers.video_list(&env_id))
 }
 
@@ -1785,7 +1786,13 @@ pub async fn video_download(
     let state = state.inner().clone();
     let user = state.require(Permission::OpenClose)?;
     state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
-    let path = state.browsers.download_video(&env_id, &video_id).await?;
+    let path = match state.browsers.download_video(&env_id, &video_id).await {
+        Ok(path) => path,
+        Err(error) => {
+            tracing::warn!(env_id = %env_id, video_id = %video_id, error = %error, "video download failed");
+            return Err(error);
+        }
+    };
     if let Ok(env) = state.db.get_environment(&env_id) {
         let _ = Audit::env(
             &state.db,

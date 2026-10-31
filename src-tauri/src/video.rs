@@ -37,6 +37,45 @@ impl VideoStore {
             .cloned()
     }
 
+    pub fn insert_external(
+        &mut self,
+        env_id: &str,
+        url: &str,
+        page_url: &str,
+    ) -> Option<SniffedVideo> {
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return None;
+        }
+        if !is_media_candidate(url, "", "") {
+            return None;
+        }
+        let kind = media_kind(url, "");
+        let id = video_id(url);
+        let entry = SniffedVideo {
+            id: id.clone(),
+            env_id: env_id.to_string(),
+            url: url.to_string(),
+            title: media_title(url, &id),
+            mime_type: String::new(),
+            kind: kind.clone(),
+            size: None,
+            page_url: page_url.to_string(),
+            referer: page_url.to_string(),
+            user_agent: String::new(),
+            downloadable: kind == "video" || kind == "audio",
+            discovered_at: now_iso(),
+        };
+        let items = self.entries.entry(env_id.to_string()).or_default();
+        if let Some(existing) = items.iter_mut().find(|item| item.url == entry.url) {
+            return Some(existing.clone());
+        }
+        if items.len() >= 300 {
+            items.remove(0);
+        }
+        items.push(entry.clone());
+        Some(entry)
+    }
+
     pub fn record_request(&mut self, env_id: &str, params: &Value) {
         let Some(request_id) = params.get("requestId").and_then(Value::as_str) else {
             return;

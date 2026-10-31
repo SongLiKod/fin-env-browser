@@ -1183,6 +1183,25 @@ impl BrowserManager {
         }
     }
 
+    pub async fn scan_videos(&self, env_id: &str) -> Result<()> {
+        let instance = self.instance(env_id)?;
+        let page_url = instance
+            .current_url
+            .lock()
+            .map(|url| url.clone())
+            .unwrap_or_default();
+        let value = instance.client.evaluate(VIDEO_SCAN_SCRIPT).await?;
+        let Some(urls) = value.as_array() else {
+            return Ok(());
+        };
+        if let Ok(mut store) = self.videos.lock() {
+            for url in urls.iter().filter_map(Value::as_str) {
+                store.insert_external(env_id, url, &page_url);
+            }
+        }
+        Ok(())
+    }
+
     fn video_sniffer_enabled(&self) -> bool {
         self.settings
             .read()
@@ -1367,14 +1386,18 @@ impl BrowserManager {
             })
             .ok_or_else(|| AppError::bad_request("B 站视频缺少 cid，无法解析播放地址"))?;
         for qn in [64, 32, 16] {
+            let cid_text = cid.to_string();
+            let qn_text = qn.to_string();
             let mut request = client
                 .get("https://api.bilibili.com/x/player/playurl")
                 .query(&[
                     ("bvid", bvid.as_str()),
-                    ("cid", &cid.to_string()),
-                    ("qn", &qn.to_string()),
+                    ("cid", cid_text.as_str()),
+                    ("qn", qn_text.as_str()),
                     ("fnval", "1"),
                     ("fourk", "1"),
+                    ("platform", "html5"),
+                    ("high_quality", "1"),
                 ])
                 .header(reqwest::header::REFERER, "https://www.bilibili.com/");
             if !cookie.is_empty() {
@@ -2028,6 +2051,25 @@ fn merge_launch_args(global: &[String], environment: &[String]) -> Vec<String> {
     }
     merged
 }
+
+const VIDEO_SCAN_SCRIPT: &str = r#"(() => {
+  const urls = new Set();
+  const media = /\.(mp4|webm|mov|m4v|m4s|flv|mkv|avi|ts|m3u8|mpd|mp3|m4a|aac|ogg|wav)(?:[?#]|$)/i;
+  const add = (value) => {
+    if (!value) return;
+    try {
+      const url = new URL(value, location.href);
+      if (url.protocol === 'http:' || url.protocol === 'https:') urls.add(url.href);
+    } catch (_) {}
+  };
+  document.querySelectorAll('video, audio, source').forEach((el) => {
+    add(el.currentSrc || el.src || el.getAttribute('src'));
+  });
+  performance.getEntriesByType('resource').forEach((entry) => {
+    if (media.test(entry.name)) add(entry.name);
+  });
+  return Array.from(urls).slice(0, 300);
+})()"#;
 
 fn cookie_domain_matches(domain: &str, host: &str) -> bool {
     if domain.is_empty() || host.is_empty() {
