@@ -47,12 +47,13 @@ import { FingerprintEditor } from '@/components/env/FingerprintEditor';
 import { AccountsPanel } from '@/components/env/AccountsPanel';
 import { SnapshotsPanel } from '@/components/env/SnapshotsPanel';
 import { NetworkingPanel } from '@/components/env/NetworkingPanel';
+import { VideoSnifferPanel } from '@/components/env/VideoSnifferPanel';
 import { ExtensionsPanel } from '@/components/env/ExtensionsPanel';
 import { DetectionPanel } from '@/components/env/DetectionPanel';
 import { DebugPanel } from '@/components/env/DebugPanel';
 import { AccessPanel } from '@/components/env/AccessPanel';
 
-const tabIds = ['overview', 'fingerprint', 'accounts', 'snapshots', 'network', 'extensions', 'access', 'detect', 'debug'] as const;
+const tabIds = ['overview', 'fingerprint', 'accounts', 'snapshots', 'network', 'videos', 'extensions', 'access', 'detect', 'debug'] as const;
 type TabId = (typeof tabIds)[number];
 
 export function EnvironmentDetailPage() {
@@ -72,6 +73,7 @@ export function EnvironmentDetailPage() {
   const [detecting, setDetecting] = React.useState(false);
   const [showClone, setShowClone] = React.useState(false);
   const [showTemplate, setShowTemplate] = React.useState(false);
+  const [videoPluginAvailable, setVideoPluginAvailable] = React.useState(false);
   const [showExport, setShowExport] = React.useState(false);
   const [showDelete, setShowDelete] = React.useState(false);
   const ipAutoChecked = React.useRef<string | null>(null);
@@ -82,6 +84,23 @@ export function EnvironmentDetailPage() {
       return { ...next, runtime: next.runtime ?? current.runtime };
     });
     useEnvStore.getState().replace(next);
+  }, []);
+
+  React.useEffect(() => {
+    let active = true;
+    void ipc
+      .pluginList()
+      .then((plugins) => {
+        if (active) {
+          setVideoPluginAvailable(
+            plugins.some((plugin) => plugin.id === 'video-sniffer' && plugin.enabled),
+          );
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
   }, []);
 
   const refresh = React.useCallback(async () => {
@@ -270,6 +289,9 @@ export function EnvironmentDetailPage() {
     ...(canManageEnv && can('edit_fingerprint_proxy')
       ? [{ value: 'network', label: '网络与 Mock' }]
       : []),
+    ...(videoPluginAvailable && canOperateEnv && can('open_close')
+      ? [{ value: 'videos', label: '视频嗅探' }]
+      : []),
     ...(canManageEnv && can('edit_env') ? [{ value: 'extensions', label: '扩展' }] : []),
     ...(canManageEnv && can('manage_env_members')
       ? [{ value: 'access', label: '访问成员' }]
@@ -447,6 +469,9 @@ export function EnvironmentDetailPage() {
         ) : null}
         {tab === 'network' && canManageEnv && can('edit_fingerprint_proxy') ? (
           <NetworkingPanel env={env} proxies={proxies} onUpdated={applyEnv} />
+        ) : null}
+        {tab === 'videos' && videoPluginAvailable && canOperateEnv && can('open_close') ? (
+          <VideoSnifferPanel env={env} />
         ) : null}
         {tab === 'extensions' && canManageEnv && can('edit_env') ? (
           <ExtensionsPanel env={env} />

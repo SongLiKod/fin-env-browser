@@ -250,6 +250,7 @@ impl AppState {
         let mut updated = user.clone();
         updated.display_name = user.display_name.clone();
         self.db.update_user(&updated, Some(&new_hash))?;
+        let _ = self.db.set_meta("remembered_login", "");
         Audit::global(
             &self.db,
             &user.username,

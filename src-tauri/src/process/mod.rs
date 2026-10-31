@@ -9,8 +9,10 @@ use std::{
 };
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tokio::{
+    io::AsyncWriteExt,
     process::Command,
     sync::{mpsc, RwLock as AsyncRwLock},
     time::sleep,
@@ -38,6 +40,11 @@ mod broadcast;
 use broadcast::BroadcastRuntime;
 
 #[derive(Debug, Clone)]
+struct ResolvedVideo {
+    url: String,
+    title: String,
+}
+
 struct ExitEvent {
     env_id: String,
     pid: u32,
@@ -68,6 +75,7 @@ pub struct BrowserInstance {
     captcha_last: Mutex<Option<Instant>>,
     memory_alert_last: Mutex<Option<Instant>>,
     current_url: Mutex<String>,
+    video_override: AtomicBool,
 }
 
 pub struct BrowserManager {
@@ -83,6 +91,7 @@ pub struct BrowserManager {
     restarts: Mutex<HashMap<String, Vec<Instant>>>,
     launch_lock: tokio::sync::Mutex<()>,
     broadcast: AsyncRwLock<Option<Arc<BroadcastRuntime>>>,
+    videos: Mutex<crate::video::VideoStore>,
 }
 
 impl BrowserManager {
@@ -106,6 +115,7 @@ impl BrowserManager {
             restarts: Mutex::new(HashMap::new()),
             launch_lock: tokio::sync::Mutex::new(()),
             broadcast: AsyncRwLock::new(None),
+            videos: Mutex::new(crate::video::VideoStore::default()),
         }
     }
 
@@ -423,11 +433,18 @@ impl BrowserManager {
                 captcha_last: Mutex::new(None),
                 memory_alert_last: Mutex::new(None),
                 current_url: Mutex::new(start_url.clone()),
+                video_override: AtomicBool::new(
+                    self.db
+                        .env_plugin_enabled(&env.id, crate::plugins::VIDEO_SNIFFER)
+                        .unwrap_or(None)
+                        .unwrap_or(true),
+                ),
             });
             // Start handling CDP events before enabling Fetch interception,
             // otherwise a paused navigation would wait for a handler that is
             // only installed later.
             self.start_event_handler(instance.clone());
+            self.start_video_tab_handler(instance.clone());
             let mut warnings = Vec::new();
             if let Err(e) = client
                 .call(
@@ -560,6 +577,7 @@ impl BrowserManager {
         if let Ok(mut map) = self.instances.write() {
             map.remove(env_id);
         }
+        self.clear_videos(env_id);
         self.broadcast_on_env_closed(env_id, actor).await;
         let _ = self.db.remove_browser_session(env_id);
         let env = self.db.get_environment(env_id).ok();
@@ -753,6 +771,7 @@ impl BrowserManager {
         if let Ok(mut map) = self.instances.write() {
             map.remove(&event.env_id);
         }
+        self.clear_videos(&event.env_id);
         self.broadcast_on_env_closed(&event.env_id, "system").await;
         let _ = self.db.remove_browser_session(&event.env_id);
         let env = match self.db.get_environment(&event.env_id) {
@@ -909,6 +928,12 @@ impl BrowserManager {
                 captcha_last: Mutex::new(None),
                 memory_alert_last: Mutex::new(None),
                 current_url: Mutex::new(page_url),
+                video_override: AtomicBool::new(
+                    self.db
+                        .env_plugin_enabled(&env.id, crate::plugins::VIDEO_SNIFFER)
+                        .unwrap_or(None)
+                        .unwrap_or(true),
+                ),
             });
             if let Ok(mut map) = self.instances.write() {
                 map.insert(env.id.clone(), instance.clone());
@@ -921,7 +946,8 @@ impl BrowserManager {
                 effective_border_color(&env),
                 env.border_width,
             );
-            self.start_event_handler(instance);
+            self.start_event_handler(instance.clone());
+            self.start_video_tab_handler(instance.clone());
             let _ = Audit::env(
                 &self.db,
                 "system",
@@ -1157,6 +1183,497 @@ impl BrowserManager {
             .await?;
         self.touch(&instance);
         Ok(())
+    }
+
+    fn video_sniffer_enabled(&self, instance: &Arc<BrowserInstance>) -> bool {
+        self.settings
+            .read()
+            .map(|settings| crate::plugins::is_enabled(&settings, crate::plugins::VIDEO_SNIFFER))
+            .unwrap_or(false)
+            && instance.video_override.load(Ordering::Relaxed)
+    }
+
+    pub fn set_video_override(&self, env_id: &str, enabled: bool) {
+        if let Some(instance) = self
+            .instances
+            .read()
+            .ok()
+            .and_then(|instances| instances.get(env_id).cloned())
+        {
+            instance.video_override.store(enabled, Ordering::Relaxed);
+        }
+    }
+
+    fn record_video_request(&self, env_id: &str, params: &Value) {
+        if let Ok(mut store) = self.videos.lock() {
+            store.record_request(env_id, params);
+        }
+    }
+
+    fn record_video_response(&self, instance: &Arc<BrowserInstance>, params: &Value) {
+        let page_url = instance
+            .current_url
+            .lock()
+            .map(|url| url.clone())
+            .unwrap_or_default();
+        self.record_video_response_for_page(&instance.env_id, &page_url, params);
+    }
+
+    fn record_video_response_for_page(&self, env_id: &str, page_url: &str, params: &Value) {
+        let detected = self
+            .videos
+            .lock()
+            .ok()
+            .and_then(|mut store| store.record_response(env_id, page_url, params));
+        if let Some(video) = detected {
+            self.emit("video://detected", video);
+        }
+    }
+
+    fn record_video_finished(&self, env_id: &str, params: &Value) {
+        if let Ok(mut store) = self.videos.lock() {
+            store.record_finished(env_id, params);
+        }
+    }
+
+    pub async fn download_video(&self, env_id: &str, video_id: &str) -> Result<String> {
+        let video = self
+            .videos
+            .lock()
+            .ok()
+            .and_then(|store| store.get(env_id, video_id))
+            .ok_or_else(|| AppError::not_found("Video not found; refresh and try again"))?;
+        let env = self.db.get_environment(env_id)?;
+        let proxy = env
+            .proxy_id
+            .as_ref()
+            .map(|id| self.db.get_proxy(id))
+            .transpose()?;
+        let mut builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(180))
+            .user_agent(if video.user_agent.is_empty() {
+                env.fingerprint.user_agent.clone()
+            } else {
+                video.user_agent.clone()
+            });
+        if let Some(proxy) = &proxy {
+            let password = if proxy.password_enc.is_empty() {
+                String::new()
+            } else {
+                self.crypto.decrypt(&proxy.password_enc)?
+            };
+            let mut proxy_url = url::Url::parse(&format!(
+                "{}://{}:{}",
+                proxy.protocol, proxy.host, proxy.port
+            ))
+            .map_err(|error| AppError::bad_request(format!("Invalid proxy address: {error}")))?;
+            if !proxy.username.is_empty() {
+                let _ = proxy_url.set_username(&proxy.username);
+                let _ = proxy_url.set_password(Some(&password));
+            }
+            builder = builder.proxy(reqwest::Proxy::all(proxy_url.as_str()).map_err(|error| {
+                AppError::bad_request(format!("Invalid proxy address: {error}"))
+            })?);
+        }
+        let client = builder.build()?;
+        let resolved = if video.downloadable {
+            None
+        } else {
+            self.resolve_bilibili_video(&client, env_id, &video).await?
+        };
+        let (download_url, referer, title) = match resolved {
+            Some(resolved) => (
+                resolved.url,
+                "https://www.bilibili.com/".into(),
+                Some(resolved.title),
+            ),
+            None if video.downloadable => (video.url.clone(), video.referer.clone(), None),
+            None => {
+                return Err(AppError::bad_request(
+                    "? HLS/DASH ????????????????? B ???? MP4",
+                ))
+            }
+        };
+        let mut request = client.get(&download_url);
+        if !referer.is_empty() {
+            request = request.header(reqwest::header::REFERER, referer);
+        }
+        let cookie = self.video_cookie_header(env_id, &download_url).await;
+        if !cookie.is_empty() {
+            request = request.header(reqwest::header::COOKIE, cookie);
+        }
+        let response = request.send().await?;
+        if !response.status().is_success() {
+            return Err(AppError::bad_request(format!(
+                "Download failed, media server returned HTTP {}",
+                response.status()
+            )));
+        }
+        let dir = paths::downloads_dir(&self.data_dir);
+        paths::ensure_dir(&dir)?;
+        let name = title
+            .as_deref()
+            .map(|title| title_filename(title, "mp4"))
+            .unwrap_or_else(|| video_filename(&download_url, &video.mime_type));
+        let path = unique_download_path(&dir, &name);
+        let mut file = tokio::fs::File::create(&path).await?;
+        let mut stream = response.bytes_stream();
+        let mut total: u64 = 0;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            total += chunk.len() as u64;
+            if total > 4 * 1024 * 1024 * 1024 {
+                let _ = tokio::fs::remove_file(&path).await;
+                return Err(AppError::bad_request(
+                    "Media exceeds 4GB, download cancelled",
+                ));
+            }
+            file.write_all(&chunk).await?;
+        }
+        file.flush().await?;
+        drop(file);
+        if is_encrypted_media(&path) {
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(AppError::bad_request(
+                "This MP4 is CENC/DRM encrypted and cannot be played directly; use Record current video",
+            ));
+        }
+        Ok(path.to_string_lossy().to_string())
+    }
+
+    pub fn video_list(&self, env_id: &str) -> Vec<crate::models::SniffedVideo> {
+        let current_url = self
+            .get_runtime(env_id)
+            .map(|runtime| runtime.current_url)
+            .unwrap_or_default();
+        let mut items = self
+            .videos
+            .lock()
+            .map(|store| store.list(env_id))
+            .unwrap_or_default();
+        if !current_url.is_empty() {
+            items
+                .retain(|item| item.page_url.is_empty() || same_page(&item.page_url, &current_url));
+        }
+        items
+    }
+
+    pub fn clear_videos(&self, env_id: &str) {
+        if let Ok(mut store) = self.videos.lock() {
+            store.clear(env_id);
+        }
+    }
+
+    pub async fn scan_videos(&self, env_id: &str) -> Result<()> {
+        let instance = self.instance(env_id)?;
+        let ws = browser_ws_url(instance.debug_port).await?;
+        let client = CdpClient::connect(&ws).await?;
+        let value = client.call("Target.getTargets", json!({})).await?;
+        let targets = value
+            .get("targetInfos")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut best: Option<(u8, String)> = None;
+        let mut found = Vec::new();
+        for info in targets {
+            if info.get("type").and_then(Value::as_str) != Some("page") {
+                continue;
+            }
+            let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                continue;
+            };
+            let Ok(session) = attach_video_session(&client, target_id).await else {
+                continue;
+            };
+            let Ok(page) = client
+                .evaluate_on(VIDEO_TAB_SCAN_SCRIPT, Some(&session))
+                .await
+            else {
+                continue;
+            };
+            let page_url = page
+                .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if page_url.is_empty() {
+                continue;
+            }
+            let visibility = page
+                .get("visibility")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let focus = page.get("focus").and_then(Value::as_bool).unwrap_or(false);
+            let score = u8::from(visibility == "visible") + u8::from(focus);
+            if score > 0
+                && best
+                    .as_ref()
+                    .map(|(value, _)| score > *value)
+                    .unwrap_or(true)
+            {
+                best = Some((score, page_url.clone()));
+            }
+            if let Some(urls) = page.get("media").and_then(Value::as_array) {
+                for url in urls.iter().filter_map(Value::as_str) {
+                    found.push((url.to_string(), page_url.clone()));
+                }
+            }
+        }
+        if let Some((_, active)) = &best {
+            update_video_tab_url(self, &instance, active);
+        }
+        if let Ok(mut store) = self.videos.lock() {
+            for (url, page_url) in found {
+                store.insert_external(env_id, &url, &page_url);
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn start_video_recording(&self, env_id: &str) -> Result<String> {
+        let instance = self.instance(env_id)?;
+        let dir = paths::downloads_dir(&self.data_dir);
+        paths::ensure_dir(&dir)?;
+        let ws = browser_ws_url(instance.debug_port).await?;
+        let client = CdpClient::connect(&ws).await?;
+        let value = client.call("Target.getTargets", json!({})).await?;
+        let targets = value
+            .get("targetInfos")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for info in targets {
+            if info.get("type").and_then(Value::as_str) != Some("page") {
+                continue;
+            }
+            let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                continue;
+            };
+            let Ok(session) = attach_video_session(&client, target_id).await else {
+                continue;
+            };
+            let probe = tokio::time::timeout(
+                Duration::from_secs(2),
+                client.evaluate_on(VIDEO_RECORD_PROBE_SCRIPT, Some(&session)),
+            )
+            .await;
+            let Ok(Ok(probe)) = probe else {
+                continue;
+            };
+            if probe.get("hasVideo").and_then(Value::as_bool) != Some(true) {
+                continue;
+            }
+            let _ = client
+                .call_on(
+                    "Page.setDownloadBehavior",
+                    json!({
+                        "behavior": "allow",
+                        "downloadPath": dir.to_string_lossy()
+                    }),
+                    Some(&session),
+                )
+                .await;
+            let started = tokio::time::timeout(
+                Duration::from_secs(10),
+                client.evaluate_on(RECORD_START_SCRIPT, Some(&session)),
+            )
+            .await;
+            let Ok(Ok(value)) = started else {
+                continue;
+            };
+            if value.get("ok").and_then(Value::as_bool) == Some(true) {
+                self.touch(&instance);
+                return Ok(value
+                    .get("mime")
+                    .and_then(Value::as_str)
+                    .unwrap_or("video/mp4")
+                    .to_string());
+            }
+        }
+        Err(AppError::bad_request(
+            "No recordable video found on the current page; play the video and try again",
+        ))
+    }
+
+    pub async fn stop_video_recording(&self, env_id: &str) -> Result<()> {
+        let instance = self.instance(env_id)?;
+        let ws = browser_ws_url(instance.debug_port).await?;
+        let client = CdpClient::connect(&ws).await?;
+        let value = client.call("Target.getTargets", json!({})).await?;
+        let targets = value
+            .get("targetInfos")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut stopped = false;
+        for info in targets {
+            if info.get("type").and_then(Value::as_str) != Some("page") {
+                continue;
+            }
+            let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                continue;
+            };
+            let Ok(session) = attach_video_session(&client, target_id).await else {
+                continue;
+            };
+            let Ok(result) = client.evaluate_on(RECORD_STOP_SCRIPT, Some(&session)).await else {
+                continue;
+            };
+            if result.get("ok").and_then(Value::as_bool) == Some(true) {
+                stopped = true;
+            }
+        }
+        if !stopped {
+            return Err(AppError::bad_request("当前没有正在进行的录制"));
+        }
+        sleep(Duration::from_millis(1500)).await;
+        self.touch(&instance);
+        Ok(())
+    }
+
+    async fn resolve_bilibili_video(
+        &self,
+        client: &reqwest::Client,
+        env_id: &str,
+        video: &crate::models::SniffedVideo,
+    ) -> Result<Option<ResolvedVideo>> {
+        let page_url = if video.page_url.is_empty() {
+            &video.url
+        } else {
+            &video.page_url
+        };
+        let Some(bvid) = extract_bvid(page_url) else {
+            return Ok(None);
+        };
+        let cookie = self
+            .video_cookie_header(env_id, "https://api.bilibili.com")
+            .await;
+        let mut view_request = client
+            .get("https://api.bilibili.com/x/web-interface/view")
+            .query(&[("bvid", bvid.as_str())])
+            .header(reqwest::header::REFERER, "https://www.bilibili.com/");
+        if !cookie.is_empty() {
+            view_request = view_request.header(reqwest::header::COOKIE, &cookie);
+        }
+        let view: Value = view_request.send().await?.json().await?;
+        if view.get("code").and_then(Value::as_i64) != Some(0) {
+            return Err(AppError::bad_request(format!(
+                "B 站视频信息解析失败: {}",
+                view.get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("接口返回错误")
+            )));
+        }
+        let data = view.get("data").cloned().unwrap_or(Value::Null);
+        let title = data
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("bilibili-video")
+            .to_string();
+        let cid = data
+            .get("cid")
+            .and_then(Value::as_u64)
+            .or_else(|| {
+                data.get("pages")
+                    .and_then(Value::as_array)
+                    .and_then(|pages| pages.first())
+                    .and_then(|page| page.get("cid"))
+                    .and_then(Value::as_u64)
+            })
+            .ok_or_else(|| AppError::bad_request("B 站视频缺少 cid，无法解析播放地址"))?;
+        for qn in [64, 32, 16] {
+            let cid_text = cid.to_string();
+            let qn_text = qn.to_string();
+            let mut request = client
+                .get("https://api.bilibili.com/x/player/playurl")
+                .query(&[
+                    ("bvid", bvid.as_str()),
+                    ("cid", cid_text.as_str()),
+                    ("qn", qn_text.as_str()),
+                    ("fnval", "1"),
+                    ("fourk", "1"),
+                    ("platform", "html5"),
+                    ("high_quality", "1"),
+                ])
+                .header(reqwest::header::REFERER, "https://www.bilibili.com/");
+            if !cookie.is_empty() {
+                request = request.header(reqwest::header::COOKIE, &cookie);
+            }
+            let payload: Value = request.send().await?.json().await?;
+            if payload.get("code").and_then(Value::as_i64) != Some(0) {
+                continue;
+            }
+            if let Some(url) = payload.pointer("/data/durl/0/url").and_then(Value::as_str) {
+                return Ok(Some(ResolvedVideo {
+                    url: url.to_string(),
+                    title,
+                }));
+            }
+        }
+        if let Some(url) = self.bilibili_mobile_mp4(client, env_id, &bvid).await? {
+            return Ok(Some(ResolvedVideo { url, title }));
+        }
+        Err(AppError::bad_request(
+            "B 站没有返回可直接合并的 MP4，可能需要登录、会员权限或该视频禁止下载",
+        ))
+    }
+
+    async fn bilibili_mobile_mp4(
+        &self,
+        client: &reqwest::Client,
+        env_id: &str,
+        bvid: &str,
+    ) -> Result<Option<String>> {
+        let cookie = self
+            .video_cookie_header(env_id, "https://m.bilibili.com")
+            .await;
+        let mut request = client
+            .get(format!("https://m.bilibili.com/video/{bvid}"))
+            .header(
+                reqwest::header::USER_AGENT,
+                "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+            )
+            .header(reqwest::header::REFERER, "https://www.bilibili.com/");
+        if !cookie.is_empty() {
+            request = request.header(reqwest::header::COOKIE, cookie);
+        }
+        let html = request.send().await?.text().await?.replace("\\/", "/");
+        let Some(end) = html.find(".mp4") else {
+            return Ok(None);
+        };
+        let start = html[..end]
+            .rfind(['"', '\''])
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let url = html[start..end + 4].trim();
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Ok(None);
+        }
+        Ok(Some(url.to_string()))
+    }
+
+    async fn video_cookie_header(&self, env_id: &str, url: &str) -> String {
+        let Ok(instance) = self.instance(env_id) else {
+            return String::new();
+        };
+        let Ok(value) = instance
+            .client
+            .call("Network.getAllCookies", json!({}))
+            .await
+        else {
+            return String::new();
+        };
+        let host = url::Url::parse(url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(ToString::to_string))
+            .unwrap_or_default();
+        cdp::cookies_from_cdp(&value)
+            .into_iter()
+            .filter(|cookie| cookie_domain_matches(&cookie.domain, &host))
+            .map(|cookie| format!("{}={}", cookie.name, cookie.value))
+            .collect::<Vec<_>>()
+            .join("; ")
     }
 
     pub async fn set_mocks(&self, env_id: &str, rules: Vec<MockRule>) -> Result<()> {
@@ -1444,6 +1961,161 @@ impl BrowserManager {
     // CDP event handling
     // -----------------------------------------------------------------------
 
+    fn start_video_tab_handler(self: &Arc<Self>, instance: Arc<BrowserInstance>) {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            if let Err(error) = manager.run_video_tab_handler(instance).await {
+                tracing::debug!(error = %error, "video tab handler stopped");
+            }
+        });
+    }
+
+    async fn run_video_tab_handler(self: &Arc<Self>, instance: Arc<BrowserInstance>) -> Result<()> {
+        let ws = browser_ws_url(instance.debug_port).await?;
+        let client = Arc::new(CdpClient::connect(&ws).await?);
+        let mut events = client.subscribe();
+        let mut target_urls: HashMap<String, String> = HashMap::new();
+        let mut session_targets: HashMap<String, String> = HashMap::new();
+        let mut active_target = target_id_from_ws(&instance.page_ws);
+        let _ = client
+            .call("Target.setDiscoverTargets", json!({ "discover": true }))
+            .await;
+        let targets = client
+            .call("Target.getTargets", json!({}))
+            .await
+            .ok()
+            .and_then(|value| value.get("targetInfos").and_then(Value::as_array).cloned())
+            .unwrap_or_default();
+        if active_target.is_none() {
+            active_target = targets.iter().find_map(|info| {
+                (info.get("type").and_then(Value::as_str) == Some("page"))
+                    .then(|| {
+                        info.get("targetId")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string)
+                    })
+                    .flatten()
+            });
+        }
+        for info in &targets {
+            if info.get("type").and_then(Value::as_str) != Some("page") {
+                continue;
+            }
+            let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                continue;
+            };
+            let url = info.get("url").and_then(Value::as_str).unwrap_or_default();
+            target_urls.insert(target_id.to_string(), url.to_string());
+            if let Ok(session) = attach_video_session(&client, target_id).await {
+                session_targets.insert(session, target_id.to_string());
+            }
+        }
+        loop {
+            let event = match events.recv().await {
+                Ok(event) => event,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            match event.method.as_str() {
+                "Target.targetCreated" => {
+                    let Some(info) = event.params.get("targetInfo") else {
+                        continue;
+                    };
+                    if info.get("type").and_then(Value::as_str) != Some("page") {
+                        continue;
+                    }
+                    let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    if target_urls.contains_key(target_id) {
+                        continue;
+                    }
+                    let url = info.get("url").and_then(Value::as_str).unwrap_or_default();
+                    target_urls.insert(target_id.to_string(), url.to_string());
+                    if let Ok(session) = attach_video_session(&client, target_id).await {
+                        session_targets.insert(session, target_id.to_string());
+                    }
+                }
+                "Target.targetInfoChanged" => {
+                    let Some(info) = event.params.get("targetInfo") else {
+                        continue;
+                    };
+                    if info.get("type").and_then(Value::as_str) != Some("page") {
+                        continue;
+                    }
+                    let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let url = info.get("url").and_then(Value::as_str).unwrap_or_default();
+                    target_urls.insert(target_id.to_string(), url.to_string());
+                    if active_target.as_deref() == Some(target_id) {
+                        update_video_tab_url(self, &instance, url);
+                    }
+                }
+                "Target.targetActivated" => {
+                    let Some(info) = event.params.get("targetInfo") else {
+                        continue;
+                    };
+                    if info.get("type").and_then(Value::as_str) != Some("page") {
+                        continue;
+                    }
+                    let Some(target_id) = info.get("targetId").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    active_target = Some(target_id.to_string());
+                    let url = info.get("url").and_then(Value::as_str).unwrap_or_default();
+                    target_urls.insert(target_id.to_string(), url.to_string());
+                    update_video_tab_url(self, &instance, url);
+                }
+                "Target.targetDestroyed" => {
+                    let Some(target_id) = event.params.get("targetId").and_then(Value::as_str)
+                    else {
+                        continue;
+                    };
+                    target_urls.remove(target_id);
+                    session_targets.retain(|_, id| id != target_id);
+                }
+                "Network.requestWillBeSent" => {
+                    if !self.video_sniffer_enabled(&instance) {
+                        continue;
+                    }
+                    if let Some(session) = event.session_id.as_deref() {
+                        if session_targets.contains_key(session) {
+                            self.record_video_request(&instance.env_id, &event.params);
+                        }
+                    }
+                }
+                "Network.responseReceived" => {
+                    if !self.video_sniffer_enabled(&instance) {
+                        continue;
+                    }
+                    if let Some(session) = event.session_id.as_deref() {
+                        if let Some(target_id) = session_targets.get(session) {
+                            let page_url = target_urls.get(target_id).cloned().unwrap_or_default();
+                            self.record_video_response_for_page(
+                                &instance.env_id,
+                                &page_url,
+                                &event.params,
+                            );
+                        }
+                    }
+                }
+                "Network.loadingFinished" => {
+                    if !self.video_sniffer_enabled(&instance) {
+                        continue;
+                    }
+                    if let Some(session) = event.session_id.as_deref() {
+                        if session_targets.contains_key(session) {
+                            self.record_video_finished(&instance.env_id, &event.params);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     fn start_event_handler(self: &Arc<Self>, instance: Arc<BrowserInstance>) {
         let mut rx = instance.client.subscribe();
         let manager = self.clone();
@@ -1521,15 +2193,24 @@ impl BrowserManager {
                             if let Ok(mut har) = instance.har.lock() {
                                 har.on_request(&event.params);
                             }
+                            if manager.video_sniffer_enabled(&instance) {
+                                manager.record_video_request(&instance.env_id, &event.params);
+                            }
                         }
                         "Network.responseReceived" => {
                             if let Ok(mut har) = instance.har.lock() {
                                 har.on_response(&event.params);
                             }
+                            if manager.video_sniffer_enabled(&instance) {
+                                manager.record_video_response(&instance, &event.params);
+                            }
                         }
                         "Network.loadingFinished" => {
                             if let Ok(mut har) = instance.har.lock() {
                                 har.on_finished(&event.params);
+                            }
+                            if manager.video_sniffer_enabled(&instance) {
+                                manager.record_video_finished(&instance.env_id, &event.params);
                             }
                         }
                         "Page.frameNavigated" => {
@@ -1545,6 +2226,14 @@ impl BrowserManager {
                                     .and_then(|f| f.get("url"))
                                     .and_then(|v| v.as_str())
                                 {
+                                    let previous = instance
+                                        .current_url
+                                        .lock()
+                                        .map(|current| current.clone())
+                                        .unwrap_or_default();
+                                    if !previous.is_empty() && previous != url {
+                                        manager.clear_videos(&instance.env_id);
+                                    }
                                     if let Ok(mut current) = instance.current_url.lock() {
                                         *current = url.to_string();
                                     }
@@ -1601,6 +2290,14 @@ impl BrowserManager {
         }
         let parsed: Value =
             serde_json::from_str(payload).unwrap_or_else(|_| json!({ "hint": payload }));
+        if parsed
+            .get("visible")
+            .and_then(|value| value.as_str())
+            .map(|value| value != "visible")
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
         let url = parsed
             .get("url")
             .and_then(|v| v.as_str())
@@ -1758,6 +2455,286 @@ fn merge_launch_args(global: &[String], environment: &[String]) -> Vec<String> {
         merged.push(arg.clone());
     }
     merged
+}
+
+const VIDEO_RECORD_PROBE_SCRIPT: &str = r#"(() => {
+  const video = document.querySelector('video');
+  return { hasVideo: !!video, readyState: video ? video.readyState : 0 };
+})()"#;
+
+const RECORD_START_SCRIPT: &str = r#"(async () => {
+  if (window.__finEnvRecorder) return { ok: false, error: '当前页面已经在录制' };
+  const video = document.querySelector('video');
+  if (!video || !video.captureStream) return { ok: false, error: '当前页面没有支持录制的视频元素' };
+  const mime = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')
+    ? 'video/mp4;codecs=avc1'
+    : (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus' : '');
+  if (!mime) return { ok: false, error: '当前 Chromium 不支持 MP4/WebM 录制' };
+  let stream = null;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      await Promise.race([
+        video.play(),
+        new Promise((resolve) => setTimeout(resolve, 1200))
+      ]);
+    } catch (error) {}
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    try { stream = video.captureStream(); } catch (error) { stream = null; }
+    if (stream && stream.getTracks().length > 0) break;
+  }
+  if (!stream || stream.getTracks().length === 0) {
+    return { ok: false, error: '视频尚未开始播放，无法获取可录制轨道' };
+  }
+  const chunks = [];
+  const recorder = new MediaRecorder(stream, {
+    mimeType: mime,
+    videoBitsPerSecond: 2500000,
+    audioBitsPerSecond: 128000
+  });
+  recorder.ondataavailable = (event) => { if (event.data && event.data.size) chunks.push(event.data); };
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: recorder.mimeType });
+    const anchor = document.createElement('a');
+    anchor.href = URL.createObjectURL(blob);
+    anchor.download = 'FinEnv-' + Date.now() + (mime.includes('mp4') ? '.mp4' : '.webm');
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(anchor.href), 10000);
+    window.__finEnvRecorder = null;
+  };
+  recorder.start(1000);
+  window.__finEnvRecorder = { recorder, stream };
+  return { ok: true, mime };
+})()"#;
+
+const RECORD_STOP_SCRIPT: &str = r#"(() => {
+  const state = window.__finEnvRecorder;
+  if (!state) return { ok: false, error: '当前没有正在进行的录制' };
+  try {
+    state.recorder.stop();
+    state.stream.getTracks().forEach((track) => track.stop());
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  }
+})()"#;
+
+const VIDEO_TAB_SCAN_SCRIPT: &str = r#"(() => {
+  const urls = new Set();
+  const media = /\.(mp4|webm|mov|m4v|m4s|flv|mkv|avi|ts|m3u8|mpd|mp3|m4a|aac|ogg|wav)(?:[?#]|$)/i;
+  const add = (value) => {
+    if (!value) return;
+    try {
+      const url = new URL(value, location.href);
+      if (url.protocol === 'http:' || url.protocol === 'https:') urls.add(url.href);
+    } catch (_) {}
+  };
+  document.querySelectorAll('video, audio, source').forEach((el) => {
+    add(el.currentSrc || el.src || el.getAttribute('src'));
+  });
+  performance.getEntriesByType('resource').forEach((entry) => {
+    if (media.test(entry.name)) add(entry.name);
+  });
+  return {
+    url: location.href,
+    visibility: document.visibilityState,
+    focus: document.hasFocus(),
+    media: Array.from(urls).slice(0, 300)
+  };
+})()"#;
+
+async fn browser_ws_url(debug_port: u16) -> Result<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(AppError::from)?;
+    let value: Value = client
+        .get(format!("http://127.0.0.1:{debug_port}/json/version"))
+        .send()
+        .await?
+        .json()
+        .await?;
+    value
+        .get("webSocketDebuggerUrl")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| AppError::internal("浏览器未返回 CDP WebSocket 地址"))
+}
+
+async fn attach_video_session(client: &CdpClient, target_id: &str) -> Result<String> {
+    let attached = client
+        .call(
+            "Target.attachToTarget",
+            json!({ "targetId": target_id, "flatten": true }),
+        )
+        .await?;
+    let session = attached
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppError::internal("无法附加视频标签页"))?
+        .to_string();
+    let _ = client
+        .call_on("Network.enable", json!({}), Some(&session))
+        .await;
+    let _ = client
+        .call_on("Page.enable", json!({}), Some(&session))
+        .await;
+    Ok(session)
+}
+
+fn target_id_from_ws(ws: &str) -> Option<String> {
+    ws.rsplit('/')
+        .next()
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn update_video_tab_url(manager: &BrowserManager, instance: &Arc<BrowserInstance>, url: &str) {
+    if url.is_empty() {
+        return;
+    }
+    if let Ok(mut current) = instance.current_url.lock() {
+        *current = url.to_string();
+    }
+    let runtime = instance.runtime.write().ok().map(|mut runtime| {
+        runtime.current_url = url.to_string();
+        runtime.clone()
+    });
+    if let Some(runtime) = runtime {
+        manager.emit("browser://runtime", runtime);
+    }
+}
+
+fn same_page(left: &str, right: &str) -> bool {
+    let normalize = |value: &str| {
+        url::Url::parse(value)
+            .ok()
+            .map(|url| {
+                format!(
+                    "{}{}",
+                    url.origin().ascii_serialization(),
+                    url.path().trim_end_matches('/')
+                )
+            })
+            .unwrap_or_else(|| value.trim_end_matches('/').to_string())
+    };
+    normalize(left) == normalize(right)
+}
+
+fn cookie_domain_matches(domain: &str, host: &str) -> bool {
+    if domain.is_empty() || host.is_empty() {
+        return true;
+    }
+    let domain = domain.trim_start_matches('.');
+    host == domain || host.ends_with(&format!(".{domain}"))
+}
+
+fn extract_bvid(url: &str) -> Option<String> {
+    let start = url.find("BV")?;
+    let candidate = url.get(start..start + 12)?;
+    if candidate.chars().all(|value| value.is_ascii_alphanumeric()) {
+        Some(candidate.to_string())
+    } else {
+        None
+    }
+}
+
+fn title_filename(title: &str, extension: &str) -> String {
+    let mut name = title
+        .chars()
+        .map(|value| {
+            if value.is_ascii_alphanumeric()
+                || matches!(value, '.' | '-' | '_')
+                || !value.is_ascii()
+            {
+                value
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches(|value| matches!(value, '.' | ' ' | '_'))
+        .to_string();
+    if name.is_empty() {
+        name = "video".into();
+    }
+    name.chars().take(100).collect::<String>() + "." + extension
+}
+
+fn video_filename(url: &str, mime_type: &str) -> String {
+    let parsed = url::Url::parse(url).ok();
+    let raw = parsed
+        .as_ref()
+        .and_then(|value| value.path_segments())
+        .and_then(|mut segments| segments.next_back())
+        .unwrap_or_default();
+    let mut name = raw
+        .chars()
+        .map(|value| {
+            if value.is_ascii_alphanumeric() || matches!(value, '.' | '-' | '_') {
+                value
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('.')
+        .to_string();
+    if name.is_empty() {
+        name = "video".into();
+    }
+    if !name.contains('.') {
+        let extension = if mime_type.starts_with("audio/") {
+            "mp3"
+        } else {
+            "mp4"
+        };
+        name.push('.');
+        name.push_str(extension);
+    }
+    name.chars().take(120).collect()
+}
+
+fn is_encrypted_media(path: &Path) -> bool {
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut header = vec![0u8; 128 * 1024];
+    use std::io::Read;
+    let Ok(read) = file.read(&mut header) else {
+        return false;
+    };
+    header[..read]
+        .windows(4)
+        .any(|chunk| chunk == b"encv" || chunk == b"enca")
+}
+
+fn unique_download_path(dir: &Path, name: &str) -> PathBuf {
+    let candidate = dir.join(name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let path = Path::new(name);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("video");
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("mp4");
+    for index in 1..1000 {
+        let candidate = dir.join(format!("{stem}-{index}.{extension}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!(
+        "{stem}-{}.{}",
+        now_iso().replace(':', "-"),
+        extension
+    ))
 }
 
 fn network_emulation_params(profile: &str) -> Value {

@@ -8,6 +8,7 @@ import {
   Camera,
   Clock3,
   ExternalLink,
+  Trash2,
 } from 'lucide-react';
 import type { CaptchaEvent } from '@/ipc/types';
 import { ipc, onCaptcha } from '@/ipc/client';
@@ -18,6 +19,7 @@ import { formatDateShort } from '@/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, EmptyState, Spinner, StatCard } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Select } from '@/components/ui/input';
 
 export function CaptchaPage() {
@@ -31,6 +33,8 @@ export function CaptchaPage() {
   const [captureEnv, setCaptureEnv] = React.useState('');
   const [capturing, setCapturing] = React.useState(false);
   const [updating, setUpdating] = React.useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = React.useState(false);
+  const [clearOpen, setClearOpen] = React.useState(false);
   const [previews, setPreviews] = React.useState<Record<string, string>>({});
 
   const load = React.useCallback(async () => {
@@ -103,6 +107,45 @@ export function CaptchaPage() {
     }
   };
 
+  const handleAll = async () => {
+    const ids = events.filter((event) => !event.handled).map((event) => event.id);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    try {
+      await ipc.captchaHandleAll(ids, true);
+      setEvents((current) => current.map((event) => ({ ...event, handled: true })));
+      toast.success('已全部标记处理', `${ids.length} 条验证码事件`);
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const clearHandled = async () => {
+    const ids = events.filter((event) => event.handled).map((event) => event.id);
+    if (ids.length === 0) {
+      setClearOpen(false);
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      await ipc.captchaDelete(ids);
+      setEvents((current) => current.filter((event) => !event.handled));
+      setPreviews((current) => {
+        const next = { ...current };
+        ids.forEach((id) => delete next[id]);
+        return next;
+      });
+      toast.success('已清空处理记录', `${ids.length} 条记录及截图已从硬盘删除`);
+      setClearOpen(false);
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const capture = async () => {
     const target = captureEnv || running[0]?.id;
     if (!target) {
@@ -139,6 +182,22 @@ export function CaptchaPage() {
           </Select>
           <Button variant="secondary" loading={capturing} disabled={!canOpen || running.length === 0} onClick={() => void capture()}>
             <Camera className="h-4 w-4" /> 采集当前画面
+          </Button>
+          <Button
+            variant="secondary"
+            loading={bulkBusy}
+            disabled={!canOpen || events.every((event) => event.handled)}
+            onClick={() => void handleAll()}
+          >
+            <CheckCheck className="h-4 w-4" /> 全部标记处理
+          </Button>
+          <Button
+            variant="ghost"
+            loading={bulkBusy}
+            disabled={!canOpen || !events.some((event) => event.handled)}
+            onClick={() => setClearOpen(true)}
+          >
+            <Trash2 className="h-4 w-4" /> 清空已处理
           </Button>
           <Button variant="secondary" onClick={() => void load()}>
             <RefreshCw className="h-4 w-4" /> 刷新
@@ -238,6 +297,16 @@ export function CaptchaPage() {
           </div>
         )}
       </Card>
+
+      <ConfirmDialog
+        open={clearOpen}
+        onOpenChange={setClearOpen}
+        title="清空已处理验证码"
+        description="将删除所有已标记处理的记录及对应截图文件，此操作不可撤销。"
+        confirmLabel="清空并删除截图"
+        busy={bulkBusy}
+        onConfirm={clearHandled}
+      />
     </div>
   );
 }

@@ -14,11 +14,13 @@ mod maintenance;
 mod models;
 mod package;
 mod paths;
+mod plugins;
 mod process;
 mod proxy_check;
 mod services;
 mod start_page;
 mod state;
+mod video;
 
 use std::sync::OnceLock;
 
@@ -214,6 +216,9 @@ pub fn run() {
             commands::auth_status,
             commands::auth_login,
             commands::auth_logout,
+            commands::auth_remember_load,
+            commands::auth_remember_save,
+            commands::auth_remember_clear,
             commands::auth_change_password,
             commands::user_list,
             commands::user_create,
@@ -313,10 +318,21 @@ pub fn run() {
             commands::env_extensions,
             commands::captcha_list,
             commands::captcha_handle,
+            commands::captcha_handle_all,
+            commands::captcha_delete,
             commands::captcha_capture,
             commands::read_artifact,
             commands::settings_get,
             commands::settings_update,
+            commands::plugin_list,
+            commands::plugin_set_enabled,
+            commands::plugin_env_state,
+            commands::plugin_set_env_enabled,
+            commands::video_list,
+            commands::video_clear,
+            commands::video_download,
+            commands::video_record_start,
+            commands::video_record_stop,
             commands::api_status,
             commands::api_restart,
             commands::api_key_list,
@@ -328,6 +344,7 @@ pub fn run() {
             commands::theme_import,
             commands::audit_list,
             commands::audit_verify,
+            commands::audit_clear,
             commands::audit_export,
             commands::dashboard,
             commands::app_info,
@@ -336,6 +353,7 @@ pub fn run() {
             commands::backup_create,
             commands::backup_restore,
             commands::backup_list,
+            commands::backup_delete,
             commands::sync_test,
             commands::sync_push,
             commands::sync_pull,

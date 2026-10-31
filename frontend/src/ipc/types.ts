@@ -605,6 +605,7 @@ export interface Settings {
   launchAtLogin: boolean;
   logLevel: string;
   downloadManifestUrl: string | null;
+  enabledPlugins: string[];
 }
 
 export interface UpdateSettingsInput {
@@ -673,6 +674,35 @@ export interface UpdateExtensionInput {
   name?: string;
   description?: string;
   enabled?: boolean;
+}
+
+export interface RememberedLogin {
+  username: string;
+  password: string;
+}
+
+export interface BuiltinPluginInfo {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  enabled: boolean;
+  builtIn: boolean;
+}
+
+export interface SniffedVideo {
+  id: string;
+  envId: string;
+  url: string;
+  title: string;
+  mimeType: string;
+  kind: 'video' | 'audio' | 'hls' | 'dash' | string;
+  size: number | null;
+  pageUrl: string;
+  referer: string;
+  userAgent: string;
+  downloadable: boolean;
+  discoveredAt: string;
 }
 
 export interface HostsEntry {

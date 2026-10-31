@@ -105,6 +105,9 @@ pub mod actions {
     pub const EXTENSION_ADD: &str = "extension.add";
     pub const EXTENSION_UPDATE: &str = "extension.update";
     pub const EXTENSION_ASSIGN: &str = "extension.assign";
+    pub const PLUGIN_UPDATE: &str = "plugin.update";
+    pub const CAPTCHA_DELETE: &str = "captcha.delete";
+    pub const VIDEO_DOWNLOAD: &str = "video.download";
     pub const TEMPLATE_CREATE: &str = "template.create";
     pub const TEMPLATE_UPDATE: &str = "template.update";
     pub const TEMPLATE_DELETE: &str = "template.delete";
@@ -130,6 +133,7 @@ pub mod actions {
     pub const API_START: &str = "api.start";
     pub const API_STOP: &str = "api.stop";
     pub const BACKUP_CREATE: &str = "backup.create";
+    pub const BACKUP_DELETE: &str = "backup.delete";
     pub const BACKUP_RESTORE: &str = "backup.restore";
     pub const SYNC_PUSH: &str = "sync.push";
     pub const SYNC_PULL: &str = "sync.pull";

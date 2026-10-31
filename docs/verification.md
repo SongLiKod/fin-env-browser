@@ -140,7 +140,7 @@ cargo test
   - Cookie 写入/读取/加密缓存落盘，应用重启后自动恢复
   - 连续录制 4 帧并生成 manifest；HAR 1.2 文件导出
   - 浏览器关闭与进程回收
-- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"4.1.0"}`。
+- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"4.2.0"}`。
 - Windows GNU 链接阶段会输出 `.rsrc merge failure: multiple non-default manifests` 警告（MinGW 默认清单与 Tauri 资源清单合并提示），构建退出码为 0，产物可正常启动；CI 使用 MSVC 工具链，不涉及该提示。
 - 完整 `cargo test` 的 Tauri 测试二进制在当前 MinGW 沙箱启动阶段报 `STATUS_ENTRYPOINT_NOT_FOUND`（WebView2/工具链运行环境限制）；`cargo check`、`clippy --all-targets` 已完整编译所有测试代码。`.github/workflows/build.yml` 在 Ubuntu 上执行完整单元测试，并在 Windows/macOS/Linux 矩阵中构建安装包。
 - 浏览器预览：登录页亮/暗主题渲染正常，无 console error。
@@ -368,3 +368,34 @@ cargo test
 - 启动页新增「地理定位」「网络模拟」摘要与实时 geolocation 展示；设置变更不再需要手动关闭再打开环境。
 - 定位改到东京坐标后，时区自动变为 `Asia/Tokyo`、语言变为 `ja-JP, ja, en`；改回上海坐标恢复 `Asia/Shanghai`。海上坐标没有可映射的时区时保留用户当前时区配置。
 - IP 位置仍是真实出口/代理出口，不会被 geolocation 修改；页面上的「IP 位置」和「地理定位」分开展示。
+
+## 39. 内置插件与视频嗅探
+
+- 设置 → 插件可全局启用/暂停「视频嗅探」；状态保存在 `Settings.enabled_plugins`，无需重启应用即可对运行中受控标签页的后续响应生效。
+- 视频列表通过 CDP `Network.responseReceived` 识别 `video/*`、`audio/*`、HLS/DASH MIME 及常见扩展名；同一 URL 去重，单环境最多保留 300 条。
+- 环境详情新增「视频嗅探」页签，每 2.5 秒刷新；直接 MP4/WebM 等可下载，文件保存到系统下载目录下的 `FinEnv/`，按环境代理/Cookie/Referer 请求。
+- 验证：打开 `flower.mp4` 测试页后识别到 `video/mp4`，下载文件大小 1,128,375 字节；清空列表返回空数组；暂停插件后不再接收新媒体。
+- B 站 DASH：桌面页面抓到 `.m4s` 分片后点击「合并下载」，后端通过 BVID/CID 调用 B 站 view/playurl 接口解析 progressive MP4；实测 `BV1BCnW6XEf9` 下载为 8,977,990 字节的 MP4 文件。
+- 懒加载页面：`hongguoduanju.com/player/...` 的 `<video preload="none" src=".../360p.mp4">` 在未播放时也能被 DOM 扫描发现，实测下载 23,524,803 字节 MP4。
+- 页面切换：同一环境从短视频页导航到 `example.com` 后，视频列表从 2 条变为 0 条；启动页会显示当前受控 URL，避免误把其他页面/标签页的结果当成当前页。
+- 多标签页：通过浏览器级 CDP 附着所有 page target，按可见/聚焦状态识别活动标签页。实测在启动页之外新开 `hongguoduanju` 标签页识别 1 条 MP4，再切到 B 站标签页识别 4 条 `.m4s`，当前 URL 随标签切换。
+- 加密媒体：`hongguoduanju` 原始 `360p.mp4` 的 sample entry 为 `encv`，Windows 无法直接播放；下载时检测并删除，页面提供「录制当前视频」。实测录制 3.5 秒生成 615,897 字节 H.264 MP4，可在系统播放器打开；从启动页新开视频标签页录制也成功生成 1,185,294 字节 MP4。
+- 下载目录：视频嗅探页提供「下载目录」按钮，打开系统下载目录下的 `FinEnv/`。
+
+## 40. 插件覆盖、验证码与登录凭据
+
+- 全局插件开启时，`env_plugins` 保存每环境覆盖；实测环境默认开启，关闭后 `plugin_env_state` 返回 false，重新开启恢复。全局关闭时环境页签隐藏，环境级启用请求被拒绝。
+- 验证码脚本仅在活动标签页 `visibilityState=visible` 时上报；后台标签页不采集。`captcha_handle_all` 可批量标记，`captcha_delete` 删除记录并删除截图文件；实测截图文件删除前后存在状态正确。
+- 登录页「记住密码」默认开启；登录成功后加密保存，退出并刷新后用户名和密码自动回填。修改密码会清除保存的凭据。
+- 限制：blob: 媒体、手动新开的标签页和通用（非 B 站）HLS/DASH 分片流不在当前 MVP 的自动合并范围内；通用流地址提供复制能力。
+
+## 41. ????????
+
+- ????????????????? CLEAR ??????????? confirm?
+- ??????? audit_logs ? append-only ????????????? VACUUM ????????????
+- ???? 351 ?? audit_list ?? 0??????? 1 ? auth.login?audit_verify ????????????????????
+
+## 42. ??????
+
+- ??????? backup_list ???backup_delete ??????????????? 1?
+- ??????? .finenvbackup ????????????? backup.delete ?????

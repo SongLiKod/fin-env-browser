@@ -192,6 +192,25 @@ fn walk(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(result)
 }
 
+pub fn delete_backup(data_dir: &Path, target: &str) -> Result<()> {
+    let dir = paths::backups_dir(data_dir);
+    paths::ensure_dir(&dir)?;
+    let root = dir
+        .canonicalize()
+        .map_err(|error| AppError::internal(format!("备份目录不可访问: {error}")))?;
+    let path = PathBuf::from(target)
+        .canonicalize()
+        .map_err(|_| AppError::not_found("备份文件不存在"))?;
+    if !path.starts_with(&root) {
+        return Err(AppError::forbidden("只能删除 FinEnv 备份目录中的文件"));
+    }
+    if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some(BACKUP_EXT) {
+        return Err(AppError::bad_request("不是有效的 FinEnv 备份文件"));
+    }
+    std::fs::remove_file(&path)?;
+    Ok(())
+}
+
 pub fn list_backups(data_dir: &Path) -> Result<Vec<BackupInfo>> {
     let dir = paths::backups_dir(data_dir);
     paths::ensure_dir(&dir)?;

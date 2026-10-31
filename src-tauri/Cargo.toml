@@ -1,6 +1,6 @@
 [package]
 name = "fin-env-browser"
-version = "4.1.0"
+version = "4.2.0"
 description = "FinEnv fingerprint environment manager"
 authors = ["FinEnv Team"]
 edition = "2021"
@@ -32,7 +32,7 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
-reqwest = { version = "0.12", default-features = false, features = ["json", "socks", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "socks", "stream", "rustls-tls"] }
 rand = "0.8"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4", "serde"] }

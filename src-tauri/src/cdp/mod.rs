@@ -339,11 +339,17 @@ pub const CAPTCHA_SCRIPT: &str = r#"(function () {
   const report = (el) => {
     try {
       if (!window.__finEnvCaptcha) return;
+      if (document.visibilityState !== 'visible') return;
       const hint = (el.outerHTML || '').replace(/\s+/g, ' ').slice(0, 240);
-      window.__finEnvCaptcha(JSON.stringify({ url: location.href, hint }));
+      window.__finEnvCaptcha(JSON.stringify({
+        url: location.href,
+        hint,
+        visible: document.visibilityState
+      }));
     } catch (e) {}
   };
   const scan = () => {
+    if (document.visibilityState !== 'visible') return;
     for (const sel of selectors) {
       const el = document.querySelector(sel);
       if (el) { report(el); return; }

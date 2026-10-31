@@ -44,14 +44,17 @@ import {
   type MockRuleInput,
   type OpenOptions,
   type PermissionDef,
+  type BuiltinPluginInfo,
   type Proxy,
   type ProxyCheckResult,
+  type RememberedLogin,
   type ProxyInput,
   type RecordingResult,
   type ResourceSnapshot,
   type ScreenshotResult,
   type SessionInfo,
   type Settings,
+  type SniffedVideo,
   type SyncResult,
   type ThemeConfig,
   type UpdateAccountInput,
@@ -103,6 +106,10 @@ export const ipc = {
   authLogin: (username: string, password: string) =>
     call<SessionInfo>('auth_login', { username, password }),
   authLogout: () => call<void>('auth_logout'),
+  authRememberLoad: () => call<RememberedLogin | null>('auth_remember_load'),
+  authRememberSave: (username: string, password: string) =>
+    call<void>('auth_remember_save', { username, password }),
+  authRememberClear: () => call<void>('auth_remember_clear'),
   authChangePassword: (oldPassword: string, newPassword: string) =>
     call<void>('auth_change_password', { oldPassword, newPassword }),
   userList: () => call<User[]>('user_list'),
@@ -278,14 +285,30 @@ export const ipc = {
   captchaList: (envId?: string) => call<CaptchaEvent[]>('captcha_list', { envId }),
   captchaHandle: (id: string, handled: boolean) =>
     call<void>('captcha_handle', { id, handled }),
+  captchaHandleAll: (ids: string[], handled: boolean) =>
+    call<number>('captcha_handle_all', { ids, handled }),
+  captchaDelete: (ids: string[]) => call<number>('captcha_delete', { ids }),
   captchaCapture: (envId: string) =>
     call<string | null>('captcha_capture', { envId }),
   readArtifact: (path: string) => call<string>('read_artifact', { path }),
-  openArtifactDir: (kind: 'screenshots' | 'recordings' | 'har' | 'exports' | 'backups' | 'reports') =>
+  openArtifactDir: (kind: 'screenshots' | 'recordings' | 'har' | 'exports' | 'backups' | 'reports' | 'downloads') =>
     call<void>('open_artifact_dir', { kind }),
 
   // settings / api / theme / audit
   settingsGet: () => call<Settings>('settings_get'),
+  pluginList: () => call<BuiltinPluginInfo[]>('plugin_list'),
+  pluginSetEnabled: (id: string, enabled: boolean) =>
+    call<BuiltinPluginInfo[]>('plugin_set_enabled', { id, enabled }),
+  pluginEnvState: (envId: string) =>
+    call<BuiltinPluginInfo[]>('plugin_env_state', { envId }),
+  pluginSetEnvEnabled: (envId: string, id: string, enabled: boolean) =>
+    call<BuiltinPluginInfo[]>('plugin_set_env_enabled', { envId, id, enabled }),
+  videoList: (envId: string) => call<SniffedVideo[]>('video_list', { envId }),
+  videoClear: (envId: string) => call<void>('video_clear', { envId }),
+  videoDownload: (envId: string, videoId: string) =>
+    call<string>('video_download', { envId, videoId }),
+  videoRecordStart: (envId: string) => call<string>('video_record_start', { envId }),
+  videoRecordStop: (envId: string) => call<void>('video_record_stop', { envId }),
   settingsUpdate: (input: UpdateSettingsInput) =>
     call<Settings>('settings_update', { input }),
   apiStatus: () => call<ApiStatus>('api_status'),
@@ -300,6 +323,7 @@ export const ipc = {
   themeImport: (path: string) => call<ThemeConfig>('theme_import', { path }),
   auditList: (filter: AuditFilter = {}) => call<AuditLog[]>('audit_list', { filter }),
   auditVerify: () => call<AuditVerifyResult>('audit_verify'),
+  auditClear: (confirm: boolean) => call<number>('audit_clear', { confirm }),
   auditExport: (path: string, format: 'json' | 'csv', filter: AuditFilter = {}) =>
     call<number>('audit_export', { path, format, filter }),
 
@@ -319,6 +343,8 @@ export const ipc = {
     confirm: boolean,
   ) => call<string>('backup_restore', { path, passphrase, restoreProfiles, confirm }),
   backupList: () => call<BackupInfo[]>('backup_list'),
+  backupDelete: (path: string, confirm: boolean) =>
+    call<void>('backup_delete', { path, confirm }),
   syncTest: (password?: string) => call<string>('sync_test', { password }),
   syncPush: (passphrase: string) => call<SyncResult>('sync_push', { passphrase }),
   syncPull: (passphrase: string, confirm: boolean) =>
