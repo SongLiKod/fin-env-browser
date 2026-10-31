@@ -1428,6 +1428,17 @@ impl BrowserManager {
             let Ok(session) = attach_video_session(&client, target_id).await else {
                 continue;
             };
+            let probe = tokio::time::timeout(
+                Duration::from_secs(2),
+                client.evaluate_on(VIDEO_RECORD_PROBE_SCRIPT, Some(&session)),
+            )
+            .await;
+            let Ok(Ok(probe)) = probe else {
+                continue;
+            };
+            if probe.get("hasVideo").and_then(Value::as_bool) != Some(true) {
+                continue;
+            }
             let _ = client
                 .call_on(
                     "Page.setDownloadBehavior",
@@ -1438,10 +1449,12 @@ impl BrowserManager {
                     Some(&session),
                 )
                 .await;
-            let Ok(value) = client
-                .evaluate_on(RECORD_START_SCRIPT, Some(&session))
-                .await
-            else {
+            let started = tokio::time::timeout(
+                Duration::from_secs(10),
+                client.evaluate_on(RECORD_START_SCRIPT, Some(&session)),
+            )
+            .await;
+            let Ok(Ok(value)) = started else {
                 continue;
             };
             if value.get("ok").and_then(Value::as_bool) == Some(true) {
@@ -1454,7 +1467,7 @@ impl BrowserManager {
             }
         }
         Err(AppError::bad_request(
-            "No recordable video found on the current page",
+            "No recordable video found on the current page; play the video and try again",
         ))
     }
 
@@ -2411,6 +2424,11 @@ fn merge_launch_args(global: &[String], environment: &[String]) -> Vec<String> {
     merged
 }
 
+const VIDEO_RECORD_PROBE_SCRIPT: &str = r#"(() => {
+  const video = document.querySelector('video');
+  return { hasVideo: !!video, readyState: video ? video.readyState : 0 };
+})()"#;
+
 const RECORD_START_SCRIPT: &str = r#"(async () => {
   if (window.__finEnvRecorder) return { ok: false, error: '当前页面已经在录制' };
   const video = document.querySelector('video');
@@ -2420,9 +2438,14 @@ const RECORD_START_SCRIPT: &str = r#"(async () => {
     : (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus' : '');
   if (!mime) return { ok: false, error: '当前 Chromium 不支持 MP4/WebM 录制' };
   let stream = null;
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    try { await video.play(); } catch (error) {}
-    await new Promise((resolve) => setTimeout(resolve, 250));
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      await Promise.race([
+        video.play(),
+        new Promise((resolve) => setTimeout(resolve, 1200))
+      ]);
+    } catch (error) {}
+    await new Promise((resolve) => setTimeout(resolve, 200));
     try { stream = video.captureStream(); } catch (error) { stream = null; }
     if (stream && stream.getTracks().length > 0) break;
   }
