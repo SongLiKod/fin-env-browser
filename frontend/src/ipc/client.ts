@@ -283,7 +283,7 @@ export const ipc = {
   captchaCapture: (envId: string) =>
     call<string | null>('captcha_capture', { envId }),
   readArtifact: (path: string) => call<string>('read_artifact', { path }),
-  openArtifactDir: (kind: 'screenshots' | 'recordings' | 'har' | 'exports' | 'backups' | 'reports') =>
+  openArtifactDir: (kind: 'screenshots' | 'recordings' | 'har' | 'exports' | 'backups' | 'reports' | 'downloads') =>
     call<void>('open_artifact_dir', { kind }),
 
   // settings / api / theme / audit
@@ -295,6 +295,8 @@ export const ipc = {
   videoClear: (envId: string) => call<void>('video_clear', { envId }),
   videoDownload: (envId: string, videoId: string) =>
     call<string>('video_download', { envId, videoId }),
+  videoRecordStart: (envId: string) => call<string>('video_record_start', { envId }),
+  videoRecordStop: (envId: string) => call<void>('video_record_stop', { envId }),
   settingsUpdate: (input: UpdateSettingsInput) =>
     call<Settings>('settings_update', { input }),
   apiStatus: () => call<ApiStatus>('api_status'),

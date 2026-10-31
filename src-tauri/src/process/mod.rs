@@ -1396,7 +1396,61 @@ impl BrowserManager {
             file.write_all(&chunk).await?;
         }
         file.flush().await?;
+        drop(file);
+        if is_encrypted_media(&path) {
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(AppError::bad_request(
+                "该 MP4 是 CENC/DRM 加密视频，下载后无法直接播放；请使用「录制当前视频」生成可播放文件",
+            ));
+        }
         Ok(path.to_string_lossy().to_string())
+    }
+
+    pub async fn start_video_recording(&self, env_id: &str) -> Result<String> {
+        let instance = self.instance(env_id)?;
+        let dir = paths::downloads_dir(&self.data_dir);
+        paths::ensure_dir(&dir)?;
+        let _ = instance
+            .client
+            .call(
+                "Page.setDownloadBehavior",
+                json!({
+                    "behavior": "allow",
+                    "downloadPath": dir.to_string_lossy()
+                }),
+            )
+            .await;
+        let value = instance.client.evaluate(RECORD_START_SCRIPT).await?;
+        if value.get("ok").and_then(Value::as_bool) != Some(true) {
+            return Err(AppError::bad_request(
+                value
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("当前页面没有可录制的视频"),
+            ));
+        }
+        self.touch(&instance);
+        Ok(value
+            .get("mime")
+            .and_then(Value::as_str)
+            .unwrap_or("video/mp4")
+            .to_string())
+    }
+
+    pub async fn stop_video_recording(&self, env_id: &str) -> Result<()> {
+        let instance = self.instance(env_id)?;
+        let value = instance.client.evaluate(RECORD_STOP_SCRIPT).await?;
+        if value.get("ok").and_then(Value::as_bool) != Some(true) {
+            return Err(AppError::bad_request(
+                value
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("当前没有正在进行的录制"),
+            ));
+        }
+        sleep(Duration::from_millis(1500)).await;
+        self.touch(&instance);
+        Ok(())
     }
 
     async fn resolve_bilibili_video(
@@ -2316,6 +2370,52 @@ fn merge_launch_args(global: &[String], environment: &[String]) -> Vec<String> {
     merged
 }
 
+const RECORD_START_SCRIPT: &str = r#"(() => {
+  if (window.__finEnvRecorder) return { ok: false, error: '当前页面已经在录制' };
+  const video = document.querySelector('video');
+  if (!video || !video.captureStream) return { ok: false, error: '当前页面没有支持录制的视频元素' };
+  const mime = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')
+    ? 'video/mp4;codecs=avc1'
+    : (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus' : '');
+  if (!mime) return { ok: false, error: '当前 Chromium 不支持 MP4/WebM 录制' };
+  let stream;
+  try { stream = video.captureStream(); } catch (error) { return { ok: false, error: String(error) }; }
+  const chunks = [];
+  const recorder = new MediaRecorder(stream, {
+    mimeType: mime,
+    videoBitsPerSecond: 2500000,
+    audioBitsPerSecond: 128000
+  });
+  recorder.ondataavailable = (event) => { if (event.data && event.data.size) chunks.push(event.data); };
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: recorder.mimeType });
+    const anchor = document.createElement('a');
+    anchor.href = URL.createObjectURL(blob);
+    anchor.download = 'FinEnv-' + Date.now() + (mime.includes('mp4') ? '.mp4' : '.webm');
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(anchor.href), 10000);
+    window.__finEnvRecorder = null;
+  };
+  recorder.start(1000);
+  window.__finEnvRecorder = { recorder, stream };
+  video.play().catch(() => {});
+  return { ok: true, mime };
+})()"#;
+
+const RECORD_STOP_SCRIPT: &str = r#"(() => {
+  const state = window.__finEnvRecorder;
+  if (!state) return { ok: false, error: '当前没有正在进行的录制' };
+  try {
+    state.recorder.stop();
+    state.stream.getTracks().forEach((track) => track.stop());
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  }
+})()"#;
+
 const VIDEO_TAB_SCAN_SCRIPT: &str = r#"(() => {
   const urls = new Set();
   const media = /\.(mp4|webm|mov|m4v|m4s|flv|mkv|avi|ts|m3u8|mpd|mp3|m4a|aac|ogg|wav)(?:[?#]|$)/i;
@@ -2490,6 +2590,20 @@ fn video_filename(url: &str, mime_type: &str) -> String {
         name.push_str(extension);
     }
     name.chars().take(120).collect()
+}
+
+fn is_encrypted_media(path: &Path) -> bool {
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut header = vec![0u8; 128 * 1024];
+    use std::io::Read;
+    let Ok(read) = file.read(&mut header) else {
+        return false;
+    };
+    header[..read]
+        .windows(4)
+        .any(|chunk| chunk == b"encv" || chunk == b"enca")
 }
 
 fn unique_download_path(dir: &Path, name: &str) -> PathBuf {

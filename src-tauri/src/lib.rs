@@ -324,6 +324,8 @@ pub fn run() {
             commands::video_list,
             commands::video_clear,
             commands::video_download,
+            commands::video_record_start,
+            commands::video_record_stop,
             commands::api_status,
             commands::api_restart,
             commands::api_key_list,

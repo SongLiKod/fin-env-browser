@@ -1649,6 +1649,7 @@ pub fn open_artifact_dir(state: State<'_, SharedState>, kind: String) -> Result<
         "exports" => paths::exports_dir(&state.data_dir),
         "backups" => paths::backups_dir(&state.data_dir),
         "reports" => paths::reports_dir(&state.data_dir),
+        "downloads" => paths::downloads_dir(&state.data_dir),
         other => return Err(AppError::bad_request(format!("不支持的目录类型: {other}"))),
     };
     paths::ensure_dir(&dir)?;
@@ -1803,6 +1804,22 @@ pub async fn video_download(
         );
     }
     Ok(path)
+}
+
+#[tauri::command]
+pub async fn video_record_start(state: State<'_, SharedState>, env_id: String) -> Result<String> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    state.browsers.start_video_recording(&env_id).await
+}
+
+#[tauri::command]
+pub async fn video_record_stop(state: State<'_, SharedState>, env_id: String) -> Result<()> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    state.browsers.stop_video_recording(&env_id).await
 }
 
 #[tauri::command]

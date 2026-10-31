@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Download, Film, RefreshCw, Trash2 } from 'lucide-react';
+import { CirclePlay, CircleStop, Download, Film, FolderOpen, RefreshCw, Trash2 } from 'lucide-react';
 import type { EnvironmentView, SniffedVideo } from '@/ipc/types';
 import { ipc } from '@/ipc/client';
 import { toastError, useToastStore } from '@/store/toast';
@@ -21,6 +21,8 @@ export function VideoSnifferPanel({ env }: { env: EnvironmentView }) {
   const [videos, setVideos] = React.useState<SniffedVideo[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [downloading, setDownloading] = React.useState<string | null>(null);
+  const [recording, setRecording] = React.useState(false);
+  const [recordingBusy, setRecordingBusy] = React.useState(false);
 
   const load = React.useCallback(
     async (quiet = false) => {
@@ -73,13 +75,62 @@ export function VideoSnifferPanel({ env }: { env: EnvironmentView }) {
     }
   };
 
+  const openDownloads = async () => {
+    try {
+      await ipc.openArtifactDir('downloads');
+    } catch (error) {
+      toastError(error);
+    }
+  };
+
+  const toggleRecording = async () => {
+    setRecordingBusy(true);
+    try {
+      if (recording) {
+        await ipc.videoRecordStop(env.id);
+        setRecording(false);
+        toast.success('录制已结束', '文件已保存到下载目录下的 FinEnv 文件夹');
+        await openDownloads();
+      } else {
+        if (!env.runtime) {
+          toast.warning('环境未运行', '请先打开环境并播放视频');
+          return;
+        }
+        const mime = await ipc.videoRecordStart(env.id);
+        setRecording(true);
+        toast.info(
+          '开始录制当前视频',
+          `格式：${mime}；播放进度会实时录制，完成后点「停止录制」`,
+        );
+      }
+    } catch (error) {
+      toast.error(recording ? '停止录制失败' : '开始录制失败',
+        error instanceof Error ? error.message : String(error));
+    } finally {
+      setRecordingBusy(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader
         title="视频嗅探"
         description="捕获当前受控标签页的视频/音频响应；B 站 DASH 分片会自动解析并合并为 MP4，其他 HLS/DASH 可复制流地址。"
         actions={
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button variant="ghost" size="sm" onClick={() => void openDownloads()}>
+              <FolderOpen className="h-3.5 w-3.5" /> 下载目录
+            </Button>
+            <Button
+              variant={recording ? 'danger' : 'secondary'}
+              size="sm"
+              loading={recordingBusy}
+              disabled={!enabled || !env.runtime}
+              onClick={() => void toggleRecording()}
+            >
+              {recording ? <CircleStop className="h-3.5 w-3.5" /> : <CirclePlay className="h-3.5 w-3.5" />}
+              {recording ? '停止录制' : '录制当前视频'}
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => void load()}>
               <RefreshCw className="h-3.5 w-3.5" /> 刷新
             </Button>
@@ -98,7 +149,7 @@ export function VideoSnifferPanel({ env }: { env: EnvironmentView }) {
             {env.runtime?.currentUrl || '环境未运行'}
           </span>
           <br />
-          FinEnv 会自动识别当前活动标签页并刷新列表；切换页面或标签页后只显示当前页结果。
+          FinEnv 会自动识别当前活动标签页并刷新列表；切换页面或标签页后只显示当前页结果。加密/DRM 视频不能直接下载时，请播放后点「录制当前视频」，录制文件会保存到下载目录。
         </div>
         {!enabled ? (
           <EmptyState
