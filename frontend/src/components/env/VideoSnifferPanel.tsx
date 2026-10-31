@@ -74,7 +74,7 @@ export function VideoSnifferPanel({ env }: { env: EnvironmentView }) {
     <Card>
       <CardHeader
         title="视频嗅探"
-        description="捕获当前受控标签页的视频/音频响应，直接文件可下载；HLS/DASH 分片流先以链接形式展示。"
+        description="捕获当前受控标签页的视频/音频响应；B 站 DASH 分片会自动解析并合并为 MP4，其他 HLS/DASH 可复制流地址。"
         actions={
           <div className="flex items-center gap-1.5">
             <Button variant="ghost" size="sm" onClick={() => void load()}>
@@ -138,20 +138,30 @@ export function VideoSnifferPanel({ env }: { env: EnvironmentView }) {
                     <Download className="h-3.5 w-3.5" /> 下载
                   </Button>
                 ) : (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(video.url);
-                        toast.success('已复制流地址', '可使用支持 HLS/DASH 的下载器处理');
-                      } catch {
-                        toast.info('流地址', video.url);
-                      }
-                    }}
-                  >
-                    复制流地址
-                  </Button>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={downloading === video.id}
+                      onClick={() => void download(video)}
+                    >
+                      <Download className="h-3.5 w-3.5" /> 合并下载
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(video.url);
+                          toast.success('已复制流地址');
+                        } catch {
+                          toast.info('流地址', video.url);
+                        }
+                      }}
+                    >
+                      复制
+                    </Button>
+                  </div>
                 )}
               </div>
             ))}

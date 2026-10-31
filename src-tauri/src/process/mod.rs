@@ -40,6 +40,11 @@ mod broadcast;
 use broadcast::BroadcastRuntime;
 
 #[derive(Debug, Clone)]
+struct ResolvedVideo {
+    url: String,
+    title: String,
+}
+
 struct ExitEvent {
     env_id: String,
     pid: u32,
@@ -1220,11 +1225,6 @@ impl BrowserManager {
             .ok()
             .and_then(|store| store.get(env_id, video_id))
             .ok_or_else(|| AppError::not_found("视频已不存在，请刷新后重试"))?;
-        if !video.downloadable {
-            return Err(AppError::bad_request(
-                "HLS/DASH 是分片流，当前版本只支持直接媒体文件下载",
-            ));
-        }
         let env = self.db.get_environment(env_id)?;
         let proxy = env
             .proxy_id
@@ -1260,11 +1260,29 @@ impl BrowserManager {
                     })?);
         }
         let client = builder.build()?;
-        let mut request = client.get(&video.url);
-        if !video.referer.is_empty() {
-            request = request.header(reqwest::header::REFERER, &video.referer);
+        let resolved = if video.downloadable {
+            None
+        } else {
+            self.resolve_bilibili_video(&client, env_id, &video).await?
+        };
+        let (download_url, referer, title) = match resolved {
+            Some(resolved) => (
+                resolved.url,
+                "https://www.bilibili.com/".into(),
+                Some(resolved.title),
+            ),
+            None if video.downloadable => (video.url.clone(), video.referer.clone(), None),
+            None => {
+                return Err(AppError::bad_request(
+                    "该 HLS/DASH 流暂不支持自动合并；当前会自动解析 B 站视频为 MP4",
+                ))
+            }
+        };
+        let mut request = client.get(&download_url);
+        if !referer.is_empty() {
+            request = request.header(reqwest::header::REFERER, referer);
         }
-        let cookie = self.video_cookie_header(env_id, &video.url).await;
+        let cookie = self.video_cookie_header(env_id, &download_url).await;
         if !cookie.is_empty() {
             request = request.header(reqwest::header::COOKIE, cookie);
         }
@@ -1277,7 +1295,10 @@ impl BrowserManager {
         }
         let dir = paths::downloads_dir(&self.data_dir);
         paths::ensure_dir(&dir)?;
-        let name = video_filename(&video.url, &video.mime_type);
+        let name = title
+            .as_deref()
+            .map(|title| title_filename(title, "mp4"))
+            .unwrap_or_else(|| video_filename(&download_url, &video.mime_type));
         let path = unique_download_path(&dir, &name);
         let mut file = tokio::fs::File::create(&path).await?;
         let mut stream = response.bytes_stream();
@@ -1293,6 +1314,86 @@ impl BrowserManager {
         }
         file.flush().await?;
         Ok(path.to_string_lossy().to_string())
+    }
+
+    async fn resolve_bilibili_video(
+        &self,
+        client: &reqwest::Client,
+        env_id: &str,
+        video: &crate::models::SniffedVideo,
+    ) -> Result<Option<ResolvedVideo>> {
+        let page_url = if video.page_url.is_empty() {
+            &video.url
+        } else {
+            &video.page_url
+        };
+        let Some(bvid) = extract_bvid(page_url) else {
+            return Ok(None);
+        };
+        let cookie = self
+            .video_cookie_header(env_id, "https://api.bilibili.com")
+            .await;
+        let mut view_request = client
+            .get("https://api.bilibili.com/x/web-interface/view")
+            .query(&[("bvid", bvid.as_str())])
+            .header(reqwest::header::REFERER, "https://www.bilibili.com/");
+        if !cookie.is_empty() {
+            view_request = view_request.header(reqwest::header::COOKIE, &cookie);
+        }
+        let view: Value = view_request.send().await?.json().await?;
+        if view.get("code").and_then(Value::as_i64) != Some(0) {
+            return Err(AppError::bad_request(format!(
+                "B 站视频信息解析失败: {}",
+                view.get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("接口返回错误")
+            )));
+        }
+        let data = view.get("data").cloned().unwrap_or(Value::Null);
+        let title = data
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("bilibili-video")
+            .to_string();
+        let cid = data
+            .get("cid")
+            .and_then(Value::as_u64)
+            .or_else(|| {
+                data.get("pages")
+                    .and_then(Value::as_array)
+                    .and_then(|pages| pages.first())
+                    .and_then(|page| page.get("cid"))
+                    .and_then(Value::as_u64)
+            })
+            .ok_or_else(|| AppError::bad_request("B 站视频缺少 cid，无法解析播放地址"))?;
+        for qn in [64, 32, 16] {
+            let mut request = client
+                .get("https://api.bilibili.com/x/player/playurl")
+                .query(&[
+                    ("bvid", bvid.as_str()),
+                    ("cid", &cid.to_string()),
+                    ("qn", &qn.to_string()),
+                    ("fnval", "1"),
+                    ("fourk", "1"),
+                ])
+                .header(reqwest::header::REFERER, "https://www.bilibili.com/");
+            if !cookie.is_empty() {
+                request = request.header(reqwest::header::COOKIE, &cookie);
+            }
+            let payload: Value = request.send().await?.json().await?;
+            if payload.get("code").and_then(Value::as_i64) != Some(0) {
+                continue;
+            }
+            if let Some(url) = payload.pointer("/data/durl/0/url").and_then(Value::as_str) {
+                return Ok(Some(ResolvedVideo {
+                    url: url.to_string(),
+                    title,
+                }));
+            }
+        }
+        Err(AppError::bad_request(
+            "B 站没有返回可直接合并的 MP4，可能需要登录、会员权限或该视频禁止下载",
+        ))
     }
 
     async fn video_cookie_header(&self, env_id: &str, url: &str) -> String {
@@ -1934,6 +2035,38 @@ fn cookie_domain_matches(domain: &str, host: &str) -> bool {
     }
     let domain = domain.trim_start_matches('.');
     host == domain || host.ends_with(&format!(".{domain}"))
+}
+
+fn extract_bvid(url: &str) -> Option<String> {
+    let start = url.find("BV")?;
+    let candidate = url.get(start..start + 12)?;
+    if candidate.chars().all(|value| value.is_ascii_alphanumeric()) {
+        Some(candidate.to_string())
+    } else {
+        None
+    }
+}
+
+fn title_filename(title: &str, extension: &str) -> String {
+    let mut name = title
+        .chars()
+        .map(|value| {
+            if value.is_ascii_alphanumeric()
+                || matches!(value, '.' | '-' | '_')
+                || !value.is_ascii()
+            {
+                value
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches(|value| matches!(value, '.' | ' ' | '_'))
+        .to_string();
+    if name.is_empty() {
+        name = "video".into();
+    }
+    name.chars().take(100).collect::<String>() + "." + extension
 }
 
 fn video_filename(url: &str, mime_type: &str) -> String {
