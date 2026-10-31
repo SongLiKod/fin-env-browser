@@ -62,7 +62,7 @@
 无需认证。
 
 ```json
-{ "status": "ok", "app": "FinEnv", "version": "4.1.0", "time": "2026-10-26T08:00:00.000Z" }
+{ "status": "ok", "app": "FinEnv", "version": "4.2.0", "time": "2026-10-26T08:00:00.000Z" }
 ```
 
 ### GET /stats
