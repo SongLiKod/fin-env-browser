@@ -14,11 +14,13 @@ mod maintenance;
 mod models;
 mod package;
 mod paths;
+mod plugins;
 mod process;
 mod proxy_check;
 mod services;
 mod start_page;
 mod state;
+mod video;
 
 use std::sync::OnceLock;
 
@@ -317,6 +319,11 @@ pub fn run() {
             commands::read_artifact,
             commands::settings_get,
             commands::settings_update,
+            commands::plugin_list,
+            commands::plugin_set_enabled,
+            commands::video_list,
+            commands::video_clear,
+            commands::video_download,
             commands::api_status,
             commands::api_restart,
             commands::api_key_list,

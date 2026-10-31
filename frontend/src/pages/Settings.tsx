@@ -44,6 +44,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Field, Input, Select, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Tabs } from '@/components/ui/tabs';
+import { PluginsPanel } from '@/components/PluginsPanel';
 
 const roles: Role[] = ['super_admin', 'test_lead', 'test_engineer', 'viewer'];
 
@@ -202,6 +203,7 @@ export function SettingsPage() {
           { value: 'team', label: '团队与权限' },
           { value: 'storage', label: '备份与同步' },
           { value: 'system', label: '系统集成' },
+          { value: 'plugins', label: '插件' },
           { value: 'about', label: '关于' },
         ]}
       />
@@ -899,6 +901,8 @@ export function SettingsPage() {
           </div>
         </div>
       ) : null}
+
+      {tab === 'plugins' ? <PluginsPanel /> : null}
 
       {tab === 'about' ? (
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">

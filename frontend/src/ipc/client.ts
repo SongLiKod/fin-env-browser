@@ -44,6 +44,7 @@ import {
   type MockRuleInput,
   type OpenOptions,
   type PermissionDef,
+  type PluginInfo,
   type Proxy,
   type ProxyCheckResult,
   type ProxyInput,
@@ -52,6 +53,7 @@ import {
   type ScreenshotResult,
   type SessionInfo,
   type Settings,
+  type SniffedVideo,
   type SyncResult,
   type ThemeConfig,
   type UpdateAccountInput,
@@ -286,6 +288,13 @@ export const ipc = {
 
   // settings / api / theme / audit
   settingsGet: () => call<Settings>('settings_get'),
+  pluginList: () => call<PluginInfo[]>('plugin_list'),
+  pluginSetEnabled: (id: string, enabled: boolean) =>
+    call<PluginInfo[]>('plugin_set_enabled', { id, enabled }),
+  videoList: (envId: string) => call<SniffedVideo[]>('video_list', { envId }),
+  videoClear: (envId: string) => call<void>('video_clear', { envId }),
+  videoDownload: (envId: string, videoId: string) =>
+    call<string>('video_download', { envId, videoId }),
   settingsUpdate: (input: UpdateSettingsInput) =>
     call<Settings>('settings_update', { input }),
   apiStatus: () => call<ApiStatus>('api_status'),

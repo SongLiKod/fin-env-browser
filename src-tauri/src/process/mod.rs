@@ -9,8 +9,10 @@ use std::{
 };
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tokio::{
+    io::AsyncWriteExt,
     process::Command,
     sync::{mpsc, RwLock as AsyncRwLock},
     time::sleep,
@@ -83,6 +85,7 @@ pub struct BrowserManager {
     restarts: Mutex<HashMap<String, Vec<Instant>>>,
     launch_lock: tokio::sync::Mutex<()>,
     broadcast: AsyncRwLock<Option<Arc<BroadcastRuntime>>>,
+    videos: Mutex<crate::video::VideoStore>,
 }
 
 impl BrowserManager {
@@ -106,6 +109,7 @@ impl BrowserManager {
             restarts: Mutex::new(HashMap::new()),
             launch_lock: tokio::sync::Mutex::new(()),
             broadcast: AsyncRwLock::new(None),
+            videos: Mutex::new(crate::video::VideoStore::default()),
         }
     }
 
@@ -560,6 +564,7 @@ impl BrowserManager {
         if let Ok(mut map) = self.instances.write() {
             map.remove(env_id);
         }
+        self.clear_videos(env_id);
         self.broadcast_on_env_closed(env_id, actor).await;
         let _ = self.db.remove_browser_session(env_id);
         let env = self.db.get_environment(env_id).ok();
@@ -753,6 +758,7 @@ impl BrowserManager {
         if let Ok(mut map) = self.instances.write() {
             map.remove(&event.env_id);
         }
+        self.clear_videos(&event.env_id);
         self.broadcast_on_env_closed(&event.env_id, "system").await;
         let _ = self.db.remove_browser_session(&event.env_id);
         let env = match self.db.get_environment(&event.env_id) {
@@ -1159,6 +1165,159 @@ impl BrowserManager {
         Ok(())
     }
 
+    pub fn video_list(&self, env_id: &str) -> Vec<crate::models::SniffedVideo> {
+        self.videos
+            .lock()
+            .map(|store| store.list(env_id))
+            .unwrap_or_default()
+    }
+
+    pub fn clear_videos(&self, env_id: &str) {
+        if let Ok(mut store) = self.videos.lock() {
+            store.clear(env_id);
+        }
+    }
+
+    fn video_sniffer_enabled(&self) -> bool {
+        self.settings
+            .read()
+            .map(|settings| crate::plugins::is_enabled(&settings, crate::plugins::VIDEO_SNIFFER))
+            .unwrap_or(false)
+    }
+
+    fn record_video_request(&self, env_id: &str, params: &Value) {
+        if let Ok(mut store) = self.videos.lock() {
+            store.record_request(env_id, params);
+        }
+    }
+
+    fn record_video_response(&self, instance: &Arc<BrowserInstance>, params: &Value) {
+        let page_url = instance
+            .current_url
+            .lock()
+            .map(|url| url.clone())
+            .unwrap_or_default();
+        let detected = self
+            .videos
+            .lock()
+            .ok()
+            .and_then(|mut store| store.record_response(&instance.env_id, &page_url, params));
+        if let Some(video) = detected {
+            self.emit("video://detected", video);
+        }
+    }
+
+    fn record_video_finished(&self, env_id: &str, params: &Value) {
+        if let Ok(mut store) = self.videos.lock() {
+            store.record_finished(env_id, params);
+        }
+    }
+
+    pub async fn download_video(&self, env_id: &str, video_id: &str) -> Result<String> {
+        let video = self
+            .videos
+            .lock()
+            .ok()
+            .and_then(|store| store.get(env_id, video_id))
+            .ok_or_else(|| AppError::not_found("视频已不存在，请刷新后重试"))?;
+        if !video.downloadable {
+            return Err(AppError::bad_request(
+                "HLS/DASH 是分片流，当前版本只支持直接媒体文件下载",
+            ));
+        }
+        let env = self.db.get_environment(env_id)?;
+        let proxy = env
+            .proxy_id
+            .as_ref()
+            .map(|id| self.db.get_proxy(id))
+            .transpose()?;
+        let mut builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(180))
+            .user_agent(if video.user_agent.is_empty() {
+                env.fingerprint.user_agent.clone()
+            } else {
+                video.user_agent.clone()
+            });
+        if let Some(proxy) = &proxy {
+            let password = if proxy.password_enc.is_empty() {
+                String::new()
+            } else {
+                self.crypto.decrypt(&proxy.password_enc)?
+            };
+            let mut proxy_url = url::Url::parse(&format!(
+                "{}://{}:{}",
+                proxy.protocol, proxy.host, proxy.port
+            ))
+            .map_err(|error| AppError::bad_request(format!("代理地址无效: {error}")))?;
+            if !proxy.username.is_empty() {
+                let _ = proxy_url.set_username(&proxy.username);
+                let _ = proxy_url.set_password(Some(&password));
+            }
+            builder =
+                builder
+                    .proxy(reqwest::Proxy::all(proxy_url.as_str()).map_err(|error| {
+                        AppError::bad_request(format!("代理配置无效: {error}"))
+                    })?);
+        }
+        let client = builder.build()?;
+        let mut request = client.get(&video.url);
+        if !video.referer.is_empty() {
+            request = request.header(reqwest::header::REFERER, &video.referer);
+        }
+        let cookie = self.video_cookie_header(env_id, &video.url).await;
+        if !cookie.is_empty() {
+            request = request.header(reqwest::header::COOKIE, cookie);
+        }
+        let response = request.send().await?;
+        if !response.status().is_success() {
+            return Err(AppError::bad_request(format!(
+                "下载失败，媒体服务器返回 HTTP {}",
+                response.status()
+            )));
+        }
+        let dir = paths::downloads_dir(&self.data_dir);
+        paths::ensure_dir(&dir)?;
+        let name = video_filename(&video.url, &video.mime_type);
+        let path = unique_download_path(&dir, &name);
+        let mut file = tokio::fs::File::create(&path).await?;
+        let mut stream = response.bytes_stream();
+        let mut total: u64 = 0;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            total += chunk.len() as u64;
+            if total > 4 * 1024 * 1024 * 1024 {
+                let _ = tokio::fs::remove_file(&path).await;
+                return Err(AppError::bad_request("媒体文件超过 4GB，已取消下载"));
+            }
+            file.write_all(&chunk).await?;
+        }
+        file.flush().await?;
+        Ok(path.to_string_lossy().to_string())
+    }
+
+    async fn video_cookie_header(&self, env_id: &str, url: &str) -> String {
+        let Ok(instance) = self.instance(env_id) else {
+            return String::new();
+        };
+        let Ok(value) = instance
+            .client
+            .call("Network.getAllCookies", json!({}))
+            .await
+        else {
+            return String::new();
+        };
+        let host = url::Url::parse(url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(ToString::to_string))
+            .unwrap_or_default();
+        cdp::cookies_from_cdp(&value)
+            .into_iter()
+            .filter(|cookie| cookie_domain_matches(&cookie.domain, &host))
+            .map(|cookie| format!("{}={}", cookie.name, cookie.value))
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
     pub async fn set_mocks(&self, env_id: &str, rules: Vec<MockRule>) -> Result<()> {
         let instance = self.instance(env_id)?;
         let mut guard = instance.mocks.write().await;
@@ -1521,15 +1680,24 @@ impl BrowserManager {
                             if let Ok(mut har) = instance.har.lock() {
                                 har.on_request(&event.params);
                             }
+                            if manager.video_sniffer_enabled() {
+                                manager.record_video_request(&instance.env_id, &event.params);
+                            }
                         }
                         "Network.responseReceived" => {
                             if let Ok(mut har) = instance.har.lock() {
                                 har.on_response(&event.params);
                             }
+                            if manager.video_sniffer_enabled() {
+                                manager.record_video_response(&instance, &event.params);
+                            }
                         }
                         "Network.loadingFinished" => {
                             if let Ok(mut har) = instance.har.lock() {
                                 har.on_finished(&event.params);
+                            }
+                            if manager.video_sniffer_enabled() {
+                                manager.record_video_finished(&instance.env_id, &event.params);
                             }
                         }
                         "Page.frameNavigated" => {
@@ -1758,6 +1926,75 @@ fn merge_launch_args(global: &[String], environment: &[String]) -> Vec<String> {
         merged.push(arg.clone());
     }
     merged
+}
+
+fn cookie_domain_matches(domain: &str, host: &str) -> bool {
+    if domain.is_empty() || host.is_empty() {
+        return true;
+    }
+    let domain = domain.trim_start_matches('.');
+    host == domain || host.ends_with(&format!(".{domain}"))
+}
+
+fn video_filename(url: &str, mime_type: &str) -> String {
+    let parsed = url::Url::parse(url).ok();
+    let raw = parsed
+        .as_ref()
+        .and_then(|value| value.path_segments())
+        .and_then(|mut segments| segments.next_back())
+        .unwrap_or_default();
+    let mut name = raw
+        .chars()
+        .map(|value| {
+            if value.is_ascii_alphanumeric() || matches!(value, '.' | '-' | '_') {
+                value
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('.')
+        .to_string();
+    if name.is_empty() {
+        name = "video".into();
+    }
+    if !name.contains('.') {
+        let extension = if mime_type.starts_with("audio/") {
+            "mp3"
+        } else {
+            "mp4"
+        };
+        name.push('.');
+        name.push_str(extension);
+    }
+    name.chars().take(120).collect()
+}
+
+fn unique_download_path(dir: &Path, name: &str) -> PathBuf {
+    let candidate = dir.join(name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let path = Path::new(name);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("video");
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("mp4");
+    for index in 1..1000 {
+        let candidate = dir.join(format!("{stem}-{index}.{extension}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!(
+        "{stem}-{}.{}",
+        now_iso().replace(':', "-"),
+        extension
+    ))
 }
 
 fn network_emulation_params(profile: &str) -> Value {

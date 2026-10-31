@@ -54,6 +54,12 @@ pub fn reports_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("reports")
 }
 
+pub fn downloads_dir(data_dir: &Path) -> PathBuf {
+    dirs::download_dir()
+        .unwrap_or_else(|| data_dir.join("downloads"))
+        .join("FinEnv")
+}
+
 pub fn start_pages_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("start-pages")
 }

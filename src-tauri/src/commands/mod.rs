@@ -1722,6 +1722,83 @@ pub async fn settings_update(
 }
 
 #[tauri::command]
+pub fn plugin_list(state: State<'_, SharedState>) -> Result<Vec<crate::models::PluginInfo>> {
+    let state = state.inner().clone();
+    state.require(Permission::ViewList)?;
+    Ok(crate::plugins::list(&state.settings()))
+}
+
+#[tauri::command]
+pub fn plugin_set_enabled(
+    state: State<'_, SharedState>,
+    id: String,
+    enabled: bool,
+) -> Result<Vec<crate::models::PluginInfo>> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::SettingsManage)?;
+    if !crate::plugins::is_valid(&id) {
+        return Err(AppError::not_found("插件不存在"));
+    }
+    let mut settings = state.settings();
+    settings.enabled_plugins.retain(|item| item != &id);
+    if enabled {
+        settings.enabled_plugins.push(id.clone());
+        settings.enabled_plugins.sort();
+        settings.enabled_plugins.dedup();
+    }
+    state.store_settings(&settings)?;
+    let _ = Audit::global(
+        &state.db,
+        &user.username,
+        actions::PLUGIN_UPDATE,
+        format!("{} 插件 {}", if enabled { "启用" } else { "暂停" }, id),
+    );
+    Ok(crate::plugins::list(&settings))
+}
+
+#[tauri::command]
+pub fn video_list(
+    state: State<'_, SharedState>,
+    env_id: String,
+) -> Result<Vec<crate::models::SniffedVideo>> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    Ok(state.browsers.video_list(&env_id))
+}
+
+#[tauri::command]
+pub fn video_clear(state: State<'_, SharedState>, env_id: String) -> Result<()> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    state.browsers.clear_videos(&env_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn video_download(
+    state: State<'_, SharedState>,
+    env_id: String,
+    video_id: String,
+) -> Result<String> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::OpenClose)?;
+    state.check_environment_access(&user, &env_id, EnvAccess::Operate)?;
+    let path = state.browsers.download_video(&env_id, &video_id).await?;
+    if let Ok(env) = state.db.get_environment(&env_id) {
+        let _ = Audit::env(
+            &state.db,
+            &user.username,
+            actions::VIDEO_DOWNLOAD,
+            &env,
+            format!("下载视频 {}", video_id),
+        );
+    }
+    Ok(path)
+}
+
+#[tauri::command]
 pub fn api_status(state: State<'_, SharedState>) -> Result<crate::models::ApiStatus> {
     let state = state.inner().clone();
     state.require(Permission::SettingsManage)?;

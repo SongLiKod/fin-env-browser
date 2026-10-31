@@ -811,6 +811,36 @@ pub struct Settings {
     pub launch_at_login: bool,
     pub log_level: String,
     pub download_manifest_url: Option<String>,
+    #[serde(default)]
+    pub enabled_plugins: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub version: String,
+    pub enabled: bool,
+    pub built_in: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SniffedVideo {
+    pub id: String,
+    pub env_id: String,
+    pub url: String,
+    pub title: String,
+    pub mime_type: String,
+    pub kind: String,
+    pub size: Option<u64>,
+    pub page_url: String,
+    pub referer: String,
+    pub user_agent: String,
+    pub downloadable: bool,
+    pub discovered_at: String,
 }
 
 impl Default for Settings {
@@ -846,6 +876,7 @@ impl Default for Settings {
             launch_at_login: false,
             log_level: "info".into(),
             download_manifest_url: None,
+            enabled_plugins: Vec::new(),
         }
     }
 }
