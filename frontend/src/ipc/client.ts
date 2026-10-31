@@ -343,6 +343,8 @@ export const ipc = {
     confirm: boolean,
   ) => call<string>('backup_restore', { path, passphrase, restoreProfiles, confirm }),
   backupList: () => call<BackupInfo[]>('backup_list'),
+  backupDelete: (path: string, confirm: boolean) =>
+    call<void>('backup_delete', { path, confirm }),
   syncTest: (password?: string) => call<string>('sync_test', { password }),
   syncPush: (passphrase: string) => call<SyncResult>('sync_push', { passphrase }),
   syncPull: (passphrase: string, confirm: boolean) =>

@@ -14,6 +14,7 @@ import {
   Save,
   ShieldCheck,
   Sparkles,
+  Trash2,
   UserCog,
   Users,
   X,
@@ -75,6 +76,8 @@ export function SettingsPage() {
   const [revokeKey, setRevokeKey] = React.useState<ApiKey | null>(null);
   const [backupCreate, setBackupCreate] = React.useState(false);
   const [restorePath, setRestorePath] = React.useState<string | null>(null);
+  const [deleteBackupPath, setDeleteBackupPath] = React.useState<string | null>(null);
+  const [deletingBackup, setDeletingBackup] = React.useState(false);
   const [syncAction, setSyncAction] = React.useState<'push' | 'pull' | null>(null);
   const [passwordForm, setPasswordForm] = React.useState({ old: '', next: '', confirm: '' });
   const [passwordBusy, setPasswordBusy] = React.useState(false);
@@ -162,6 +165,21 @@ export function SettingsPage() {
       toastError(err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const deleteBackup = async () => {
+    if (!deleteBackupPath) return;
+    setDeletingBackup(true);
+    try {
+      await ipc.backupDelete(deleteBackupPath, true);
+      setBackups(await ipc.backupList());
+      setDeleteBackupPath(null);
+      toast.success('备份文件已删除');
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setDeletingBackup(false);
     }
   };
 
@@ -534,6 +552,15 @@ export function SettingsPage() {
                           <p className="text-[10px] text-content-hint">{formatBytes(backup.size)} · {formatDate(backup.createdAt)} · {backup.encrypted ? '加密' : '未加密'}</p>
                         </div>
                         <Button variant="secondary" size="sm" onClick={() => setRestorePath(backup.path)}>恢复</Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-danger"
+                          title="删除备份文件"
+                          onClick={() => setDeleteBackupPath(backup.path)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
                     ))}
                   </div>
@@ -1021,6 +1048,16 @@ export function SettingsPage() {
           setRestorePath(null);
           await useAuthStore.getState().initialize();
         }}
+      />
+      <ConfirmDialog
+        open={!!deleteBackupPath}
+        onOpenChange={(value) => !value && setDeleteBackupPath(null)}
+        title="删除备份文件"
+        description={deleteBackupPath ?? ''}
+        confirmLabel="删除"
+        requiredText="DELETE"
+        busy={deletingBackup}
+        onConfirm={deleteBackup}
       />
       <SyncActionDialog
         mode={syncAction}

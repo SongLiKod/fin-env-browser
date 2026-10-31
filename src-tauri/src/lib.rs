@@ -353,6 +353,7 @@ pub fn run() {
             commands::backup_create,
             commands::backup_restore,
             commands::backup_list,
+            commands::backup_delete,
             commands::sync_test,
             commands::sync_push,
             commands::sync_pull,

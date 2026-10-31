@@ -2378,6 +2378,26 @@ pub fn backup_list(state: State<'_, SharedState>) -> Result<Vec<crate::models::B
 }
 
 #[tauri::command]
+pub fn backup_delete(state: State<'_, SharedState>, path: String, confirm: bool) -> Result<()> {
+    let state = state.inner().clone();
+    let actor = state.require(Permission::SettingsManage)?.username;
+    if !confirm {
+        return Err(AppError::code_with(
+            "confirmation_required",
+            "删除备份文件需要二次确认",
+        ));
+    }
+    backup::delete_backup(&state.data_dir, &path)?;
+    let _ = Audit::global(
+        &state.db,
+        &actor,
+        actions::BACKUP_DELETE,
+        format!("删除本地备份 {}", path),
+    );
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn sync_test(state: State<'_, SharedState>, password: Option<String>) -> Result<String> {
     let state = state.inner().clone();
     state.require(Permission::SettingsManage)?;
