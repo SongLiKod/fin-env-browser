@@ -268,6 +268,8 @@ export const ipc = {
   extensionList: () => call<Extension[]>('extension_list'),
   extensionAdd: (path: string, name?: string) =>
     call<Extension>('extension_add', { path, name }),
+  extensionInstallArchive: (path: string, name?: string, envIds: string[] = []) =>
+    call<Extension>('extension_install_archive', { path, name, envIds }),
   extensionInstallOnline: (source: string, envIds: string[] = []) =>
     call<Extension>('extension_install_online', { source, envIds }),
   extensionUpdate: (id: string, input: UpdateExtensionInput) =>

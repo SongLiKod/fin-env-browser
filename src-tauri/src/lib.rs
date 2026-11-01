@@ -307,6 +307,7 @@ pub fn run() {
             commands::mock_set,
             commands::extension_list,
             commands::extension_add,
+            commands::extension_install_archive,
             commands::extension_delete,
             commands::extension_assign,
             commands::extension_unassign,

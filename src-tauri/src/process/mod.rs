@@ -348,6 +348,23 @@ impl BrowserManager {
         let launched = async {
             let (ws, _page_url) = wait_for_cdp_page(debug_port, Duration::from_secs(20)).await?;
             let client = Arc::new(CdpClient::connect(&ws).await?);
+            let mut warnings = Vec::new();
+            // Branded Chrome 137+ ignores --load-extension. Load the unpacked
+            // extensions through the browser-level CDP Extensions domain
+            // before navigating to the start page. The switch above is only
+            // required when extensions are assigned.
+            if !extensions.is_empty() {
+                match load_extensions_via_cdp(debug_port, &extensions).await {
+                    Ok(ids) => {
+                        tracing::info!(
+                            environment = %env.id,
+                            extensions = ids.join(","),
+                            "loaded unpacked extensions through CDP"
+                        );
+                    }
+                    Err(error) => warnings.push(format!("扩展自动加载失败: {error}")),
+                }
+            }
             let _ = client.call("Page.enable", json!({})).await;
             let _ = client.call("Runtime.enable", json!({})).await;
             let _ = client.call("Network.enable", json!({})).await;
@@ -445,7 +462,6 @@ impl BrowserManager {
             // only installed later.
             self.start_event_handler(instance.clone());
             self.start_video_tab_handler(instance.clone());
-            let mut warnings = Vec::new();
             if let Err(e) = client
                 .call(
                     "Fetch.enable",
@@ -2831,6 +2847,10 @@ fn build_chromium_args(
         ));
     }
     if !extensions.is_empty() {
+        // Chrome 137+ branded builds ignore --load-extension. Keep it for
+        // Chromium/older builds, and enable the CDP Extensions domain so the
+        // launcher can load unpacked extensions at runtime as well.
+        args.push("--enable-unsafe-extension-debugging".into());
         args.push(format!("--load-extension={}", extensions.join(",")));
     }
     args.extend(extra_args.iter().cloned());
@@ -2926,6 +2946,75 @@ fn free_port() -> Result<u16> {
         .port();
     drop(listener);
     Ok(port)
+}
+
+async fn wait_for_browser_ws(port: u16, timeout: Duration) -> Result<String> {
+    let deadline = Instant::now() + timeout;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(1500))
+        .build()
+        .map_err(AppError::from)?;
+    let mut last_error = String::new();
+    while Instant::now() < deadline {
+        match client
+            .get(format!("http://127.0.0.1:{port}/json/version"))
+            .send()
+            .await
+        {
+            Ok(response) => match response.json::<Value>().await {
+                Ok(value) => {
+                    if let Some(ws) = value.get("webSocketDebuggerUrl").and_then(Value::as_str) {
+                        return Ok(ws.to_string());
+                    }
+                    last_error = "浏览器 CDP 地址为空".into();
+                }
+                Err(error) => last_error = error.to_string(),
+            },
+            Err(error) => last_error = error.to_string(),
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+    Err(AppError::internal(format!(
+        "等待 Chromium 浏览器 CDP 端口 {port} 超时: {last_error}"
+    )))
+}
+
+async fn load_extensions_via_cdp(port: u16, extensions: &[String]) -> Result<Vec<String>> {
+    let browser_ws = wait_for_browser_ws(port, Duration::from_secs(10)).await?;
+    let client = CdpClient::connect(&browser_ws).await?;
+    let mut loaded = Vec::new();
+    let mut errors = Vec::new();
+    for path in extensions {
+        match client
+            .call("Extensions.loadUnpacked", json!({ "path": path }))
+            .await
+        {
+            Ok(value) => {
+                if let Some(id) = value.get("id").and_then(Value::as_str) {
+                    loaded.push(id.to_string());
+                }
+            }
+            Err(error) => {
+                let message = error.message().to_lowercase();
+                // On Chromium/older Chrome --load-extension already loaded
+                // the same directory. Method-not-available also means the
+                // legacy command-line path is the only option.
+                if message.contains("already") || message.contains("method not available") {
+                    continue;
+                }
+                let name = Path::new(path)
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or(path);
+                errors.push(format!("{name}: {}", error.message()));
+            }
+        }
+    }
+    if errors.is_empty() {
+        Ok(loaded)
+    } else {
+        Err(AppError::internal(errors.join("; ")))
+    }
 }
 
 async fn wait_for_cdp_page(port: u16, timeout: Duration) -> Result<(String, String)> {
@@ -3281,7 +3370,27 @@ async fn handle_request_paused(instance: &Arc<BrowserInstance>, params: Value) -
 
 #[cfg(test)]
 mod launch_args_tests {
-    use super::merge_launch_args;
+    use super::{build_chromium_args, merge_launch_args};
+    use crate::fingerprint::Fingerprint;
+    use std::path::Path;
+
+    #[test]
+    fn extensions_enable_cdp_debugging() {
+        let args = build_chromium_args(
+            &Fingerprint::default(),
+            Path::new("C:/tmp/profile"),
+            9222,
+            None,
+            &[],
+            &["C:/tmp/extension".to_string()],
+            "FinEnv test",
+            "about:blank",
+            false,
+            &[],
+        );
+        assert!(args.contains(&"--enable-unsafe-extension-debugging".to_string()));
+        assert!(args.contains(&"--load-extension=C:/tmp/extension".to_string()));
+    }
 
     #[test]
     fn environment_switch_replaces_global_switch() {

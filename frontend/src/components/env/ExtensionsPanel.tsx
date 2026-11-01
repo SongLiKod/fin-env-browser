@@ -1,6 +1,7 @@
 import * as React from 'react';
 import {
   CheckCheck,
+  FileArchive,
   FolderOpen,
   FolderPlus,
   Globe2,
@@ -13,7 +14,7 @@ import {
 } from 'lucide-react';
 import type { EnvironmentView, Extension } from '@/ipc/types';
 import { ipc } from '@/ipc/client';
-import { pickDirectory } from '@/utils/dialog';
+import { pickDirectory, pickFile } from '@/utils/dialog';
 import { useAuthStore } from '@/store/auth';
 import { toastError, useToastStore } from '@/store/toast';
 import { cn, formatDateShort } from '@/utils';
@@ -34,9 +35,10 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
   const [assigned, setAssigned] = React.useState<Extension[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [addOpen, setAddOpen] = React.useState(false);
-  const [addMode, setAddMode] = React.useState<'online' | 'local'>('online');
+  const [addMode, setAddMode] = React.useState<'online' | 'local' | 'archive'>('online');
   const [storeSource, setStoreSource] = React.useState('');
   const [path, setPath] = React.useState('');
+  const [archivePath, setArchivePath] = React.useState('');
   const [name, setName] = React.useState('');
   const [assignCurrent, setAssignCurrent] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
@@ -75,6 +77,7 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
   const resetAdd = () => {
     setStoreSource('');
     setPath('');
+    setArchivePath('');
     setName('');
     setAssignCurrent(true);
     setAddMode('online');
@@ -99,6 +102,20 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
           assignCurrent ? [env.id] : [],
         );
         toast.success('在线扩展已安装', assignCurrent ? '已分配到当前环境' : '可在扩展库中分配');
+      } else if (addMode === 'archive') {
+        if (!archivePath) {
+          toast.warning('请选择 ZIP 或 CRX 扩展包');
+          return;
+        }
+        extension = await ipc.extensionInstallArchive(
+          archivePath,
+          name.trim() || undefined,
+          assignCurrent ? [env.id] : [],
+        );
+        toast.success(
+          'ZIP/CRX 扩展已安装',
+          assignCurrent ? '已分配到当前环境' : '可在扩展库中分配',
+        );
       } else {
         if (!path) {
           toast.warning('请选择扩展目录');
@@ -188,7 +205,7 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
         <div>
           <h3 className="text-sm font-semibold text-content-main">浏览器扩展</h3>
           <p className="mt-0.5 text-xs text-content-weak">
-            从 Chrome 应用商店在线安装，或加载本地解压目录；安装后进入全局扩展库，可分配到任意/全部环境。
+            从 Chrome 应用商店在线安装，加载本地目录，或直接导入 ZIP / CRX；安装后进入全局扩展库，可分配到任意/全部环境。
           </p>
         </div>
         {canEdit ? (
@@ -212,6 +229,16 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
               }}
             >
               <FolderPlus className="h-3.5 w-3.5" /> 本地安装
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setAddMode('archive');
+                setAddOpen(true);
+              }}
+            >
+              <FileArchive className="h-3.5 w-3.5" /> ZIP / CRX
             </Button>
           </div>
         ) : null}
@@ -388,15 +415,15 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
       </Card>
 
       <div className="rounded-md border border-border bg-surface-secondary p-3 text-[11px] leading-5 text-content-weak">
-        在线安装会从 Chrome 应用商店下载 CRX 并解压到扩展库，再由 <code className="font-mono">--load-extension</code> 注入。
-        Chrome 137+ 品牌版已移除该启动参数；若扩展未加载，请使用「在浏览器中打开商店」手动添加，或使用 Chromium / Chrome for Testing。
+        安装后的扩展由 FinEnv 在浏览器启动时通过 CDP 自动加载，支持 Chrome 137+ 品牌版，无需手动打开扩展管理页。
+        首次启动会自动启用扩展调试通道；如果扩展未出现在页面中，请确认扩展已启用并分配到当前环境。
       </div>
 
       <Dialog
         open={addOpen}
         onOpenChange={closeAdd}
         title="安装浏览器扩展"
-        description="在线安装或选择本地解压目录；需要包含 manifest.json。"
+        description="在线安装、选择本地解压目录，或导入 ZIP / CRX；安装包需要包含 manifest.json。"
         width="max-w-xl"
         footer={
           <>
@@ -404,16 +431,26 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
             <Button
               variant="primary"
               loading={busy}
-              disabled={addMode === 'online' ? !storeSource.trim() : !path}
+              disabled={
+                addMode === 'online'
+                  ? !storeSource.trim()
+                  : addMode === 'archive'
+                    ? !archivePath
+                    : !path
+              }
               onClick={() => void install()}
             >
-              {addMode === 'online' ? '在线安装' : '安装本地扩展'}
+              {addMode === 'online'
+                ? '在线安装'
+                : addMode === 'archive'
+                  ? '安装 ZIP / CRX'
+                  : '安装本地扩展'}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-surface-secondary p-1">
+          <div className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-surface-secondary p-1">
             <button
               type="button"
               className={cn(
@@ -434,6 +471,16 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
             >
               <FolderPlus className="h-3.5 w-3.5" /> 本地目录
             </button>
+            <button
+              type="button"
+              className={cn(
+                'flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-colors',
+                addMode === 'archive' ? 'bg-surface-base text-content-main shadow-sm' : 'text-content-weak hover:text-content-main',
+              )}
+              onClick={() => setAddMode('archive')}
+            >
+              <FileArchive className="h-3.5 w-3.5" /> ZIP / CRX
+            </button>
           </div>
 
           {addMode === 'online' ? (
@@ -453,14 +500,14 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
                 <Button variant="secondary" size="sm" onClick={() => void openStore()}>
                   <Globe2 className="h-3.5 w-3.5" /> 在浏览器中打开商店
                 </Button>
-                <span className="text-[10px] text-content-hint">品牌版 Chrome 137+ 建议用此方式手动安装</span>
+                <span className="text-[10px] text-content-hint">扩展会在环境启动时自动加载</span>
               </div>
               <div className="rounded-md border border-border bg-surface-secondary p-3 text-[11px] leading-5 text-content-weak">
                 在线安装会下载 CRX、校验包结构并解压到 <code className="font-mono">extensions/store</code>，随后作为全局扩展加入扩展库。
                 需本机能访问 Chrome 应用商店。
               </div>
             </>
-          ) : (
+          ) : addMode === 'local' ? (
             <>
               <Field label="扩展目录" required>
                 <div className="flex gap-2">
@@ -477,6 +524,32 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
                     }}
                   >
                     <FolderPlus className="h-4 w-4" /> 选择
+                  </Button>
+                </div>
+              </Field>
+              <Field label="显示名称" hint="留空时使用 manifest.json 中的 name">
+                <Input value={name} onChange={(event) => setName(event.target.value)} />
+              </Field>
+            </>
+          ) : (
+            <>
+              <Field label="ZIP / CRX 扩展包" required hint="支持 Chrome 扩展 ZIP 和 CRX2 / CRX3">
+                <div className="flex gap-2">
+                  <Input value={archivePath} readOnly placeholder="选择 .zip 或 .crx 文件" />
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      try {
+                        const files = await pickFile([
+                          { name: 'Chrome 扩展包', extensions: ['zip', 'crx'] },
+                        ]);
+                        if (files?.[0]) setArchivePath(files[0]);
+                      } catch (error) {
+                        toastError(error);
+                      }
+                    }}
+                  >
+                    <FileArchive className="h-4 w-4" /> 选择文件
                   </Button>
                 </div>
               </Field>
