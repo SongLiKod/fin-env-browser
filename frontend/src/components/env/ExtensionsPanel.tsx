@@ -205,7 +205,7 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
         <div>
           <h3 className="text-sm font-semibold text-content-main">浏览器扩展</h3>
           <p className="mt-0.5 text-xs text-content-weak">
-            从 Chrome 应用商店在线安装，或加载本地解压目录；安装后进入全局扩展库，可分配到任意/全部环境。
+            从 Chrome 应用商店在线安装，加载本地目录，或直接导入 ZIP / CRX；安装后进入全局扩展库，可分配到任意/全部环境。
           </p>
         </div>
         {canEdit ? (
@@ -415,15 +415,15 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
       </Card>
 
       <div className="rounded-md border border-border bg-surface-secondary p-3 text-[11px] leading-5 text-content-weak">
-        在线安装会从 Chrome 应用商店下载 CRX 并解压到扩展库，再由 <code className="font-mono">--load-extension</code> 注入。
-        Chrome 137+ 品牌版已移除该启动参数；若扩展未加载，请使用「在浏览器中打开商店」手动添加，或使用 Chromium / Chrome for Testing。
+        安装后的扩展由 FinEnv 在浏览器启动时通过 CDP 自动加载，支持 Chrome 137+ 品牌版，无需手动打开扩展管理页。
+        首次启动会自动启用扩展调试通道；如果扩展未出现在页面中，请确认扩展已启用并分配到当前环境。
       </div>
 
       <Dialog
         open={addOpen}
         onOpenChange={closeAdd}
         title="安装浏览器扩展"
-        description="在线安装或选择本地解压目录；需要包含 manifest.json。"
+        description="在线安装、选择本地解压目录，或导入 ZIP / CRX；安装包需要包含 manifest.json。"
         width="max-w-xl"
         footer={
           <>
@@ -500,7 +500,7 @@ export function ExtensionsPanel({ env }: { env: EnvironmentView }) {
                 <Button variant="secondary" size="sm" onClick={() => void openStore()}>
                   <Globe2 className="h-3.5 w-3.5" /> 在浏览器中打开商店
                 </Button>
-                <span className="text-[10px] text-content-hint">品牌版 Chrome 137+ 建议用此方式手动安装</span>
+                <span className="text-[10px] text-content-hint">扩展会在环境启动时自动加载</span>
               </div>
               <div className="rounded-md border border-border bg-surface-secondary p-3 text-[11px] leading-5 text-content-weak">
                 在线安装会下载 CRX、校验包结构并解压到 <code className="font-mono">extensions/store</code>，随后作为全局扩展加入扩展库。

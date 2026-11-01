@@ -177,10 +177,10 @@ cargo test
 ## 16. 扩展在线安装与全局管理
 
 - **在线安装**：`extension_install_online` 支持 Chrome 应用商店链接或 32 位扩展 ID；后端下载 CRX2/CRX3，跳过签名头并解压 ZIP 到 `extensions/store/<id>-<suffix>`，校验 `manifest.json` 后加入全局扩展库。
-- **安全**：拒绝非 CRX/ZIP 数据、超过 80MB 的安装包、超过 120MB 的解压总量、超过 6000 个文件；使用 `enclosed_name` 防止 Zip Slip，跳过符号链接。
+- **安全**：拒绝非 CRX/ZIP 数据、在线包超过 80MB、本地包超过 512MB、解压总量超过 512MB、超过 6000 个文件；使用 `enclosed_name` 防止 Zip Slip，跳过符号链接。
 - **全局扩展库**：任何环境都可选择同一扩展；列表展示已分配环境数，支持启用/停用、编辑名称/描述、打开扩展目录、删除（在线下载目录一并清理）。
 - **批量与全部应用**：支持批量勾选环境、全选；`extension_assign_all` 一键分配到全部环境。运行中的环境需重启浏览器生效。
-- **品牌版 Chrome 回退**：Chrome 137+ 品牌版移除了 `--load-extension`；在线安装页提供「在浏览器中打开商店」，可在目标环境中通过 Chrome 原生「添加至 Chrome」安装。Chromium / Chrome for Testing 仍可直接加载解压扩展。
+- **Chrome 137+ 自动加载**：保留 `--load-extension` 兼容 Chromium/旧版；同时在分配了扩展时追加 `--enable-unsafe-extension-debugging`，浏览器启动后、页面导航前通过浏览器级 CDP `Extensions.loadUnpacked` 逐个加载解压目录。Chrome 156 品牌版实测扩展 service worker 已自动出现在目标列表中，无需 Chromium 或 Chrome for Testing。
 - **验证**：通过本地 CRX3 测试服务完整跑通下载 → 解析 → 解压 → 入库 → 分配到 1 个环境 → 应用到全部 2 个环境 → 停用/改描述 → 第二个环境读取 → 删除并确认扩展目录被清理；UI 截图确认在线安装对话框与扩展库布局。
 
 ## 17. 环境模板、批量创建与多环境操作
@@ -389,18 +389,26 @@ cargo test
 - 登录页「记住密码」默认开启；登录成功后加密保存，退出并刷新后用户名和密码自动回填。修改密码会清除保存的凭据。
 - 限制：blob: 媒体、手动新开的标签页和通用（非 B 站）HLS/DASH 分片流不在当前 MVP 的自动合并范围内；通用流地址提供复制能力。
 
-## 41. ????????
+## 41. 审计日志手动清理
 
-- ????????????????? CLEAR ??????????? confirm?
-- ??????? audit_logs ? append-only ????????????? VACUUM ????????????
-- ???? 351 ?? audit_list ?? 0??????? 1 ? auth.login?audit_verify ????????????????????
+- 超级管理员在审计日志页输入 `CLEAR` 后确认，临时移除 `audit_logs` 的 append-only 触发器，删除全部记录，执行 `VACUUM` 后重建触发器。
+- 清理后 `audit_list` 返回 0 条；新的 `auth.login` 记录链从创世哈希重新开始，`audit_verify` 验证通过。
+- 实测清理 351 条记录，数据库文件与 WAL 空间已回收。
 
-## 42. ??????
+## 42. 本地备份删除
 
-- ??????? backup_list ???backup_delete ??????????????? 1?
-- ??????? .finenvbackup ????????????? backup.delete ?????
+- 备份列表新增单个文件删除，后端只允许删除 `backups/` 下的 `.finenvbackup`，并要求输入 `DELETE` 确认。
+- 实测创建备份后删除，`backup_list` 数量减少，磁盘文件确实移除。
 
-## 43. ?? ZIP / CRX ??
+## 43. 扩展 ZIP / CRX 安装
 
-- ??????? CRX ?????????manifest.json ????????? 78 ????
-- ???????????????? ZIP ????????????????
+- 使用用户提供的 CRX 文件实测安装成功，`manifest.json` 位于扩展根目录，共 78 个文件。
+- 将同一扩展重新打包为带顶层目录的 ZIP 后安装成功，顶层目录被自动展平。
+- 本地扩展包限制 512MB，解压总量限制 512MB，最多 6000 个条目。
+
+## 44. Chrome 137+ 扩展自动加载
+
+- 启动参数保留 `--load-extension` 兼容 Chromium/旧版 Chrome；只要环境分配了扩展，就同时追加 `--enable-unsafe-extension-debugging`。
+- 浏览器启动后、页面导航前，通过浏览器级 CDP `Extensions.loadUnpacked` 逐个加载扩展目录。
+- 使用 Chrome 156.0.8078.79 品牌版实测：环境启动后 `/json/list` 中出现 `chrome-extension://.../background.js` 的 service worker target，扩展自动加载成功。
+- 运行中的环境修改扩展分配仍按原提示需要重启浏览器生效。
