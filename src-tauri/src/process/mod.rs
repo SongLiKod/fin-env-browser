@@ -3370,7 +3370,27 @@ async fn handle_request_paused(instance: &Arc<BrowserInstance>, params: Value) -
 
 #[cfg(test)]
 mod launch_args_tests {
-    use super::merge_launch_args;
+    use super::{build_chromium_args, merge_launch_args};
+    use crate::fingerprint::Fingerprint;
+    use std::path::Path;
+
+    #[test]
+    fn extensions_enable_cdp_debugging() {
+        let args = build_chromium_args(
+            &Fingerprint::default(),
+            Path::new("C:/tmp/profile"),
+            9222,
+            None,
+            &[],
+            &["C:/tmp/extension".to_string()],
+            "FinEnv test",
+            "about:blank",
+            false,
+            &[],
+        );
+        assert!(args.contains(&"--enable-unsafe-extension-debugging".to_string()));
+        assert!(args.contains(&"--load-extension=C:/tmp/extension".to_string()));
+    }
 
     #[test]
     fn environment_switch_replaces_global_switch() {
