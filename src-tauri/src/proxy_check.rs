@@ -111,9 +111,34 @@ pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyChe
 
     let http_start = Instant::now();
     let lookup = lookup_exit(&client).await;
+    let has_exit = lookup.ip.is_some();
+    let socks_auth_unsupported =
+        proxy.protocol.eq_ignore_ascii_case("socks5") && !proxy.username.is_empty();
+    let (google_ok, youtube_ok) = if has_exit && !socks_auth_unsupported {
+        tokio::join!(
+            probe_https(&client, "https://www.google.com/generate_204"),
+            probe_https(&client, "https://www.youtube.com/robots.txt")
+        )
+    } else {
+        (false, false)
+    };
+    let message = if socks_auth_unsupported {
+        "Chromium 不支持 SOCKS5 用户名/密码认证，浏览器无法使用该代理；请改用 HTTP 代理或本地转发"
+            .into()
+    } else if !has_exit {
+        lookup.message.clone()
+    } else if google_ok && youtube_ok {
+        "出口检测成功，Google / YouTube 可访问".into()
+    } else if google_ok {
+        "出口检测成功，但 YouTube 不可访问".into()
+    } else if youtube_ok {
+        "出口检测成功，但 Google 不可访问".into()
+    } else {
+        "出口检测成功，但 Google / YouTube 均不可访问".into()
+    };
     ProxyCheckResult {
         proxy_id: proxy.id.clone(),
-        ok: lookup.ip.is_some(),
+        ok: has_exit && google_ok && youtube_ok,
         latency_ms: Some(tcp_latency + http_start.elapsed().as_millis() as u64),
         exit_ip: lookup.ip,
         country: lookup.country_code.clone().or(lookup.country),
@@ -124,9 +149,17 @@ pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyChe
                 .map(crate::fingerprint::timezone_for_country)
         }),
         city: lookup.city,
-        message: lookup.message,
+        message,
         checked_at,
     }
+}
+
+async fn probe_https(client: &reqwest::Client, url: &str) -> bool {
+    matches!(
+        timeout(Duration::from_secs(6), client.get(url).send()).await,
+        Ok(Ok(response))
+            if response.status().is_success() || response.status().is_redirection()
+    )
 }
 
 /// Check and persist one proxy. Keeps the existing single-proxy behaviour.

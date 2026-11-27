@@ -204,7 +204,7 @@ export function ProxiesPage() {
       if (result.ok) {
         toast.success(
           `代理 ${proxy.name} 连通`,
-          `${result.exitIp ?? '未知出口'} · ${result.latencyMs ?? '—'}ms`,
+          `${result.exitIp ?? '未知出口'} · ${result.latencyMs ?? '—'}ms · ${result.message}`,
         );
       } else {
         toast.error(`代理 ${proxy.name} 检测失败`, result.message);
@@ -308,7 +308,7 @@ export function ProxiesPage() {
           </p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight text-content-main">代理池</h1>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-content-weak">
-            管理 HTTP / HTTPS / SOCKS5 代理与订阅源，支持批量导入、批量检测、分组标签和停用节点清理。
+            管理 HTTP / HTTPS / SOCKS5 代理与订阅源，支持批量导入、批量检测、分组标签和停用节点清理。检测会同时验证 Google / YouTube 可达性。
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -593,9 +593,11 @@ export function ProxiesPage() {
                                 {proxy.disabledReason === 'subscription_missing' ? '订阅缺失' : '已停用'}
                               </Badge>
                             ) : ok === true ? (
-                              <Badge tone="success">
-                                <CheckCircle2 className="h-3 w-3" /> 可用
-                              </Badge>
+                              <Tooltip content={proxy.lastCheckMessage ?? '最近一次检测成功'}>
+                                <Badge tone="success">
+                                  <CheckCircle2 className="h-3 w-3" /> 可用
+                                </Badge>
+                              </Tooltip>
                             ) : ok === false ? (
                               <Tooltip content={proxy.lastCheckMessage ?? '检测失败'}>
                                 <Badge tone="danger">
@@ -1706,6 +1708,11 @@ function ProxyEditorDialog({
             placeholder={proxy?.hasPassword ? '••••••••' : ''}
           />
         </Field>
+        {form.protocol === 'socks5' && form.username.trim() ? (
+          <p className="col-span-2 rounded-md border border-border bg-surface-secondary px-3 py-2 text-[11px] text-[var(--warning)]">
+            Chromium 不支持 SOCKS5 用户名/密码认证，带认证的 SOCKS5 代理在浏览器中不可用；请改用 HTTP 代理或本地转发。
+          </p>
+        ) : null}
         <Field label="分组">
           <Input
             value={form.groupName}
@@ -2307,11 +2314,20 @@ function AssignEnvsDialog({
   const toast = useToastStore();
   const [selected, setSelected] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState(false);
+  const [restartRunning, setRestartRunning] = React.useState(true);
 
   React.useEffect(() => {
     if (!open || !proxy) return;
     setSelected(envs.filter((env) => env.proxyId === proxy.id).map((env) => env.id));
+    setRestartRunning(true);
   }, [open, proxy, envs]);
+
+  const runningAffected = envs.filter(
+    (env) =>
+      env.runtime &&
+      ((selected.includes(env.id) && env.proxyId !== proxy?.id) ||
+        (!selected.includes(env.id) && env.proxyId === proxy?.id)),
+  );
 
   return (
     <Dialog
@@ -2335,11 +2351,32 @@ function AssignEnvsDialog({
                 const previouslyBound = envs
                   .filter((env) => env.proxyId === proxy.id && !selected.includes(env.id))
                   .map((env) => env.id);
-                if (previouslyBound.length > 0) {
-                  await ipc.proxyAssign(previouslyBound, null);
+                if (restartRunning && runningAffected.length > 0) {
+                  const runningIds = new Set(runningAffected.map((env) => env.id));
+                  const normalPreviouslyBound = previouslyBound.filter((id) => !runningIds.has(id));
+                  const normalSelected = selected.filter((id) => !runningIds.has(id));
+                  if (normalPreviouslyBound.length > 0) {
+                    await ipc.proxyAssign(normalPreviouslyBound, null);
+                  }
+                  await ipc.proxyAssign(normalSelected, proxy.id);
+                  for (const env of runningAffected) {
+                    await ipc.browserSwitchProxy(
+                      env.id,
+                      selected.includes(env.id) ? proxy.id : null,
+                      true,
+                    );
+                  }
+                  toast.success(
+                    '代理分配完成',
+                    `${normalSelected.length + runningAffected.length} 个环境已更新，${runningAffected.length} 个运行中环境已重启生效`,
+                  );
+                } else {
+                  if (previouslyBound.length > 0) {
+                    await ipc.proxyAssign(previouslyBound, null);
+                  }
+                  const count = await ipc.proxyAssign(selected, proxy.id);
+                  toast.success('代理分配完成', `${count} 个环境已更新${previouslyBound.length ? `，${previouslyBound.length} 个环境已解绑` : ''}`);
                 }
-                const count = await ipc.proxyAssign(selected, proxy.id);
-                toast.success('代理分配完成', `${count} 个环境已更新${previouslyBound.length ? `，${previouslyBound.length} 个环境已解绑` : ''}`);
                 onDone();
                 onOpenChange(false);
               } catch (error) {
@@ -2383,7 +2420,19 @@ function AssignEnvsDialog({
           </label>
         ))}
       </div>
-      <p className="mt-2 text-[10px] text-content-hint">保存后运行中的环境需重启浏览器，代理才会生效。</p>
+      {runningAffected.length > 0 ? (
+        <label className="mt-2 flex items-center gap-2 text-xs text-content-weak">
+          <input
+            type="checkbox"
+            className="accent-[var(--color-primary)]"
+            checked={restartRunning}
+            onChange={(event) => setRestartRunning(event.target.checked)}
+          />
+          自动重启 {runningAffected.length} 个运行中的环境，使代理立即生效
+        </label>
+      ) : (
+        <p className="mt-2 text-[10px] text-content-hint">保存后运行中的环境需重启浏览器，代理才会生效。</p>
+      )}
     </Dialog>
   );
 }

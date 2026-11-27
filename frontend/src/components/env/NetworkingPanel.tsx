@@ -107,7 +107,7 @@ export function NetworkingPanel({
     try {
       const result = await ipc.proxyCheck(proxyId);
       setCheckResult(result);
-      if (result.ok) toast.success('代理连通', `${result.exitIp ?? '未知出口'} · ${result.latencyMs ?? '—'}ms`);
+      if (result.ok) toast.success('代理连通', `${result.exitIp ?? '未知出口'} · ${result.latencyMs ?? '—'}ms · ${result.message}`);
       else toast.error('代理检测失败', result.message);
     } catch (error) {
       toastError(error);
