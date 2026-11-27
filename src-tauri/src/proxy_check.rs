@@ -110,35 +110,39 @@ pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyChe
     };
 
     let http_start = Instant::now();
-    let lookup = lookup_exit(&client).await;
-    let has_exit = lookup.ip.is_some();
     let socks_auth_unsupported =
         proxy.protocol.eq_ignore_ascii_case("socks5") && !proxy.username.is_empty();
-    let (google_ok, youtube_ok) = if has_exit && !socks_auth_unsupported {
+    let (lookup, google_ok, youtube_ok) = if socks_auth_unsupported {
+        (lookup_exit(&client).await, false, false)
+    } else {
         tokio::join!(
+            lookup_exit(&client),
             probe_https(&client, "https://www.google.com/generate_204"),
             probe_https(&client, "https://www.youtube.com/robots.txt")
         )
-    } else {
-        (false, false)
     };
+    let has_exit = lookup.ip.is_some();
     let message = if socks_auth_unsupported {
         "Chromium 不支持 SOCKS5 用户名/密码认证，浏览器无法使用该代理；请改用 HTTP 代理或本地转发"
             .into()
-    } else if !has_exit {
-        lookup.message.clone()
     } else if google_ok && youtube_ok {
-        "出口检测成功，Google / YouTube 可访问".into()
+        if has_exit {
+            "Google / YouTube 可访问，出口信息解析成功".into()
+        } else {
+            "Google / YouTube 可访问，但出口 IP 解析失败".into()
+        }
     } else if google_ok {
-        "出口检测成功，但 YouTube 不可访问".into()
+        "Google 可访问，但 YouTube 不可访问".into()
     } else if youtube_ok {
-        "出口检测成功，但 Google 不可访问".into()
+        "YouTube 可访问，但 Google 不可访问".into()
+    } else if has_exit {
+        "出口信息解析成功，但 Google / YouTube 均不可访问".into()
     } else {
-        "出口检测成功，但 Google / YouTube 均不可访问".into()
+        format!("{}；Google / YouTube 均不可访问", lookup.message)
     };
     ProxyCheckResult {
         proxy_id: proxy.id.clone(),
-        ok: has_exit && google_ok && youtube_ok,
+        ok: google_ok && youtube_ok,
         latency_ms: Some(tcp_latency + http_start.elapsed().as_millis() as u64),
         exit_ip: lookup.ip,
         country: lookup.country_code.clone().or(lookup.country),
@@ -156,7 +160,7 @@ pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyChe
 
 async fn probe_https(client: &reqwest::Client, url: &str) -> bool {
     matches!(
-        timeout(Duration::from_secs(6), client.get(url).send()).await,
+        timeout(Duration::from_secs(8), client.get(url).send()).await,
         Ok(Ok(response))
             if response.status().is_success() || response.status().is_redirection()
     )
@@ -249,6 +253,57 @@ async fn lookup_exit(client: &reqwest::Client) -> ExitLookup {
         },
         Err(e) => {
             message = format!("出口 HTTP 请求失败: {e}");
+        }
+    }
+
+    if exit_ip.is_none() {
+        if let Ok(Ok(response)) = timeout(
+            Duration::from_secs(6),
+            client.get("https://ipinfo.io/json").send(),
+        )
+        .await
+        {
+            if let Ok(value) = response.json::<Value>().await {
+                exit_ip = value
+                    .get("ip")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
+                country = value
+                    .get("country")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
+                country_code = country.clone();
+                timezone = value
+                    .get("timezone")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
+                city = value
+                    .get("city")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
+                if exit_ip.is_some() {
+                    message = "备用 HTTPS 出口检测成功".into();
+                }
+            }
+        }
+    }
+
+    if exit_ip.is_none() {
+        if let Ok(Ok(response)) = timeout(
+            Duration::from_secs(6),
+            client.get("https://api.ipify.org?format=json").send(),
+        )
+        .await
+        {
+            if let Ok(value) = response.json::<Value>().await {
+                exit_ip = value
+                    .get("ip")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
+                if exit_ip.is_some() {
+                    message = "备用 HTTPS 出口检测成功".into();
+                }
+            }
         }
     }
 
