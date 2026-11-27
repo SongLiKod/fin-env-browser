@@ -282,20 +282,21 @@ fn parse_line(
     if let Ok((host, rest)) = split_host_port_with_rest(line) {
         let parts = rest.splitn(3, ':').collect::<Vec<_>>();
         if parts.len() >= 2 {
-            let port = parse_port(parts[0])?;
-            let username = parts[1].to_string();
-            let password = parts.get(2).map(|v| v.to_string());
-            return finish_entry(
-                line_no,
-                options,
-                index,
-                None,
-                default_protocol(options),
-                host,
-                port,
-                username,
-                password,
-            );
+            if let Ok(port) = parse_port(parts[0]) {
+                let username = parts[1].to_string();
+                let password = parts.get(2).map(|v| v.to_string());
+                return finish_entry(
+                    line_no,
+                    options,
+                    index,
+                    None,
+                    default_protocol(options),
+                    host,
+                    port,
+                    username,
+                    password,
+                );
+            }
         }
     }
     if let Some((userinfo, hostport)) = line.rsplit_once('@') {
