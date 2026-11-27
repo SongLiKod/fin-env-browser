@@ -898,6 +898,9 @@ pub struct ProxyDiscoveryInput {
     pub default_protocol: Option<String>,
     #[serde(default)]
     pub max_results: Option<u32>,
+    /// 每个来源最多抓取多少条候选，默认 5000。
+    #[serde(default)]
+    pub per_source_limit: Option<u32>,
     /// 是否抓取内置的公开代理列表（Proxifly / TheSpeedX 等）。
     #[serde(default)]
     pub include_public_lists: Option<bool>,

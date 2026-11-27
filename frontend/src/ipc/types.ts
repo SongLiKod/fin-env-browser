@@ -690,6 +690,7 @@ export interface ProxyDiscoveryInput {
   followLinks?: boolean;
   defaultProtocol?: 'http' | 'https' | 'socks5';
   maxResults?: number;
+  perSourceLimit?: number;
   includePublicLists?: boolean;
   verify?: boolean;
 }

@@ -1137,6 +1137,7 @@ function ProxyDiscoveryDialog({
   const [followLinks, setFollowLinks] = React.useState(true);
   const [protocol, setProtocol] = React.useState<'http' | 'https' | 'socks5'>('http');
   const [maxResults, setMaxResults] = React.useState('200');
+  const [perSourceLimit, setPerSourceLimit] = React.useState('5000');
   const [result, setResult] = React.useState<ProxyDiscoveryResult | null>(null);
   const [selected, setSelected] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState(false);
@@ -1166,6 +1167,7 @@ function ProxyDiscoveryDialog({
       if (typeof value.followLinks === 'boolean') setFollowLinks(value.followLinks);
       if (value.protocol === 'http' || value.protocol === 'https' || value.protocol === 'socks5') setProtocol(value.protocol);
       if (typeof value.maxResults === 'string') setMaxResults(value.maxResults);
+      if (typeof value.perSourceLimit === 'string') setPerSourceLimit(value.perSourceLimit);
       if (typeof value.includePublicLists === 'boolean') setIncludePublicLists(value.includePublicLists);
       if (typeof value.verify === 'boolean') setVerify(value.verify);
     } catch {
@@ -1177,7 +1179,7 @@ function ProxyDiscoveryDialog({
     try {
       window.localStorage.setItem(
         'finenv:proxy-discovery',
-        JSON.stringify({ searchQuery, engines, githubQuery, friendLinks, followLinks, protocol, maxResults, includePublicLists, verify }),
+        JSON.stringify({ searchQuery, engines, githubQuery, friendLinks, followLinks, protocol, maxResults, perSourceLimit, includePublicLists, verify }),
       );
     } catch {
       // Ignore storage failures.
@@ -1198,6 +1200,7 @@ function ProxyDiscoveryDialog({
     followLinks,
     defaultProtocol: protocol,
     maxResults: Number(maxResults) || 200,
+    perSourceLimit: Math.min(20000, Math.max(100, Number(perSourceLimit) || 5000)),
     includePublicLists,
     verify,
   });
@@ -1425,7 +1428,7 @@ function ProxyDiscoveryDialog({
             checked={verify}
             onCheckedChange={setVerify}
             label="只返回真正可用的节点"
-            description="逐个实测 Google / YouTube 可达性，自动过滤失效和受限节点。"
+            description="TCP 预筛后再实测 Google / YouTube；候选较多时首次扫描可能需要 1-3 分钟。"
           />
         </div>
 
@@ -1445,6 +1448,18 @@ function ProxyDiscoveryDialog({
               value={maxResults}
               onChange={(event) => setMaxResults(event.target.value)}
               className="w-24"
+            />
+          </Field>
+          <Field label="单来源上限">
+            <Input
+              type="number"
+              min={100}
+              max={20000}
+              step={500}
+              value={perSourceLimit}
+              onChange={(event) => setPerSourceLimit(event.target.value)}
+              className="w-28"
+              title="每个来源抓取的候选数量，默认 5000；数值越大扫描越慢"
             />
           </Field>
           <div className="pb-1.5">
