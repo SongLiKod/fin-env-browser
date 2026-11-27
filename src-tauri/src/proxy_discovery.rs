@@ -8,6 +8,8 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use futures_util::{stream, StreamExt};
 use regex::Regex;
 use serde_json::Value;
+use tokio::net::TcpStream;
+use tokio::time::timeout;
 
 use crate::{
     audit_log::{actions, Audit},
@@ -24,7 +26,7 @@ use crate::{
 };
 
 const MAX_PAGE_BYTES: usize = 2 * 1024 * 1024;
-const MAX_PER_PAGE: usize = 500;
+const MAX_EXTRACT_PER_PAGE: usize = 20000;
 const STORE_TTL: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone)]
@@ -111,6 +113,7 @@ pub async fn scan(
     let options = discovery_options(input);
     let follow = input.follow_links.unwrap_or(true);
     let max_results = input.max_results.unwrap_or(200).clamp(1, 500);
+    let per_source_limit = input.per_source_limit.unwrap_or(5000).clamp(100, 20000) as usize;
     let tasks = build_tasks(input);
     let client = build_client()?;
 
@@ -118,7 +121,7 @@ pub async fn scan(
         .map(|task| {
             let client = client.clone();
             let options = options.clone();
-            async move { run_task(&client, task, &options, follow).await }
+            async move { run_task(&client, task, &options, follow, per_source_limit).await }
         })
         .buffer_unordered(6)
         .collect::<Vec<_>>()
@@ -160,7 +163,10 @@ pub async fn scan(
             .cmp(&right.parsed.host)
             .then(left.parsed.port.cmp(&right.parsed.port))
     });
-    drafts.truncate(max_results as usize);
+    let verify = input.verify.unwrap_or(true);
+    if !verify {
+        drafts.truncate(max_results as usize);
+    }
 
     let keys = drafts
         .iter()
@@ -223,36 +229,79 @@ pub async fn scan(
 
     let mut verified = 0u32;
     let mut rejected = 0u32;
-    if input.verify.unwrap_or(true) && !candidates.is_empty() {
-        let checked = stream::iter(candidates)
-            .map(|mut candidate| {
-                let state = state.clone();
-                async move {
-                    match check_candidate(&state, &candidate.id).await {
-                        Ok(result) => {
-                            candidate.verified = result.ok;
-                            candidate.latency_ms = result.latency_ms;
-                            candidate.exit_ip = result.exit_ip;
-                            candidate.check_message = Some(result.message);
-                            (candidate, result.ok)
-                        }
-                        Err(error) => {
-                            candidate.check_message = Some(error.message().to_string());
-                            (candidate, false)
-                        }
-                    }
+    if verify && !candidates.is_empty() {
+        let total = candidates.len() as u32;
+        // 免费代理列表里大量节点端口未开放，先用短超时 TCP 预筛，
+        // 避免对每个死节点都发起完整的 Google / YouTube 检测。
+        let reachable = stream::iter(candidates)
+            .map(|candidate| async move {
+                if tcp_reachable(&candidate.host, candidate.port).await {
+                    Some(candidate)
+                } else {
+                    None
                 }
             })
-            .buffer_unordered(16)
+            .buffer_unordered(128)
+            .filter_map(|candidate| async move { candidate })
             .collect::<Vec<_>>()
             .await;
-        rejected = checked.len() as u32;
-        candidates = checked
-            .into_iter()
-            .filter_map(|(candidate, ok)| ok.then_some(candidate))
-            .collect();
+        if reachable.is_empty() {
+            errors.push("候选节点均无法建立 TCP 连接".into());
+            candidates = Vec::new();
+        } else {
+            // 第二层先用 Google 204 快速探测，过滤掉开放端口但不是代理的节点，
+            // 再对通过者做完整的 Google / YouTube / 出口信息检测。
+            let quick = stream::iter(reachable)
+                .map(|candidate| {
+                    let state = state.clone();
+                    async move {
+                        if quick_google_reachable(&state, &candidate.id).await {
+                            Some(candidate)
+                        } else {
+                            None
+                        }
+                    }
+                })
+                .buffer_unordered(48)
+                .filter_map(|candidate| async move { candidate })
+                .collect::<Vec<_>>()
+                .await;
+            if quick.is_empty() {
+                errors.push("TCP 可连接，但没有节点通过 Google 探测".into());
+                candidates = Vec::new();
+            } else {
+                let checked = stream::iter(quick)
+                    .map(|mut candidate| {
+                        let state = state.clone();
+                        async move {
+                            match check_candidate(&state, &candidate.id).await {
+                                Ok(result) => {
+                                    candidate.verified = result.ok;
+                                    candidate.latency_ms = result.latency_ms;
+                                    candidate.exit_ip = result.exit_ip;
+                                    candidate.check_message = Some(result.message);
+                                    (candidate, result.ok)
+                                }
+                                Err(error) => {
+                                    candidate.check_message = Some(error.message().to_string());
+                                    (candidate, false)
+                                }
+                            }
+                        }
+                    })
+                    .buffer_unordered(24)
+                    .collect::<Vec<_>>()
+                    .await;
+                candidates = checked
+                    .into_iter()
+                    .filter_map(|(candidate, ok)| ok.then_some(candidate))
+                    .collect();
+            }
+        }
+        candidates.sort_by_key(|candidate| candidate.latency_ms.unwrap_or(u64::MAX));
+        candidates.truncate(max_results as usize);
         verified = candidates.len() as u32;
-        rejected = rejected.saturating_sub(verified);
+        rejected = total.saturating_sub(verified);
         if candidates.is_empty() {
             errors.push("候选节点均未通过 Google / YouTube 可达性验证".into());
         }
@@ -268,6 +317,17 @@ pub async fn scan(
     })
 }
 
+async fn tcp_reachable(host: &str, port: u16) -> bool {
+    matches!(
+        timeout(
+            Duration::from_millis(2500),
+            TcpStream::connect((host, port))
+        )
+        .await,
+        Ok(Ok(_))
+    )
+}
+
 /// Check one scanned candidate without persisting it. Results are returned to
 /// the discovery dialog so users can see latency before adding nodes.
 pub async fn check_candidate(state: &SharedState, candidate_id: &str) -> Result<ProxyCheckResult> {
@@ -276,6 +336,11 @@ pub async fn check_candidate(state: &SharedState, candidate_id: &str) -> Result<
         .proxy_discovery
         .get(candidate_id)
         .ok_or_else(|| AppError::not_found("节点已过期，请重新扫描"))?;
+    let (proxy, password) = record_proxy(&record);
+    Ok(check_proxy_core(&proxy, password.as_deref()).await)
+}
+
+fn record_proxy(record: &DiscoveredCandidate) -> (Proxy, Option<String>) {
     let password = record.password.clone().filter(|value| !value.is_empty());
     let proxy = Proxy {
         id: record.candidate.id.clone(),
@@ -288,7 +353,39 @@ pub async fn check_candidate(state: &SharedState, candidate_id: &str) -> Result<
         enabled: true,
         ..Default::default()
     };
-    Ok(check_proxy_core(&proxy, password.as_deref()).await)
+    (proxy, password)
+}
+
+async fn quick_google_reachable(state: &SharedState, candidate_id: &str) -> bool {
+    let Some(record) = state.proxy_discovery.get(candidate_id) else {
+        return false;
+    };
+    let (proxy, password) = record_proxy(&record);
+    let Ok(proxy_url) =
+        crate::proxy_check::build_proxy_url_with_auth(&proxy, password.as_deref().unwrap_or(""))
+    else {
+        return false;
+    };
+    let Ok(proxy) = reqwest::Proxy::all(&proxy_url) else {
+        return false;
+    };
+    let Ok(client) = reqwest::Client::builder()
+        .proxy(proxy)
+        .timeout(Duration::from_secs(5))
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) FinEnv/1.0")
+        .build()
+    else {
+        return false;
+    };
+    matches!(
+        timeout(
+            Duration::from_secs(5),
+            client.get("https://www.google.com/generate_204").send()
+        )
+        .await,
+        Ok(Ok(response))
+            if response.status().is_success() || response.status().is_redirection()
+    )
 }
 
 pub fn add(
@@ -472,9 +569,14 @@ fn build_tasks(input: &ProxyDiscoveryInput) -> Vec<DiscoveryTask> {
         // 这些是公开维护的纯文本代理列表，比搜索引擎抓取更稳定；
         // 扫描结束后仍会通过 Google / YouTube 实测过滤。
         tasks.push(DiscoveryTask::Feed {
-            url: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.txt".into(),
-            label: "Proxifly".into(),
-            default_protocol: None,
+            url: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt".into(),
+            label: "Proxifly HTTP".into(),
+            default_protocol: Some("http".into()),
+        });
+        tasks.push(DiscoveryTask::Feed {
+            url: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt".into(),
+            label: "Proxifly SOCKS5".into(),
+            default_protocol: Some("socks5".into()),
         });
         tasks.push(DiscoveryTask::Feed {
             url: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt".into(),
@@ -540,6 +642,7 @@ async fn run_task(
     task: DiscoveryTask,
     options: &ProxyImportOptions,
     follow: bool,
+    per_source_limit: usize,
 ) -> SourceOutcome {
     match task {
         DiscoveryTask::Search { engine, query } => {
@@ -549,10 +652,23 @@ async fn run_task(
                 "duckduckgo" => "DuckDuckGo",
                 _ => "Bing",
             };
-            run_page(client, &url, label, options, follow, 5).await
+            run_page(client, &url, label, options, follow, 5, per_source_limit).await
         }
-        DiscoveryTask::Github { query } => run_github(client, &query, options, follow).await,
-        DiscoveryTask::Link { url } => run_page(client, &url, "友情链接", options, follow, 8).await,
+        DiscoveryTask::Github { query } => {
+            run_github(client, &query, options, follow, per_source_limit).await
+        }
+        DiscoveryTask::Link { url } => {
+            run_page(
+                client,
+                &url,
+                "友情链接",
+                options,
+                follow,
+                8,
+                per_source_limit,
+            )
+            .await
+        }
         DiscoveryTask::Feed {
             url,
             label,
@@ -562,7 +678,7 @@ async fn run_task(
             if default_protocol.is_some() {
                 options.default_protocol = default_protocol;
             }
-            run_page(client, &url, &label, &options, false, 0).await
+            run_page(client, &url, &label, &options, false, 0, per_source_limit).await
         }
     }
 }
@@ -574,6 +690,7 @@ async fn run_page(
     options: &ProxyImportOptions,
     follow: bool,
     follow_limit: usize,
+    per_source_limit: usize,
 ) -> SourceOutcome {
     let mut status = ProxyDiscoverySourceStatus {
         kind: label.into(),
@@ -593,7 +710,7 @@ async fn run_page(
             };
         }
     };
-    let mut entries = extract_proxies(&text, options)
+    let mut entries = extract_proxies(&text, options, per_source_limit)
         .into_iter()
         .map(|parsed| FoundProxy {
             parsed,
@@ -601,24 +718,30 @@ async fn run_page(
             source_label: label.to_string(),
         })
         .collect::<Vec<_>>();
-    if follow {
+    if follow && entries.len() < per_source_limit {
         let links = extract_links(&text, url)
             .into_iter()
             .take(follow_limit)
             .collect::<Vec<_>>();
         let fetched = fetch_pages(client, links).await;
         for (link, page) in fetched {
+            if entries.len() >= per_source_limit {
+                break;
+            }
             if let Ok(page) = page {
-                entries.extend(extract_proxies(&page, options).into_iter().map(|parsed| {
-                    FoundProxy {
-                        parsed,
-                        source_url: link.clone(),
-                        source_label: label.to_string(),
-                    }
-                }));
+                entries.extend(
+                    extract_proxies(&page, options, per_source_limit)
+                        .into_iter()
+                        .map(|parsed| FoundProxy {
+                            parsed,
+                            source_url: link.clone(),
+                            source_label: label.to_string(),
+                        }),
+                );
             }
         }
     }
+    entries.truncate(per_source_limit);
     status.count = entries.len() as u32;
     if entries.is_empty() {
         status.message = "未发现可用代理".into();
@@ -631,6 +754,7 @@ async fn run_github(
     query: &str,
     options: &ProxyImportOptions,
     follow: bool,
+    per_source_limit: usize,
 ) -> SourceOutcome {
     let mut status = ProxyDiscoverySourceStatus {
         kind: "GitHub".into(),
@@ -708,7 +832,7 @@ async fn run_github(
             continue;
         };
         entries.extend(
-            extract_proxies(&text, options)
+            extract_proxies(&text, options, per_source_limit)
                 .into_iter()
                 .map(|parsed| FoundProxy {
                     parsed,
@@ -716,25 +840,31 @@ async fn run_github(
                     source_label: "GitHub".into(),
                 }),
         );
-        if follow {
+        if follow && entries.len() < per_source_limit {
             let links = extract_links(&text, &raw)
                 .into_iter()
                 .take(3)
                 .collect::<Vec<_>>();
             let fetched = fetch_pages(client, links).await;
             for (link, page) in fetched {
+                if entries.len() >= per_source_limit {
+                    break;
+                }
                 if let Ok(page) = page {
-                    entries.extend(extract_proxies(&page, options).into_iter().map(|parsed| {
-                        FoundProxy {
-                            parsed,
-                            source_url: link.clone(),
-                            source_label: "GitHub".into(),
-                        }
-                    }));
+                    entries.extend(
+                        extract_proxies(&page, options, per_source_limit)
+                            .into_iter()
+                            .map(|parsed| FoundProxy {
+                                parsed,
+                                source_url: link.clone(),
+                                source_label: "GitHub".into(),
+                            }),
+                    );
                 }
             }
         }
     }
+    entries.truncate(per_source_limit);
     status.count = entries.len() as u32;
     if entries.is_empty() {
         status.message = "仓库 README 未发现可用代理".into();
@@ -832,7 +962,12 @@ fn merge_key(parsed: &proxy_import::ParsedProxy) -> String {
     )
 }
 
-fn extract_proxies(text: &str, options: &ProxyImportOptions) -> Vec<proxy_import::ParsedProxy> {
+fn extract_proxies(
+    text: &str,
+    options: &ProxyImportOptions,
+    limit: usize,
+) -> Vec<proxy_import::ParsedProxy> {
+    let limit = limit.clamp(1, MAX_EXTRACT_PER_PAGE);
     let text = clean_text(text);
     let mut found: HashMap<String, proxy_import::ParsedProxy> = HashMap::new();
     for regex in proxy_regexes() {
@@ -869,11 +1004,11 @@ fn extract_proxies(text: &str, options: &ProxyImportOptions) -> Vec<proxy_import
                     found.insert(key, parsed);
                 }
             }
-            if found.len() >= MAX_PER_PAGE {
+            if found.len() >= limit {
                 break;
             }
         }
-        if found.len() >= MAX_PER_PAGE {
+        if found.len() >= limit {
             break;
         }
     }
@@ -1124,7 +1259,7 @@ mod tests {
             <a href="https://example.com/list">list</a>
             </html>
         "#;
-        let found = extract_proxies(html, &options());
+        let found = extract_proxies(html, &options(), 5000);
         assert_eq!(found.len(), 2);
         assert!(found.iter().any(|proxy| proxy.host == "1.2.3.4"));
     }
