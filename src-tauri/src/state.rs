@@ -14,6 +14,8 @@ use crate::{
     models::{new_id, now_iso, SessionInfo, Settings, User},
     paths,
     process::BrowserManager,
+    proxy_discovery::ProxyDiscoveryStore,
+    proxy_jobs::ProxyJobManager,
 };
 
 pub type SharedState = Arc<AppState>;
@@ -25,6 +27,8 @@ pub struct AppState {
     pub settings: Arc<RwLock<Settings>>,
     pub session: RwLock<Option<User>>,
     pub browsers: Arc<BrowserManager>,
+    pub proxy_jobs: Arc<ProxyJobManager>,
+    pub proxy_discovery: Arc<ProxyDiscoveryStore>,
     pub api: Arc<ApiServerHandle>,
     pub app_handle: Mutex<Option<tauri::AppHandle>>,
 }
@@ -56,6 +60,8 @@ impl AppState {
             settings,
             session: RwLock::new(None),
             browsers,
+            proxy_jobs: Arc::new(ProxyJobManager::new()),
+            proxy_discovery: Arc::new(ProxyDiscoveryStore::new()),
             api,
             app_handle: Mutex::new(None),
         }))

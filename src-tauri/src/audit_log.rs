@@ -95,6 +95,15 @@ pub mod actions {
     pub const PROXY_CHECK: &str = "proxy.check";
     pub const PROXY_ASSIGN: &str = "proxy.assign";
     pub const PROXY_ALIGN: &str = "proxy.align";
+    pub const PROXY_BATCH_IMPORT: &str = "proxy.batch_import";
+    pub const PROXY_BATCH_UPDATE: &str = "proxy.batch_update";
+    pub const PROXY_BATCH_DELETE: &str = "proxy.batch_delete";
+    pub const PROXY_BATCH_CHECK: &str = "proxy.batch_check";
+    pub const PROXY_SUBSCRIPTION_CREATE: &str = "proxy.subscription_create";
+    pub const PROXY_SUBSCRIPTION_UPDATE: &str = "proxy.subscription_update";
+    pub const PROXY_SUBSCRIPTION_DELETE: &str = "proxy.subscription_delete";
+    pub const PROXY_SUBSCRIPTION_REFRESH: &str = "proxy.subscription_refresh";
+    pub const PROXY_DISCOVERY_ADD: &str = "proxy.discovery_add";
     pub const FINGERPRINT_UPDATE: &str = "fingerprint.update";
     pub const FINGERPRINT_DETECT: &str = "fingerprint.detect";
     pub const SNAPSHOT_CREATE: &str = "snapshot.create";

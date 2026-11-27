@@ -140,7 +140,7 @@
 
 \- 指纹校验：请求BrowserLeaks/Pixelscan接口生成报告
 
-\- 代理检测：tcp ping、http连通性检测、IP解析
+\- 代理池：单条/批量导入、订阅源、在线发现（搜索引擎 / GitHub README / 友情链接）、后台批量检测、分组标签、停用节点清理；检测包含 tcp ping、http 连通性、IP/国家/城市/时区解析。
 
 \- 打包：tauri-cli，cross-rs 跨平台编译
 

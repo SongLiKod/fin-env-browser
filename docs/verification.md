@@ -22,13 +22,18 @@
 | 指纹检测面板 | `fingerprint_report::detect`、`PROBE_SCRIPT`、`DetectionPanel.tsx` |
 | 一键调用检测服务 | 新开 CDP 标签页访问 `detectionServiceUrl`，探针比对并评分 |
 
-## 3. 代理管理（P0）
+## 3. 代理管理（P0/P1）
 
 - 每环境绑定 HTTP/HTTPS/SOCKS5：`environments.proxy_id` + 启动参数 `--proxy-server`。
-- 连通性 + 出口 IP/国家/时区：`proxy_check.rs`、`Proxies.tsx`。
+- 连通性 + 出口 IP/国家/时区：`proxy_check.rs`、`Proxies.tsx`；批量检测使用 `proxy_jobs.rs` 后台 Job，支持并发、进度事件、取消。
 - IP/时区对齐：`services::align_proxy` + `fingerprint::apply_country_locale`。
 - 代理池批量分配：`proxy_assign` / `AssignEnvsDialog`。
-- 代理密码 AES-256-GCM：`proxies.password_enc`。
+- 批量导入：`proxy_import.rs` 支持纯文本、Base64、URI、JSON 与常见 Clash HTTP/SOCKS5 节点；`proxy_import_preview` 预览、`proxy_import_commit` 事务提交。
+- 订阅源：`proxy_subscriptions` + `proxy_subscription.rs`；手动刷新与可选自动刷新（默认关闭），源中消失节点停用并标记 `subscription_missing`，支持批量清理停用节点。
+- 在线发现：`proxy_discovery.rs` 从 Bing/DuckDuckGo/Google、GitHub 仓库 README、友情链接页面抓取候选节点，勾选后直接加入代理池；候选密码只存后端内存，接口不返回明文。
+- 分组/标签/备注/来源/分页筛选：`proxies` 新字段 + `ProxyFilter`。
+- 代理密码 AES-256-GCM；订阅 URL/Headers 落库加密、接口可回显明文。
+- 检测结论持久化：`last_check_ok` / `last_check_message` / `last_check_city` / `fail_count`，修复旧 `exit_ip` 导致的状态误判。
 
 ## 4. 浏览器内核隔离（P0）
 
@@ -113,6 +118,16 @@ cargo test
 ```
 
 ## 13. 本轮校验记录
+
+### 13.1 代理池增强（V4.3.x）
+
+- `cargo check --all-targets`：通过（0 warning）
+- `cargo test --no-run`：通过（测试目标编译成功；本机测试运行器因 `STATUS_ENTRYPOINT_NOT_FOUND` 无法启动，属于本机 Tauri/WebView2 链接环境问题）
+- `npm --prefix frontend run check`：通过（`tsc --noEmit` 0 error；Vitest 20 用例；Vite 生产构建成功）
+- `node scripts/verify.mjs`：通过（163 个 Tauri 命令、54 条 API 路由）
+- 迁移 SQL 使用 Python `sqlite3` 独立执行 001 + 011 验证：表/字段/索引创建成功，旧代理 `endpoint_key` 回填正确
+
+### 13.2 历史校验记录
 
 - `npm --prefix frontend run check`：通过（`tsc --noEmit` 0 error；Vitest 4 个文件 / 20 用例；Vite 生产构建成功，产物 `frontend/dist`）
 - `sdk/js npm test`：4/4 通过（URL/Header/JSON/错误映射）

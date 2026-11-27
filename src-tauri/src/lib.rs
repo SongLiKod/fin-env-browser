@@ -17,6 +17,10 @@ mod paths;
 mod plugins;
 mod process;
 mod proxy_check;
+mod proxy_discovery;
+mod proxy_import;
+mod proxy_jobs;
+mod proxy_subscription;
 mod services;
 mod start_page;
 mod state;
@@ -189,6 +193,7 @@ pub fn run() {
                     Err(e) => tracing::warn!(error = %e, "session restore failed"),
                 }
                 state.browsers.start_monitor();
+                proxy_subscription::start_scheduler(state.clone());
                 if state.settings().api_enabled {
                     match state.api.start(state.clone()).await {
                         Ok(status) => tracing::info!(url = %status.base_url, "API server ready"),
@@ -278,6 +283,24 @@ pub fn run() {
             commands::proxy_check,
             commands::proxy_assign,
             commands::proxy_align,
+            commands::proxy_query,
+            commands::proxy_stats,
+            commands::proxy_import_preview,
+            commands::proxy_import_commit,
+            commands::proxy_batch_check,
+            commands::proxy_job_get,
+            commands::proxy_job_cancel,
+            commands::proxy_batch_set_enabled,
+            commands::proxy_batch_update,
+            commands::proxy_batch_delete,
+            commands::proxy_batch_delete_disabled,
+            commands::proxy_subscription_list,
+            commands::proxy_subscription_create,
+            commands::proxy_subscription_update,
+            commands::proxy_subscription_delete,
+            commands::proxy_subscription_refresh,
+            commands::proxy_discovery_scan,
+            commands::proxy_discovery_add,
             commands::browser_open,
             commands::browser_close,
             commands::browser_status,

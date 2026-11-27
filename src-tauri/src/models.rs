@@ -478,13 +478,54 @@ pub struct Proxy {
     pub exit_ip: Option<String>,
     pub exit_country: Option<String>,
     pub exit_timezone: Option<String>,
+    #[serde(default)]
+    pub group_name: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub note: String,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub subscription_id: Option<String>,
+    #[serde(default)]
+    pub weight: u32,
+    #[serde(default)]
+    pub last_check_ok: Option<bool>,
+    #[serde(default)]
+    pub last_check_message: Option<String>,
+    #[serde(default)]
+    pub last_check_city: Option<String>,
+    #[serde(default)]
+    pub fail_count: u32,
+    #[serde(default)]
+    pub disabled_reason: String,
+    #[serde(default, skip_serializing)]
+    pub endpoint_key: String,
     pub created_at: String,
     pub updated_at: String,
 }
 
 impl Proxy {
     pub fn url(&self) -> String {
-        format!("{}://{}:{}", self.protocol, self.host, self.port)
+        format!("{}://{}:{}", self.protocol, self.url_host(), self.port)
+    }
+
+    pub fn url_host(&self) -> String {
+        if self.host.contains(':') && !self.host.starts_with('[') {
+            format!("[{}]", self.host)
+        } else {
+            self.host.clone()
+        }
+    }
+
+    pub fn endpoint_key(&self) -> String {
+        crate::proxy_import::endpoint_key(
+            &self.protocol,
+            &self.host,
+            self.port,
+            &self.username,
+        )
     }
 }
 
@@ -501,6 +542,12 @@ pub struct ProxyInput {
     pub password: Option<String>,
     #[serde(default)]
     pub enabled: Option<bool>,
+    #[serde(default)]
+    pub group_name: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -520,6 +567,12 @@ pub struct UpdateProxyInput {
     pub password: Option<String>,
     #[serde(default)]
     pub enabled: Option<bool>,
+    #[serde(default)]
+    pub group_name: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -541,6 +594,361 @@ pub struct ProxyCheckResult {
 pub struct AlignProxyResult {
     pub environment: EnvironmentView,
     pub check: ProxyCheckResult,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyFilter {
+    #[serde(default)]
+    pub search: Option<String>,
+    #[serde(default)]
+    pub group_name: Option<String>,
+    #[serde(default)]
+    pub tag: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub subscription_id: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// ok | fail | untested | disabled
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub disabled_reason: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyPage {
+    pub items: Vec<Proxy>,
+    pub total: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyStats {
+    pub total: u32,
+    pub enabled: u32,
+    pub available: u32,
+    pub failed: u32,
+    pub untested: u32,
+    pub disabled: u32,
+    pub subscriptions: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyImportOptions {
+    #[serde(default)]
+    pub default_protocol: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub group_name: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub name_prefix: Option<String>,
+    /// skip | update | error
+    #[serde(default)]
+    pub on_duplicate: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyImportInput {
+    pub text: String,
+    #[serde(default)]
+    pub options: ProxyImportOptions,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyImportRow {
+    pub line: usize,
+    pub name: String,
+    pub protocol: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub has_password: bool,
+    pub duplicate: bool,
+    pub duplicate_kind: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyImportError {
+    pub line: usize,
+    pub raw: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyImportPreview {
+    pub total_lines: u32,
+    pub valid: u32,
+    pub invalid: u32,
+    pub duplicates: u32,
+    pub unsupported: u32,
+    pub rows: Vec<ProxyImportRow>,
+    pub errors: Vec<ProxyImportError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyImportResult {
+    pub total: u32,
+    pub valid: u32,
+    pub inserted: u32,
+    pub updated: u32,
+    pub skipped: u32,
+    pub failed: u32,
+    pub errors: Vec<ProxyImportError>,
+    pub proxy_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyBatchCheckInput {
+    #[serde(default)]
+    pub ids: Vec<String>,
+    #[serde(default)]
+    pub filter: Option<ProxyFilter>,
+    #[serde(default)]
+    pub only_enabled: Option<bool>,
+    #[serde(default)]
+    pub concurrency: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyBatchCheckStart {
+    pub job_id: String,
+    pub total: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyBatchProgress {
+    pub job_id: String,
+    pub kind: String,
+    pub state: String,
+    pub total: u32,
+    pub completed: u32,
+    pub ok: u32,
+    pub failed: u32,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub message: String,
+    pub recent: Vec<ProxyCheckResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyJobView {
+    pub progress: ProxyBatchProgress,
+    pub results: Vec<ProxyCheckResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyDeleteResult {
+    pub deleted: u32,
+    pub affected_envs: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyBatchUpdateInput {
+    pub ids: Vec<String>,
+    #[serde(default)]
+    pub group_name: Option<String>,
+    #[serde(default)]
+    pub add_tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub remove_tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyBatchEnableInput {
+    pub ids: Vec<String>,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyBatchDeleteInput {
+    pub ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxySubscriptionDeleteInput {
+    #[serde(default)]
+    pub delete_proxies: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxySubscription {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    #[serde(skip_serializing, default)]
+    pub url_enc: String,
+    pub headers: Option<String>,
+    #[serde(skip_serializing, default)]
+    pub headers_enc: String,
+    pub default_protocol: String,
+    pub group_name: String,
+    pub tags: Vec<String>,
+    pub enabled: bool,
+    pub auto_refresh: bool,
+    pub refresh_interval_min: u32,
+    pub last_refresh_at: Option<String>,
+    pub last_refresh_status: Option<String>,
+    pub last_refresh_message: Option<String>,
+    pub proxy_count: u32,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxySubscriptionInput {
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub headers: Option<String>,
+    #[serde(default)]
+    pub default_protocol: Option<String>,
+    #[serde(default)]
+    pub group_name: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub auto_refresh: Option<bool>,
+    #[serde(default)]
+    pub refresh_interval_min: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxySubscriptionUpdate {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub headers: Option<String>,
+    #[serde(default)]
+    pub default_protocol: Option<String>,
+    #[serde(default)]
+    pub group_name: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub auto_refresh: Option<bool>,
+    #[serde(default)]
+    pub refresh_interval_min: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyRefreshResult {
+    pub subscription_id: String,
+    pub added: u32,
+    pub updated: u32,
+    pub unchanged: u32,
+    pub disabled: u32,
+    pub restored: u32,
+    pub skipped: u32,
+    pub unsupported: u32,
+    pub total_in_feed: u32,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyDiscoveryInput {
+    #[serde(default)]
+    pub search_queries: Vec<String>,
+    #[serde(default)]
+    pub engines: Vec<String>,
+    #[serde(default)]
+    pub github_queries: Vec<String>,
+    #[serde(default)]
+    pub friend_links: Vec<String>,
+    #[serde(default)]
+    pub follow_links: Option<bool>,
+    #[serde(default)]
+    pub default_protocol: Option<String>,
+    #[serde(default)]
+    pub max_results: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyDiscoveryCandidate {
+    pub id: String,
+    pub name: String,
+    pub protocol: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub has_password: bool,
+    pub source: String,
+    pub source_url: String,
+    pub duplicate: bool,
+    pub existing_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyDiscoverySourceStatus {
+    pub kind: String,
+    pub target: String,
+    pub ok: bool,
+    pub count: u32,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyDiscoveryResult {
+    pub candidates: Vec<ProxyDiscoveryCandidate>,
+    pub sources: Vec<ProxyDiscoverySourceStatus>,
+    pub scanned: u32,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyDiscoveryAddInput {
+    pub candidate_ids: Vec<String>,
+    #[serde(default)]
+    pub group_name: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub on_duplicate: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

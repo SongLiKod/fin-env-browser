@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
@@ -12,11 +13,16 @@ use crate::{
         AuditFilter, BatchCreateResult, BatchCreateTemplateInput, CreateEnvironmentInput,
         CreateTemplateFromEnvInput, CreatedApiKey, DashboardStats, Environment, EnvironmentFilter,
         EnvironmentIpInfo, EnvironmentTemplate, EnvironmentView, Extension, FingerprintSnapshot,
-        Group, GroupInput, HostsEntryInput, MockRuleInput, Proxy, ProxyCheckResult, ProxyInput,
-        Settings, ThemeConfig, UpdateAccountInput, UpdateEnvironmentInput, UpdateProxyInput,
-        UpdateSettingsInput, UpdateTemplateInput, User, UserInput, UserUpdateInput,
+        Group, GroupInput, HostsEntryInput, MockRuleInput, Proxy, ProxyBatchCheckInput,
+        ProxyBatchCheckStart, ProxyBatchUpdateInput, ProxyCheckResult, ProxyDeleteResult,
+        ProxyFilter, ProxyImportInput, ProxyImportOptions, ProxyImportPreview, ProxyImportResult,
+        ProxyImportRow, ProxyInput, ProxyJobView, ProxyPage, ProxyRefreshResult, ProxyStats,
+        ProxySubscription,
+        ProxySubscriptionInput, ProxySubscriptionUpdate, Settings, ThemeConfig,
+        UpdateAccountInput, UpdateEnvironmentInput, UpdateProxyInput, UpdateSettingsInput,
+        UpdateTemplateInput, User, UserInput, UserUpdateInput,
     },
-    package, paths, proxy_check,
+    package, paths, proxy_check, proxy_import, proxy_subscription,
     state::SharedState,
 };
 
@@ -1114,7 +1120,7 @@ pub fn create_proxy(state: &SharedState, input: ProxyInput, actor: &str) -> Resu
     validate_proxy_input(&input)?;
     let now = now_iso();
     let password = input.password.unwrap_or_default();
-    let proxy = Proxy {
+    let mut proxy = Proxy {
         id: new_id(),
         name: input.name.trim().to_string(),
         protocol: input.protocol,
@@ -1133,9 +1139,26 @@ pub fn create_proxy(state: &SharedState, input: ProxyInput, actor: &str) -> Resu
         exit_ip: None,
         exit_country: None,
         exit_timezone: None,
+        group_name: input.group_name.unwrap_or_default().trim().to_string(),
+        tags: input.tags.unwrap_or_default(),
+        note: input.note.unwrap_or_default().trim().to_string(),
+        source: "manual".into(),
+        subscription_id: None,
+        weight: 1,
+        last_check_ok: None,
+        last_check_message: None,
+        last_check_city: None,
+        fail_count: 0,
+        disabled_reason: if input.enabled.unwrap_or(true) {
+            String::new()
+        } else {
+            "manual".into()
+        },
+        endpoint_key: String::new(),
         created_at: now.clone(),
         updated_at: now,
     };
+    proxy.endpoint_key = proxy.endpoint_key();
     state.db.insert_proxy(&proxy)?;
     Audit::global(
         &state.db,
@@ -1162,6 +1185,7 @@ pub fn update_proxy(
     actor: &str,
 ) -> Result<Proxy> {
     let mut proxy = state.db.get_proxy(id)?;
+    let mut reset_check = false;
     if let Some(name) = input.name {
         if name.trim().is_empty() {
             return Err(AppError::bad_request("代理名称不能为空"));
@@ -1172,22 +1196,35 @@ pub fn update_proxy(
         if !crate::models::PROXY_PROTOCOLS.contains(&protocol.as_str()) {
             return Err(AppError::bad_request("代理协议仅支持 http/https/socks5"));
         }
-        proxy.protocol = protocol;
+        if proxy.protocol != protocol {
+            reset_check = true;
+            proxy.protocol = protocol;
+        }
     }
     if let Some(host) = input.host {
         if host.trim().is_empty() {
             return Err(AppError::bad_request("代理主机不能为空"));
         }
-        proxy.host = host.trim().to_string();
+        let host = host.trim().to_string();
+        if proxy.host != host {
+            reset_check = true;
+            proxy.host = host;
+        }
     }
     if let Some(port) = input.port {
         if port == 0 {
             return Err(AppError::bad_request("代理端口不合法"));
         }
-        proxy.port = port;
+        if proxy.port != port {
+            reset_check = true;
+            proxy.port = port;
+        }
     }
     if let Some(username) = input.username {
-        proxy.username = username;
+        if proxy.username != username {
+            reset_check = true;
+            proxy.username = username;
+        }
     }
     if let Some(password) = input.password {
         proxy.password_enc = if password.is_empty() {
@@ -1196,10 +1233,31 @@ pub fn update_proxy(
             state.crypto.encrypt(&password)?
         };
         proxy.has_password = !password.is_empty();
+        reset_check = true;
     }
     if let Some(enabled) = input.enabled {
         proxy.enabled = enabled;
+        proxy.disabled_reason = if enabled {
+            String::new()
+        } else {
+            "manual".into()
+        };
     }
+    if let Some(group_name) = input.group_name {
+        proxy.group_name = group_name.trim().to_string();
+    }
+    if let Some(tags) = input.tags {
+        proxy.tags = tags;
+    }
+    if let Some(note) = input.note {
+        proxy.note = note.trim().to_string();
+    }
+    if reset_check {
+        proxy.last_check_ok = None;
+        proxy.last_check_message = Some("凭据或地址已更新，待重新检测".into());
+        proxy.fail_count = 0;
+    }
+    proxy.endpoint_key = proxy.endpoint_key();
     proxy.updated_at = now_iso();
     state.db.update_proxy(&proxy)?;
     Audit::global(
@@ -1226,6 +1284,620 @@ pub fn delete_proxy(state: &SharedState, id: &str, actor: &str) -> Result<()> {
     )?;
     state.db.delete_proxy(id)?;
     Ok(())
+}
+
+pub fn query_proxies(state: &SharedState, filter: &ProxyFilter) -> Result<ProxyPage> {
+    state.db.query_proxies(filter)
+}
+
+pub fn proxy_stats(state: &SharedState) -> Result<ProxyStats> {
+    state.db.proxy_stats()
+}
+
+fn normalize_import_options(options: &ProxyImportOptions) -> ProxyImportOptions {
+    ProxyImportOptions {
+        default_protocol: options
+            .default_protocol
+            .as_deref()
+            .map(|value| value.trim().to_ascii_lowercase())
+            .map(|value| if value == "socks5h" { "socks5".into() } else { value })
+            .filter(|value| crate::models::PROXY_PROTOCOLS.contains(&value.as_str()))
+            .or_else(|| Some("http".into())),
+        enabled: options.enabled.or(Some(true)),
+        group_name: options.group_name.clone(),
+        tags: options.tags.clone(),
+        name_prefix: options.name_prefix.clone(),
+        on_duplicate: Some(
+            options
+                .on_duplicate
+                .clone()
+                .filter(|value| matches!(value.as_str(), "skip" | "update" | "error"))
+                .unwrap_or_else(|| "skip".into()),
+        ),
+    }
+}
+
+pub fn preview_proxy_import(
+    state: &SharedState,
+    input: &ProxyImportInput,
+) -> Result<ProxyImportPreview> {
+    if input.text.len() > 8 * 1024 * 1024 {
+        return Err(AppError::bad_request("导入内容不能超过 8MB"));
+    }
+    let options = normalize_import_options(&input.options);
+    let parsed = proxy_import::parse_proxy_text(&input.text, &options);
+    let keys = parsed
+        .entries
+        .iter()
+        .map(|entry| {
+            proxy_import::endpoint_key(
+                &entry.protocol,
+                &entry.host,
+                entry.port,
+                &entry.username,
+            )
+        })
+        .collect::<Vec<_>>();
+    let existing = state
+        .db
+        .find_proxies_by_endpoint_keys(&keys)?
+        .into_iter()
+        .map(|proxy| (proxy.endpoint_key.clone(), proxy))
+        .collect::<HashMap<_, _>>();
+    let mut duplicates = 0u32;
+    let mut rows = parsed
+        .entries
+        .iter()
+        .map(|entry| {
+            let key = proxy_import::endpoint_key(
+                &entry.protocol,
+                &entry.host,
+                entry.port,
+                &entry.username,
+            );
+            let duplicate_kind = if entry.duplicate {
+                Some("in_batch".to_string())
+            } else if existing.contains_key(&key) {
+                Some("in_db".to_string())
+            } else {
+                None
+            };
+            let duplicate = duplicate_kind.is_some();
+            if duplicate {
+                duplicates += 1;
+            }
+            ProxyImportRow {
+                line: entry.line,
+                name: entry.name.clone(),
+                protocol: entry.protocol.clone(),
+                host: entry.host.clone(),
+                port: entry.port,
+                username: entry.username.clone(),
+                has_password: entry.password.as_deref().is_some_and(|value| !value.is_empty()),
+                duplicate,
+                duplicate_kind,
+                error: None,
+            }
+        })
+        .collect::<Vec<_>>();
+    rows.truncate(200);
+    let invalid = parsed.errors.len() as u32;
+    let mut errors = parsed.errors;
+    errors.truncate(200);
+    Ok(ProxyImportPreview {
+        total_lines: parsed.total_lines,
+        valid: parsed.entries.len() as u32,
+        invalid,
+        duplicates,
+        unsupported: parsed.unsupported,
+        rows,
+        errors,
+    })
+}
+
+pub fn import_proxies(
+    state: &SharedState,
+    input: &ProxyImportInput,
+    actor: &str,
+) -> Result<ProxyImportResult> {
+    if input.text.len() > 8 * 1024 * 1024 {
+        return Err(AppError::bad_request("导入内容不能超过 8MB"));
+    }
+    let options = normalize_import_options(&input.options);
+    let on_duplicate = options.on_duplicate.as_deref().unwrap_or("skip");
+    let parsed = proxy_import::parse_proxy_text(&input.text, &options);
+    if parsed.entries.is_empty() {
+        return Err(AppError::bad_request("没有可导入的有效代理"));
+    }
+    if parsed.entries.len() > 5000 {
+        return Err(AppError::bad_request("单次最多导入 5000 个代理"));
+    }
+    let keys = parsed
+        .entries
+        .iter()
+        .map(|entry| {
+            proxy_import::endpoint_key(
+                &entry.protocol,
+                &entry.host,
+                entry.port,
+                &entry.username,
+            )
+        })
+        .collect::<Vec<_>>();
+    let existing = state
+        .db
+        .find_proxies_by_endpoint_keys(&keys)?
+        .into_iter()
+        .map(|proxy| (proxy.endpoint_key.clone(), proxy))
+        .collect::<HashMap<_, _>>();
+
+    let now = now_iso();
+    let mut inserts = Vec::new();
+    let mut updates = Vec::new();
+    let mut errors = parsed.errors;
+    let mut skipped = 0u32;
+    let mut proxy_ids = Vec::new();
+    let mut seen = HashSet::new();
+
+    for entry in parsed.entries {
+        let key = proxy_import::endpoint_key(
+            &entry.protocol,
+            &entry.host,
+            entry.port,
+            &entry.username,
+        );
+        if entry.duplicate || !seen.insert(key.clone()) {
+            skipped += 1;
+            continue;
+        }
+        if let Some(existing) = existing.get(&key) {
+            if on_duplicate == "error" {
+                errors.push(crate::models::ProxyImportError {
+                    line: entry.line,
+                    raw: format!("{}:{}", entry.host, entry.port),
+                    message: "代理已存在".into(),
+                });
+                skipped += 1;
+                continue;
+            }
+            if on_duplicate == "skip" {
+                skipped += 1;
+                continue;
+            }
+            let mut proxy = existing.clone();
+            proxy.protocol = entry.protocol;
+            proxy.username = entry.username;
+            if let Some(password) = entry.password {
+                if !password.is_empty() {
+                    proxy.password_enc = state.crypto.encrypt(&password)?;
+                    proxy.has_password = true;
+                    proxy.last_check_ok = None;
+                    proxy.last_check_message = Some("凭据已更新，待重新检测".into());
+                    proxy.fail_count = 0;
+                }
+            }
+            proxy.endpoint_key = key;
+            proxy.updated_at = now.clone();
+            proxy_ids.push(proxy.id.clone());
+            updates.push(proxy);
+            continue;
+        }
+        let password = entry.password.unwrap_or_default();
+        let mut proxy = Proxy {
+            id: new_id(),
+            name: entry.name,
+            protocol: entry.protocol,
+            host: entry.host,
+            port: entry.port,
+            username: entry.username,
+            password_enc: if password.is_empty() {
+                String::new()
+            } else {
+                state.crypto.encrypt(&password)?
+            },
+            has_password: !password.is_empty(),
+            enabled: options.enabled.unwrap_or(true),
+            last_check_at: None,
+            latency_ms: None,
+            exit_ip: None,
+            exit_country: None,
+            exit_timezone: None,
+            group_name: options.group_name.clone().unwrap_or_default().trim().to_string(),
+            tags: options.tags.clone().unwrap_or_default(),
+            note: String::new(),
+            source: "import".into(),
+            subscription_id: None,
+            weight: 1,
+            last_check_ok: None,
+            last_check_message: None,
+            last_check_city: None,
+            fail_count: 0,
+            disabled_reason: if options.enabled.unwrap_or(true) {
+                String::new()
+            } else {
+                "manual".into()
+            },
+            endpoint_key: String::new(),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        proxy.endpoint_key = proxy.endpoint_key();
+        proxy_ids.push(proxy.id.clone());
+        inserts.push(proxy);
+    }
+
+    let (inserted, updated) = state.db.apply_proxy_import(&inserts, &updates)?;
+    let result = ProxyImportResult {
+        total: parsed.total_lines,
+        valid: (inserted + updated + skipped) as u32,
+        inserted,
+        updated,
+        skipped,
+        failed: errors.len() as u32,
+        errors,
+        proxy_ids,
+    };
+    Audit::global(
+        &state.db,
+        actor,
+        actions::PROXY_BATCH_IMPORT,
+        format!(
+            "批量导入代理：新增 {}，更新 {}，跳过 {}，失败 {}",
+            result.inserted, result.updated, result.skipped, result.failed
+        ),
+    )?;
+    Ok(result)
+}
+
+pub fn start_proxy_batch_check(
+    state: &SharedState,
+    input: &ProxyBatchCheckInput,
+    actor: &str,
+) -> Result<ProxyBatchCheckStart> {
+    let mut proxies = Vec::new();
+    let mut seen = HashSet::new();
+    if !input.ids.is_empty() {
+        for id in &input.ids {
+            if seen.insert(id.clone()) {
+                proxies.push(state.db.get_proxy(id)?);
+            }
+        }
+    } else {
+        let mut filter = input.filter.clone().unwrap_or_default();
+        if input.only_enabled.unwrap_or(true) {
+            filter.enabled = Some(true);
+        }
+        filter.limit = Some(500);
+        filter.offset = Some(0);
+        let mut page = state.db.query_proxies(&filter)?;
+        if page.total > 2000 {
+            return Err(AppError::bad_request(
+                "单次最多检测 2000 个代理，请先筛选或分批执行",
+            ));
+        }
+        let expected = page.total as usize;
+        proxies.append(&mut page.items);
+        while proxies.len() < expected && proxies.len() < 2000 {
+            filter.offset = Some(proxies.len() as u32);
+            let mut next = state.db.query_proxies(&filter)?;
+            if next.items.is_empty() {
+                break;
+            }
+            proxies.append(&mut next.items);
+        }
+    }
+    if proxies.len() > 2000 {
+        return Err(AppError::bad_request(
+            "单次最多检测 2000 个代理，请先筛选或分批执行",
+        ));
+    }
+    let mut unique = Vec::with_capacity(proxies.len());
+    let mut ids = HashSet::new();
+    for proxy in proxies {
+        if ids.insert(proxy.id.clone()) {
+            unique.push(proxy);
+        }
+    }
+    state.proxy_jobs.start_check(
+        state.clone(),
+        unique,
+        input.concurrency.unwrap_or(8),
+        actor.to_string(),
+    )
+}
+
+pub fn get_proxy_job(state: &SharedState, job_id: &str) -> Result<ProxyJobView> {
+    state.proxy_jobs.get(job_id)
+}
+
+pub fn cancel_proxy_job(state: &SharedState, job_id: &str) -> Result<()> {
+    state.proxy_jobs.cancel(job_id)
+}
+
+pub fn set_proxies_enabled(
+    state: &SharedState,
+    ids: &[String],
+    enabled: bool,
+    actor: &str,
+) -> Result<u32> {
+    let count = state
+        .db
+        .set_proxies_enabled(ids, enabled, "manual")?;
+    Audit::global(
+        &state.db,
+        actor,
+        actions::PROXY_BATCH_UPDATE,
+        format!(
+            "批量{}代理 {} 个",
+            if enabled { "启用" } else { "停用" },
+            count
+        ),
+    )?;
+    Ok(count)
+}
+
+pub fn update_proxies_meta(
+    state: &SharedState,
+    input: &ProxyBatchUpdateInput,
+    actor: &str,
+) -> Result<u32> {
+    if input.ids.is_empty() {
+        return Ok(0);
+    }
+    let mut updates = Vec::new();
+    for id in &input.ids {
+        let mut proxy = state.db.get_proxy(id)?;
+        if let Some(group_name) = input.group_name.as_deref() {
+            proxy.group_name = group_name.trim().to_string();
+        }
+        if let Some(add_tags) = input.add_tags.as_deref() {
+            for tag in add_tags {
+                let tag = tag.trim();
+                if !tag.is_empty() && !proxy.tags.iter().any(|value| value == tag) {
+                    proxy.tags.push(tag.to_string());
+                }
+            }
+        }
+        if let Some(remove_tags) = input.remove_tags.as_deref() {
+            proxy.tags.retain(|tag| !remove_tags.iter().any(|value| value == tag));
+        }
+        if let Some(note) = input.note.as_deref() {
+            proxy.note = note.trim().to_string();
+        }
+        proxy.updated_at = now_iso();
+        updates.push(proxy);
+    }
+    let updated = state.db.update_proxies_bulk(&updates)?;
+    Audit::global(
+        &state.db,
+        actor,
+        actions::PROXY_BATCH_UPDATE,
+        format!("批量更新代理 {updated} 个的分组/标签/备注"),
+    )?;
+    Ok(updated)
+}
+
+pub fn delete_proxies(
+    state: &SharedState,
+    ids: &[String],
+    actor: &str,
+) -> Result<ProxyDeleteResult> {
+    let result = state.db.delete_proxies(ids)?;
+    Audit::global(
+        &state.db,
+        actor,
+        actions::PROXY_BATCH_DELETE,
+        format!(
+            "批量删除代理 {} 个，影响 {} 个环境",
+            result.deleted, result.affected_envs
+        ),
+    )?;
+    Ok(result)
+}
+
+pub fn delete_disabled_proxies(
+    state: &SharedState,
+    filter: &ProxyFilter,
+    actor: &str,
+) -> Result<ProxyDeleteResult> {
+    let result = state.db.delete_disabled_proxies(filter)?;
+    Audit::global(
+        &state.db,
+        actor,
+        actions::PROXY_BATCH_DELETE,
+        format!(
+            "清理停用代理 {} 个，影响 {} 个环境",
+            result.deleted, result.affected_envs
+        ),
+    )?;
+    Ok(result)
+}
+
+pub fn list_proxy_subscriptions(state: &SharedState) -> Result<Vec<ProxySubscription>> {
+    state.db.list_subscriptions()
+}
+
+fn normalize_subscription_url(value: &str) -> Result<String> {
+    let trimmed = value.trim();
+    let url = url::Url::parse(trimmed)
+        .map_err(|_| AppError::bad_request("订阅 URL 无效"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(AppError::bad_request("订阅 URL 仅支持 http/https"));
+    }
+    if url.host_str().unwrap_or("").is_empty() {
+        return Err(AppError::bad_request("订阅 URL 缺少主机"));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn normalize_headers(value: Option<&str>) -> Result<Option<String>> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if value.len() > 8192 {
+        return Err(AppError::bad_request("订阅请求头不能超过 8KB"));
+    }
+    proxy_subscription::validate_headers(value)?;
+    Ok(Some(value.to_string()))
+}
+
+fn normalize_interval(value: Option<u32>) -> u32 {
+    value.unwrap_or(360).clamp(5, 10_080)
+}
+
+pub fn create_proxy_subscription(
+    state: &SharedState,
+    input: ProxySubscriptionInput,
+    actor: &str,
+) -> Result<ProxySubscription> {
+    if input.name.trim().is_empty() {
+        return Err(AppError::bad_request("订阅名称不能为空"));
+    }
+    let url = normalize_subscription_url(&input.url)?;
+    let headers = normalize_headers(input.headers.as_deref())?;
+    let default_protocol = input
+        .default_protocol
+        .unwrap_or_else(|| "http".into());
+    if !crate::models::PROXY_PROTOCOLS.contains(&default_protocol.as_str()) {
+        return Err(AppError::bad_request("默认协议仅支持 http/https/socks5"));
+    }
+    let now = now_iso();
+    let subscription = ProxySubscription {
+        id: new_id(),
+        name: input.name.trim().to_string(),
+        url_enc: state.crypto.encrypt(&url)?,
+        url,
+        headers_enc: match headers.as_deref() {
+            Some(value) => state.crypto.encrypt(value)?,
+            None => String::new(),
+        },
+        headers,
+        default_protocol,
+        group_name: input.group_name.unwrap_or_default().trim().to_string(),
+        tags: input.tags.unwrap_or_default(),
+        enabled: input.enabled.unwrap_or(true),
+        auto_refresh: input.auto_refresh.unwrap_or(false),
+        refresh_interval_min: normalize_interval(input.refresh_interval_min),
+        last_refresh_at: None,
+        last_refresh_status: None,
+        last_refresh_message: None,
+        proxy_count: 0,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    state.db.insert_subscription(&subscription)?;
+    Audit::global(
+        &state.db,
+        actor,
+        actions::PROXY_SUBSCRIPTION_CREATE,
+        format!("新增代理订阅 {}", subscription.name),
+    )?;
+    state.db.get_subscription(&subscription.id)
+}
+
+pub fn update_proxy_subscription(
+    state: &SharedState,
+    id: &str,
+    input: ProxySubscriptionUpdate,
+    actor: &str,
+) -> Result<ProxySubscription> {
+    let mut subscription = state.db.get_subscription(id)?;
+    if let Some(name) = input.name {
+        if name.trim().is_empty() {
+            return Err(AppError::bad_request("订阅名称不能为空"));
+        }
+        subscription.name = name.trim().to_string();
+    }
+    if let Some(url) = input.url.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        let url = normalize_subscription_url(url)?;
+        subscription.url_enc = state.crypto.encrypt(&url)?;
+        subscription.url = url;
+    }
+    if let Some(headers) = input.headers {
+        let headers = normalize_headers(Some(&headers))?;
+        subscription.headers_enc = match headers.as_deref() {
+            Some(value) => state.crypto.encrypt(value)?,
+            None => String::new(),
+        };
+        subscription.headers = headers;
+    }
+    if let Some(protocol) = input.default_protocol {
+        if !crate::models::PROXY_PROTOCOLS.contains(&protocol.as_str()) {
+            return Err(AppError::bad_request("默认协议仅支持 http/https/socks5"));
+        }
+        subscription.default_protocol = protocol;
+    }
+    if let Some(group_name) = input.group_name {
+        subscription.group_name = group_name.trim().to_string();
+    }
+    if let Some(tags) = input.tags {
+        subscription.tags = tags;
+    }
+    if let Some(enabled) = input.enabled {
+        subscription.enabled = enabled;
+    }
+    if let Some(auto_refresh) = input.auto_refresh {
+        subscription.auto_refresh = auto_refresh;
+    }
+    if let Some(interval) = input.refresh_interval_min {
+        subscription.refresh_interval_min = normalize_interval(Some(interval));
+    }
+    subscription.updated_at = now_iso();
+    state.db.update_subscription(&subscription)?;
+    Audit::global(
+        &state.db,
+        actor,
+        actions::PROXY_SUBSCRIPTION_UPDATE,
+        format!("更新代理订阅 {}", subscription.name),
+    )?;
+    state.db.get_subscription(id)
+}
+
+pub fn delete_proxy_subscription(
+    state: &SharedState,
+    id: &str,
+    delete_proxies: bool,
+    actor: &str,
+) -> Result<ProxyDeleteResult> {
+    let subscription = state.db.get_subscription(id)?;
+    state.proxy_jobs.begin_refresh(id)?;
+    let outcome = (|| -> Result<ProxyDeleteResult> {
+        let result = if delete_proxies {
+            state.db.delete_proxies_by_subscription(id)?
+        } else {
+            state.db.detach_subscription_proxies(id)?;
+            ProxyDeleteResult::default()
+        };
+        state.db.delete_subscription_row(id)?;
+        Ok(result)
+    })();
+    state.proxy_jobs.end_refresh(id);
+    let result = outcome?;
+    Audit::global(
+        &state.db,
+        actor,
+        actions::PROXY_SUBSCRIPTION_DELETE,
+        format!(
+            "删除代理订阅 {}（{}，删除代理 {} 个，影响 {} 个环境）",
+            subscription.name,
+            if delete_proxies {
+                "同时删除代理"
+            } else {
+                "保留代理并转为手工"
+            },
+            result.deleted,
+            result.affected_envs
+        ),
+    )?;
+    Ok(result)
+}
+
+pub async fn refresh_proxy_subscription(
+    state: &SharedState,
+    id: &str,
+    actor: &str,
+) -> Result<ProxyRefreshResult> {
+    proxy_subscription::refresh(state, id, actor).await
 }
 
 /// Resolve and persist the last observed egress IP for an environment. Uses the

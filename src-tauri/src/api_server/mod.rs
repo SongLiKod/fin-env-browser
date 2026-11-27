@@ -25,7 +25,10 @@ use crate::{
     models::{
         now_iso, AuditFilter, BatchCreateTemplateInput, BroadcastStartInput, CookieRecord,
         CreateEnvironmentInput, CreateTemplateFromEnvInput, EnvironmentFilter, EnvironmentTemplate,
-        OpenOptions, ProxyInput, UpdateEnvironmentInput, UpdateProxyInput, UpdateTemplateInput,
+        OpenOptions, ProxyBatchCheckInput, ProxyBatchDeleteInput, ProxyBatchEnableInput,
+        ProxyBatchUpdateInput, ProxyDiscoveryAddInput, ProxyDiscoveryInput, ProxyFilter,
+        ProxyImportInput, ProxyInput, ProxySubscriptionDeleteInput, ProxySubscriptionInput,
+        ProxySubscriptionUpdate, UpdateEnvironmentInput, UpdateProxyInput, UpdateTemplateInput,
     },
     services,
     state::SharedState,
@@ -194,8 +197,33 @@ fn build_router(state: SharedState) -> Router {
         .route("/envs/:id/hosts", get(list_hosts).put(set_hosts))
         .route("/envs/:id/mocks", get(list_mocks).put(set_mocks))
         .route("/proxies", get(list_proxies).post(create_proxy))
+        .route("/proxies/page", get(page_proxies))
+        .route("/proxies/stats", get(proxy_stats))
+        .route("/proxies/import/preview", post(preview_proxy_import))
+        .route("/proxies/import", post(import_proxies))
+        .route("/proxies/batch/check", post(batch_check_proxies))
+        .route("/proxy-jobs/:id", get(get_proxy_job))
+        .route("/proxy-jobs/:id/cancel", post(cancel_proxy_job))
+        .route("/proxies/batch/enable", post(batch_enable_proxies))
+        .route("/proxies/batch/update", post(batch_update_proxies))
+        .route("/proxies/batch/delete", post(batch_delete_proxies))
+        .route("/proxies/batch/delete-disabled", post(batch_delete_disabled_proxies))
         .route("/proxies/:id", patch(update_proxy).delete(delete_proxy))
         .route("/proxies/:id/check", post(check_proxy))
+        .route(
+            "/proxy-subscriptions",
+            get(list_proxy_subscriptions).post(create_proxy_subscription),
+        )
+        .route(
+            "/proxy-subscriptions/:id",
+            patch(update_proxy_subscription).delete(delete_proxy_subscription),
+        )
+        .route(
+            "/proxy-subscriptions/:id/refresh",
+            post(refresh_proxy_subscription),
+        )
+        .route("/proxy-discovery/scan", post(scan_proxy_discovery))
+        .route("/proxy-discovery/add", post(add_proxy_discovery))
         .route("/audit-logs", get(list_audit))
         .route("/audit-logs/verify", get(verify_audit))
         .route_layer(middleware::from_fn_with_state(
@@ -982,6 +1010,241 @@ async fn check_proxy(
 ) -> Result<Json<crate::models::ProxyCheckResult>, AppError> {
     permit(&auth, Permission::ViewList)?;
     Ok(Json(services::check_proxy(&state, &id, &auth.actor).await?))
+}
+
+async fn page_proxies(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Query(filter): Query<ProxyFilter>,
+) -> Result<Json<crate::models::ProxyPage>, AppError> {
+    permit(&auth, Permission::ViewList)?;
+    Ok(Json(services::query_proxies(&state, &filter)?))
+}
+
+async fn proxy_stats(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+) -> Result<Json<crate::models::ProxyStats>, AppError> {
+    permit(&auth, Permission::ViewList)?;
+    Ok(Json(services::proxy_stats(&state)?))
+}
+
+async fn preview_proxy_import(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Json(input): Json<ProxyImportInput>,
+) -> Result<Json<crate::models::ProxyImportPreview>, AppError> {
+    permit(&auth, Permission::EditFingerprintProxy)?;
+    Ok(Json(services::preview_proxy_import(&state, &input)?))
+}
+
+async fn import_proxies(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Json(input): Json<ProxyImportInput>,
+) -> Result<Json<crate::models::ProxyImportResult>, AppError> {
+    permit(&auth, Permission::EditFingerprintProxy)?;
+    Ok(Json(services::import_proxies(
+        &state,
+        &input,
+        &auth.actor,
+    )?))
+}
+
+async fn batch_check_proxies(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Json(input): Json<ProxyBatchCheckInput>,
+) -> Result<(StatusCode, Json<crate::models::ProxyBatchCheckStart>), AppError> {
+    permit(&auth, Permission::ViewList)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(services::start_proxy_batch_check(
+            &state,
+            &input,
+            &auth.actor,
+        )?),
+    ))
+}
+
+async fn get_proxy_job(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Path(id): Path<String>,
+) -> Result<Json<crate::models::ProxyJobView>, AppError> {
+    permit(&auth, Permission::ViewList)?;
+    Ok(Json(services::get_proxy_job(&state, &id)?))
+}
+
+async fn cancel_proxy_job(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, AppError> {
+    permit(&auth, Permission::ViewList)?;
+    services::cancel_proxy_job(&state, &id)?;
+    Ok(Json(json!({ "cancelled": true, "jobId": id })))
+}
+
+async fn batch_enable_proxies(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Json(input): Json<ProxyBatchEnableInput>,
+) -> Result<Json<Value>, AppError> {
+    permit(&auth, Permission::EditFingerprintProxy)?;
+    let count = services::set_proxies_enabled(
+        &state,
+        &input.ids,
+        input.enabled,
+        &auth.actor,
+    )?;
+    Ok(Json(json!({ "updated": count })))
+}
+
+async fn batch_update_proxies(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Json(input): Json<ProxyBatchUpdateInput>,
+) -> Result<Json<Value>, AppError> {
+    permit(&auth, Permission::EditFingerprintProxy)?;
+    let count = services::update_proxies_meta(&state, &input, &auth.actor)?;
+    Ok(Json(json!({ "updated": count })))
+}
+
+async fn batch_delete_proxies(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    headers: HeaderMap,
+    Json(input): Json<ProxyBatchDeleteInput>,
+) -> Result<Json<crate::models::ProxyDeleteResult>, AppError> {
+    permit(&auth, Permission::EditFingerprintProxy)?;
+    if !confirmed(&headers) {
+        return Err(AppError::code_with(
+            "confirmation_required",
+            "批量删除代理需要 X-FinEnv-Confirm: true",
+        ));
+    }
+    Ok(Json(services::delete_proxies(
+        &state,
+        &input.ids,
+        &auth.actor,
+    )?))
+}
+
+async fn batch_delete_disabled_proxies(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    headers: HeaderMap,
+    Json(filter): Json<ProxyFilter>,
+) -> Result<Json<crate::models::ProxyDeleteResult>, AppError> {
+    permit(&auth, Permission::EditFingerprintProxy)?;
+    if !confirmed(&headers) {
+        return Err(AppError::code_with(
+            "confirmation_required",
+            "清理停用代理需要 X-FinEnv-Confirm: true",
+        ));
+    }
+    Ok(Json(services::delete_disabled_proxies(
+        &state,
+        &filter,
+        &auth.actor,
+    )?))
+}
+
+async fn list_proxy_subscriptions(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+) -> Result<Json<Vec<crate::models::ProxySubscription>>, AppError> {
+    permit(&auth, Permission::ViewList)?;
+    Ok(Json(services::list_proxy_subscriptions(&state)?))
+}
+
+async fn create_proxy_subscription(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Json(input): Json<ProxySubscriptionInput>,
+) -> Result<(StatusCode, Json<crate::models::ProxySubscription>), AppError> {
+    permit(&auth, Permission::EditFingerprintProxy)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(services::create_proxy_subscription(
+            &state,
+            input,
+            &auth.actor,
+        )?),
+    ))
+}
+
+async fn update_proxy_subscription(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Path(id): Path<String>,
+    Json(input): Json<ProxySubscriptionUpdate>,
+) -> Result<Json<crate::models::ProxySubscription>, AppError> {
+    permit(&auth, Permission::EditFingerprintProxy)?;
+    Ok(Json(services::update_proxy_subscription(
+        &state,
+        &id,
+        input,
+        &auth.actor,
+    )?))
+}
+
+async fn delete_proxy_subscription(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(input): Json<ProxySubscriptionDeleteInput>,
+) -> Result<Json<crate::models::ProxyDeleteResult>, AppError> {
+    permit(&auth, Permission::EditFingerprintProxy)?;
+    if !confirmed(&headers) {
+        return Err(AppError::code_with(
+            "confirmation_required",
+            "删除订阅需要 X-FinEnv-Confirm: true",
+        ));
+    }
+    Ok(Json(services::delete_proxy_subscription(
+        &state,
+        &id,
+        input.delete_proxies,
+        &auth.actor,
+    )?))
+}
+
+async fn refresh_proxy_subscription(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Path(id): Path<String>,
+) -> Result<Json<crate::models::ProxyRefreshResult>, AppError> {
+    permit(&auth, Permission::EditFingerprintProxy)?;
+    Ok(Json(
+        services::refresh_proxy_subscription(&state, &id, &auth.actor).await?,
+    ))
+}
+
+async fn scan_proxy_discovery(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Json(input): Json<ProxyDiscoveryInput>,
+) -> Result<Json<crate::models::ProxyDiscoveryResult>, AppError> {
+    permit(&auth, Permission::ViewList)?;
+    Ok(Json(
+        crate::proxy_discovery::scan(&state, &input).await?,
+    ))
+}
+
+async fn add_proxy_discovery(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Json(input): Json<ProxyDiscoveryAddInput>,
+) -> Result<Json<crate::models::ProxyImportResult>, AppError> {
+    permit(&auth, Permission::EditFingerprintProxy)?;
+    Ok(Json(crate::proxy_discovery::add(
+        &state,
+        &input,
+        &auth.actor,
+    )?))
 }
 
 async fn list_audit(
