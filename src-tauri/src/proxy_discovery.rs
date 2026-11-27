@@ -74,9 +74,21 @@ impl ProxyDiscoveryStore {
 
 #[derive(Debug, Clone)]
 enum DiscoveryTask {
-    Search { engine: String, query: String },
-    Github { query: String },
-    Link { url: String },
+    Search {
+        engine: String,
+        query: String,
+    },
+    Github {
+        query: String,
+    },
+    Link {
+        url: String,
+    },
+    Feed {
+        url: String,
+        label: String,
+        default_protocol: Option<String>,
+    },
 }
 
 #[derive(Debug)]
@@ -195,6 +207,10 @@ pub async fn scan(
             source_url: draft.source_url,
             duplicate: existing.contains_key(&endpoint),
             existing_id: existing.get(&endpoint).cloned(),
+            verified: false,
+            latency_ms: None,
+            exit_ip: None,
+            check_message: None,
         };
         state.proxy_discovery.insert(DiscoveredCandidate {
             candidate: candidate.clone(),
@@ -205,10 +221,49 @@ pub async fn scan(
         candidates.push(candidate);
     }
 
+    let mut verified = 0u32;
+    let mut rejected = 0u32;
+    if input.verify.unwrap_or(true) && !candidates.is_empty() {
+        let checked = stream::iter(candidates)
+            .map(|mut candidate| {
+                let state = state.clone();
+                async move {
+                    match check_candidate(&state, &candidate.id).await {
+                        Ok(result) => {
+                            candidate.verified = result.ok;
+                            candidate.latency_ms = result.latency_ms;
+                            candidate.exit_ip = result.exit_ip;
+                            candidate.check_message = Some(result.message);
+                            (candidate, result.ok)
+                        }
+                        Err(error) => {
+                            candidate.check_message = Some(error.message().to_string());
+                            (candidate, false)
+                        }
+                    }
+                }
+            })
+            .buffer_unordered(16)
+            .collect::<Vec<_>>()
+            .await;
+        rejected = checked.len() as u32;
+        candidates = checked
+            .into_iter()
+            .filter_map(|(candidate, ok)| ok.then_some(candidate))
+            .collect();
+        verified = candidates.len() as u32;
+        rejected = rejected.saturating_sub(verified);
+        if candidates.is_empty() {
+            errors.push("候选节点均未通过 Google / YouTube 可达性验证".into());
+        }
+    }
+
     Ok(ProxyDiscoveryResult {
         candidates,
         sources,
         scanned,
+        verified,
+        rejected,
         errors,
     })
 }
@@ -413,6 +468,25 @@ fn discovery_options(input: &ProxyDiscoveryInput) -> ProxyImportOptions {
 
 fn build_tasks(input: &ProxyDiscoveryInput) -> Vec<DiscoveryTask> {
     let mut tasks = Vec::new();
+    if input.include_public_lists.unwrap_or(true) {
+        // 这些是公开维护的纯文本代理列表，比搜索引擎抓取更稳定；
+        // 扫描结束后仍会通过 Google / YouTube 实测过滤。
+        tasks.push(DiscoveryTask::Feed {
+            url: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.txt".into(),
+            label: "Proxifly".into(),
+            default_protocol: None,
+        });
+        tasks.push(DiscoveryTask::Feed {
+            url: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt".into(),
+            label: "SpeedX HTTP".into(),
+            default_protocol: Some("http".into()),
+        });
+        tasks.push(DiscoveryTask::Feed {
+            url: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt".into(),
+            label: "SpeedX SOCKS5".into(),
+            default_protocol: Some("socks5".into()),
+        });
+    }
     let queries = input
         .search_queries
         .iter()
@@ -479,6 +553,17 @@ async fn run_task(
         }
         DiscoveryTask::Github { query } => run_github(client, &query, options, follow).await,
         DiscoveryTask::Link { url } => run_page(client, &url, "友情链接", options, follow, 8).await,
+        DiscoveryTask::Feed {
+            url,
+            label,
+            default_protocol,
+        } => {
+            let mut options = options.clone();
+            if default_protocol.is_some() {
+                options.default_protocol = default_protocol;
+            }
+            run_page(client, &url, &label, &options, false, 0).await
+        }
     }
 }
 

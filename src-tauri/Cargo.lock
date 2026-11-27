@@ -1194,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "fin-env-browser"
-version = "4.3.4"
+version = "4.3.5"
 dependencies = [
  "axum",
  "base64 0.22.1",

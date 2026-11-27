@@ -793,6 +793,18 @@ export function ProxiesPage() {
           }
           void startBatch({ ids: failedIds, concurrency: 8 });
         }}
+        onSelectWorking={() => {
+          const ids = (jobResults.length > 0 ? jobResults : job?.recent ?? [])
+            .filter((item) => item.ok)
+            .map((item) => item.proxyId);
+          if (ids.length === 0) {
+            toast.info('没有可用节点可勾选');
+            return;
+          }
+          setSelected(ids);
+          setJobOpen(false);
+          toast.success('已选择可用节点', `${ids.length} 个`);
+        }}
       />
 
       <BulkMetaDialog
@@ -1131,6 +1143,8 @@ function ProxyDiscoveryDialog({
   const [tags, setTags] = React.useState('');
   const [enabled, setEnabled] = React.useState(true);
   const [onDuplicate, setOnDuplicate] = React.useState<'skip' | 'update' | 'error'>('skip');
+  const [includePublicLists, setIncludePublicLists] = React.useState(true);
+  const [verify, setVerify] = React.useState(true);
   const [checks, setChecks] = React.useState<Record<string, ProxyCheckResult>>({});
   const [checking, setChecking] = React.useState<string[]>([]);
 
@@ -1151,6 +1165,8 @@ function ProxyDiscoveryDialog({
       if (typeof value.followLinks === 'boolean') setFollowLinks(value.followLinks);
       if (value.protocol === 'http' || value.protocol === 'https' || value.protocol === 'socks5') setProtocol(value.protocol);
       if (typeof value.maxResults === 'string') setMaxResults(value.maxResults);
+      if (typeof value.includePublicLists === 'boolean') setIncludePublicLists(value.includePublicLists);
+      if (typeof value.verify === 'boolean') setVerify(value.verify);
     } catch {
       // Ignore malformed local settings.
     }
@@ -1160,7 +1176,7 @@ function ProxyDiscoveryDialog({
     try {
       window.localStorage.setItem(
         'finenv:proxy-discovery',
-        JSON.stringify({ searchQuery, engines, githubQuery, friendLinks, followLinks, protocol, maxResults }),
+        JSON.stringify({ searchQuery, engines, githubQuery, friendLinks, followLinks, protocol, maxResults, includePublicLists, verify }),
       );
     } catch {
       // Ignore storage failures.
@@ -1181,16 +1197,19 @@ function ProxyDiscoveryDialog({
     followLinks,
     defaultProtocol: protocol,
     maxResults: Number(maxResults) || 200,
+    includePublicLists,
+    verify,
   });
 
   const scan = async () => {
     const input = buildInput();
     const hasSource =
+      includePublicLists ||
       ((input.engines?.length ?? 0) > 0 && (input.searchQueries?.length ?? 0) > 0) ||
       (input.githubQueries?.length ?? 0) > 0 ||
       (input.friendLinks?.length ?? 0) > 0;
     if (!hasSource) {
-      toast.warning('请至少填写一个来源', '搜索引擎关键词、GitHub 关键词或友情链接');
+      toast.warning('请至少填写一个来源', '公共列表、搜索引擎关键词、GitHub 关键词或友情链接');
       return;
     }
     setBusy(true);
@@ -1202,9 +1221,18 @@ function ProxyDiscoveryDialog({
     try {
       const next = await ipc.proxyDiscoveryScan(input);
       setResult(next);
-      setSelected(next.candidates.filter((candidate) => !candidate.duplicate).map((candidate) => candidate.id));
+      setSelected(
+        next.candidates
+          .filter((candidate) => !candidate.duplicate && (!verify || candidate.verified))
+          .map((candidate) => candidate.id),
+      );
       if (next.candidates.length === 0) {
         toast.warning('没有发现可用节点', next.errors[0] ?? '尝试更换关键词或友情链接');
+      } else if (verify) {
+        toast.success(
+          '在线扫描完成',
+          `验证可用 ${next.verified} 个，已过滤 ${next.rejected} 个不可用节点`,
+        );
       } else {
         toast.success('在线扫描完成', `发现 ${next.candidates.length} 个候选节点`);
       }
@@ -1270,6 +1298,23 @@ function ProxyDiscoveryDialog({
     setEngines((current) => (checked ? [...current, engine] : current.filter((value) => value !== engine)));
   };
 
+  const selectWorking = () => {
+    if (!result) return;
+    const ids = result.candidates
+      .filter((candidate) => {
+        const check = checks[candidate.id];
+        if (check) return check.ok;
+        return candidate.verified || !verify;
+      })
+      .map((candidate) => candidate.id);
+    setSelected(ids);
+    if (ids.length > 0) {
+      toast.success('已选择可用节点', `${ids.length} 个节点`);
+    } else {
+      toast.warning('没有可用节点', '先执行检测，或开启“只返回可用节点”后重新扫描');
+    }
+  };
+
   const toggleCandidate = (id: string, checked: boolean) => {
     setSelected((current) => (checked ? [...current, id] : current.filter((value) => value !== id)));
   };
@@ -1284,7 +1329,7 @@ function ProxyDiscoveryDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="在线获取代理节点"
-      description="从搜索引擎、GitHub 和友情链接抓取公开页面，提取 HTTP/HTTPS/SOCKS5 节点；可先检测延迟，再勾选加入代理池。"
+      description="从内置公开列表、搜索引擎、GitHub 和友情链接抓取公开页面，提取 HTTP/HTTPS/SOCKS5 节点；扫描后实测 Google / YouTube，只保留真正可用的节点。"
       width="max-w-5xl"
       footer={
         <>
@@ -1316,6 +1361,10 @@ function ProxyDiscoveryDialog({
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="关键词，多个用逗号分隔"
             />
+            <PromptChips
+              items={['free proxy list', 'socks5 proxy list', 'fresh proxy list google', 'proxy list youtube']}
+              onPick={setSearchQuery}
+            />
             <div className="flex flex-wrap gap-3 text-[11px] text-content-weak">
               {[
                 ['bing', 'Bing'],
@@ -1343,6 +1392,10 @@ function ProxyDiscoveryDialog({
               onChange={(event) => setGithubQuery(event.target.value)}
               placeholder="仓库搜索关键词"
             />
+            <PromptChips
+              items={['free proxy list', 'socks5 proxy list', 'proxy list google', 'proxy scraper daily']}
+              onPick={setGithubQuery}
+            />
             <p className="text-[10px] leading-4 text-content-hint">
               抓取搜索结果前 5 个仓库的 README；未配置 Token 时受 GitHub 匿名限流影响。
             </p>
@@ -1358,6 +1411,21 @@ function ProxyDiscoveryDialog({
               placeholder={'每行一个页面 URL\nhttps://example.com/proxy-list'}
             />
           </div>
+        </div>
+
+        <div className="grid gap-3 rounded-md border border-border bg-surface-secondary p-3 md:grid-cols-2">
+          <Switch
+            checked={includePublicLists}
+            onCheckedChange={setIncludePublicLists}
+            label="内置公开代理列表"
+            description="抓取 Proxifly / TheSpeedX 等公开列表；推荐开启，不依赖搜索关键词。"
+          />
+          <Switch
+            checked={verify}
+            onCheckedChange={setVerify}
+            label="只返回真正可用的节点"
+            description="逐个实测 Google / YouTube 可达性，自动过滤失效和受限节点。"
+          />
         </div>
 
         <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface-secondary p-3">
@@ -1405,6 +1473,8 @@ function ProxyDiscoveryDialog({
               <Badge tone="primary">候选 {result.candidates.length}</Badge>
               <Badge tone={duplicates > 0 ? 'warning' : 'neutral'}>已存在 {duplicates}</Badge>
               <Badge tone="neutral">扫描 {result.scanned}</Badge>
+              {result.verified > 0 ? <Badge tone="success">已验证 {result.verified}</Badge> : null}
+              {result.rejected > 0 ? <Badge tone="warning">过滤 {result.rejected}</Badge> : null}
               {tested > 0 ? <Badge tone="success">可用 {testedOk}/{tested}</Badge> : null}
               <span className="text-content-hint">已选 {selected.length}</span>
               <div className="ml-auto flex flex-wrap items-center gap-1">
@@ -1424,6 +1494,9 @@ function ProxyDiscoveryDialog({
                   onClick={() => void checkCandidates(result.candidates.map((candidate) => candidate.id))}
                 >
                   <Wifi className="h-3.5 w-3.5" /> 全部检测
+                </Button>
+                <Button variant="secondary" size="sm" onClick={selectWorking}>
+                  <CheckCircle2 className="h-3.5 w-3.5" /> 选择可用
                 </Button>
                 <button
                   type="button"
@@ -1472,6 +1545,9 @@ function ProxyDiscoveryDialog({
                   <tbody>
                     {result.candidates.map((candidate) => {
                       const check = checks[candidate.id];
+                      const latency = check?.latencyMs ?? candidate.latencyMs;
+                      const exitIp = check?.exitIp ?? candidate.exitIp;
+                      const verified = check?.ok ?? candidate.verified;
                       return (
                         <tr key={candidate.id}>
                           <td>
@@ -1489,6 +1565,13 @@ function ProxyDiscoveryDialog({
                             <p className="max-w-[240px] truncate text-[10px] text-content-hint" title={candidate.sourceUrl}>
                               {candidate.name}
                             </p>
+                            {verified ? (
+                              <p className="text-[10px] text-[var(--success)]">
+                                已验证
+                                {latency != null ? ` · ${latency}ms` : ''}
+                                {exitIp ? ` · ${exitIp}` : ''}
+                              </p>
+                            ) : null}
                           </td>
                           <td>
                             <Badge tone="outline">{candidate.source}</Badge>
@@ -1965,6 +2048,7 @@ function ProxyBatchPanel({
   results,
   onCancel,
   onRetryFailed,
+  onSelectWorking,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -1972,6 +2056,7 @@ function ProxyBatchPanel({
   results: ProxyCheckResult[];
   onCancel: () => void;
   onRetryFailed: () => void;
+  onSelectWorking: () => void;
 }) {
   if (!job) return null;
   const percent = job.total > 0 ? Math.round((job.completed / job.total) * 100) : 0;
@@ -1993,9 +2078,14 @@ function ProxyBatchPanel({
               取消检测
             </Button>
           ) : (
-            <Button variant="secondary" onClick={onRetryFailed}>
-              重试失败项
-            </Button>
+            <>
+              <Button variant="secondary" onClick={onRetryFailed}>
+                重试失败项
+              </Button>
+              <Button variant="primary" onClick={onSelectWorking}>
+                选择可用节点
+              </Button>
+            </>
           )}
         </>
       }
@@ -2507,6 +2597,23 @@ function cleanupStatusLabel(status: string): string {
       : status === 'untested'
         ? '未检测'
         : status;
+}
+
+function PromptChips({ items, onPick }: { items: string[]; onPick: (value: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.map((item) => (
+        <button
+          key={item}
+          type="button"
+          className="rounded border border-border bg-surface-base px-1.5 py-0.5 text-[10px] text-content-weak hover:border-primary hover:text-primary"
+          onClick={() => onPick(item)}
+        >
+          {item}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function formatInterval(minutes: number): string {

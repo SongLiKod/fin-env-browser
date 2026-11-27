@@ -898,6 +898,12 @@ pub struct ProxyDiscoveryInput {
     pub default_protocol: Option<String>,
     #[serde(default)]
     pub max_results: Option<u32>,
+    /// 是否抓取内置的公开代理列表（Proxifly / TheSpeedX 等）。
+    #[serde(default)]
+    pub include_public_lists: Option<bool>,
+    /// 是否在返回前验证 Google / YouTube 可达性，只保留真正可用的节点。
+    #[serde(default)]
+    pub verify: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -914,6 +920,14 @@ pub struct ProxyDiscoveryCandidate {
     pub source_url: String,
     pub duplicate: bool,
     pub existing_id: Option<String>,
+    #[serde(default)]
+    pub verified: bool,
+    #[serde(default)]
+    pub latency_ms: Option<u64>,
+    #[serde(default)]
+    pub exit_ip: Option<String>,
+    #[serde(default)]
+    pub check_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -932,6 +946,8 @@ pub struct ProxyDiscoveryResult {
     pub candidates: Vec<ProxyDiscoveryCandidate>,
     pub sources: Vec<ProxyDiscoverySourceStatus>,
     pub scanned: u32,
+    pub verified: u32,
+    pub rejected: u32,
     pub errors: Vec<String>,
 }
 

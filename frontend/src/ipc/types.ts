@@ -690,6 +690,8 @@ export interface ProxyDiscoveryInput {
   followLinks?: boolean;
   defaultProtocol?: 'http' | 'https' | 'socks5';
   maxResults?: number;
+  includePublicLists?: boolean;
+  verify?: boolean;
 }
 
 export interface ProxyDiscoveryCandidate {
@@ -704,6 +706,10 @@ export interface ProxyDiscoveryCandidate {
   sourceUrl: string;
   duplicate: boolean;
   existingId: string | null;
+  verified: boolean;
+  latencyMs: number | null;
+  exitIp: string | null;
+  checkMessage: string | null;
 }
 
 export interface ProxyDiscoverySourceStatus {
@@ -718,6 +724,8 @@ export interface ProxyDiscoveryResult {
   candidates: ProxyDiscoveryCandidate[];
   sources: ProxyDiscoverySourceStatus[];
   scanned: number;
+  verified: number;
+  rejected: number;
   errors: string[];
 }
 
