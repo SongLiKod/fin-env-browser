@@ -10,13 +10,9 @@ use crate::{
     models::{now_iso, Proxy, ProxyCheckResult},
 };
 
-/// Check a proxy end to end: TCP reachability, then an HTTPS request through
-/// the proxy to resolve the exit IP, country and timezone.
-pub async fn check_proxy(
-    db: &Db,
-    proxy: &Proxy,
-    password: Option<&str>,
-) -> Result<ProxyCheckResult> {
+/// Check a proxy end to end without persisting the result. Batch checks use
+/// this and flush all results in one transaction at the end.
+pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyCheckResult {
     let checked_at = now_iso();
     let connect_start = Instant::now();
     let tcp = timeout(
@@ -27,7 +23,7 @@ pub async fn check_proxy(
     match tcp {
         Ok(Ok(_)) => {}
         Ok(Err(e)) => {
-            let result = ProxyCheckResult {
+            return ProxyCheckResult {
                 proxy_id: proxy.id.clone(),
                 ok: false,
                 latency_ms: Some(connect_start.elapsed().as_millis() as u64),
@@ -38,11 +34,9 @@ pub async fn check_proxy(
                 message: format!("TCP 连接失败: {e}"),
                 checked_at,
             };
-            db.save_proxy_check(&result)?;
-            return Ok(result);
         }
         Err(_) => {
-            let result = ProxyCheckResult {
+            return ProxyCheckResult {
                 proxy_id: proxy.id.clone(),
                 ok: false,
                 latency_ms: Some(8000),
@@ -53,8 +47,6 @@ pub async fn check_proxy(
                 message: "TCP 连接超时".into(),
                 checked_at,
             };
-            db.save_proxy_check(&result)?;
-            return Ok(result);
         }
     }
     let tcp_latency = connect_start.elapsed().as_millis() as u64;
@@ -66,7 +58,7 @@ pub async fn check_proxy(
     let proxy_url = match proxy_url {
         Ok(url) => url,
         Err(e) => {
-            return Ok(ProxyCheckResult {
+            return ProxyCheckResult {
                 proxy_id: proxy.id.clone(),
                 ok: false,
                 latency_ms: Some(tcp_latency),
@@ -76,23 +68,81 @@ pub async fn check_proxy(
                 city: None,
                 message: e.message().to_string(),
                 checked_at,
-            })
+            }
         }
     };
-    let reqwest_proxy = reqwest::Proxy::all(&proxy_url)
-        .map_err(|e| AppError::bad_request(format!("代理 URL 无效: {e}")))?;
-    let client = reqwest::Client::builder()
+    let reqwest_proxy = match reqwest::Proxy::all(&proxy_url) {
+        Ok(proxy) => proxy,
+        Err(e) => {
+            return ProxyCheckResult {
+                proxy_id: proxy.id.clone(),
+                ok: false,
+                latency_ms: Some(tcp_latency),
+                exit_ip: None,
+                country: None,
+                timezone: None,
+                city: None,
+                message: format!("代理 URL 无效: {e}"),
+                checked_at,
+            }
+        }
+    };
+    let client = match reqwest::Client::builder()
         .proxy(reqwest_proxy)
         .timeout(Duration::from_secs(12))
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) FinEnv/1.0")
         .build()
-        .map_err(AppError::from)?;
+    {
+        Ok(client) => client,
+        Err(e) => {
+            return ProxyCheckResult {
+                proxy_id: proxy.id.clone(),
+                ok: false,
+                latency_ms: Some(tcp_latency),
+                exit_ip: None,
+                country: None,
+                timezone: None,
+                city: None,
+                message: format!("检测客户端创建失败: {e}"),
+                checked_at,
+            }
+        }
+    };
 
     let http_start = Instant::now();
-    let lookup = lookup_exit(&client).await;
-    let result = ProxyCheckResult {
+    let socks_auth_unsupported =
+        proxy.protocol.eq_ignore_ascii_case("socks5") && !proxy.username.is_empty();
+    let (lookup, google_ok, youtube_ok) = if socks_auth_unsupported {
+        (lookup_exit(&client).await, false, false)
+    } else {
+        tokio::join!(
+            lookup_exit(&client),
+            probe_https(&client, "https://www.google.com/generate_204"),
+            probe_https(&client, "https://www.youtube.com/robots.txt")
+        )
+    };
+    let has_exit = lookup.ip.is_some();
+    let message = if socks_auth_unsupported {
+        "Chromium 不支持 SOCKS5 用户名/密码认证，浏览器无法使用该代理；请改用 HTTP 代理或本地转发"
+            .into()
+    } else if google_ok && youtube_ok {
+        if has_exit {
+            "Google / YouTube 可访问，出口信息解析成功".into()
+        } else {
+            "Google / YouTube 可访问，但出口 IP 解析失败".into()
+        }
+    } else if google_ok {
+        "Google 可访问，但 YouTube 不可访问".into()
+    } else if youtube_ok {
+        "YouTube 可访问，但 Google 不可访问".into()
+    } else if has_exit {
+        "出口信息解析成功，但 Google / YouTube 均不可访问".into()
+    } else {
+        format!("{}；Google / YouTube 均不可访问", lookup.message)
+    };
+    ProxyCheckResult {
         proxy_id: proxy.id.clone(),
-        ok: lookup.ip.is_some(),
+        ok: google_ok && youtube_ok,
         latency_ms: Some(tcp_latency + http_start.elapsed().as_millis() as u64),
         exit_ip: lookup.ip,
         country: lookup.country_code.clone().or(lookup.country),
@@ -103,9 +153,26 @@ pub async fn check_proxy(
                 .map(crate::fingerprint::timezone_for_country)
         }),
         city: lookup.city,
-        message: lookup.message,
+        message,
         checked_at,
-    };
+    }
+}
+
+async fn probe_https(client: &reqwest::Client, url: &str) -> bool {
+    matches!(
+        timeout(Duration::from_secs(8), client.get(url).send()).await,
+        Ok(Ok(response))
+            if response.status().is_success() || response.status().is_redirection()
+    )
+}
+
+/// Check and persist one proxy. Keeps the existing single-proxy behaviour.
+pub async fn check_proxy(
+    db: &Db,
+    proxy: &Proxy,
+    password: Option<&str>,
+) -> Result<ProxyCheckResult> {
+    let result = check_proxy_core(proxy, password).await;
     db.save_proxy_check(&result)?;
     Ok(result)
 }
@@ -190,6 +257,57 @@ async fn lookup_exit(client: &reqwest::Client) -> ExitLookup {
     }
 
     if exit_ip.is_none() {
+        if let Ok(Ok(response)) = timeout(
+            Duration::from_secs(6),
+            client.get("https://ipinfo.io/json").send(),
+        )
+        .await
+        {
+            if let Ok(value) = response.json::<Value>().await {
+                exit_ip = value
+                    .get("ip")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
+                country = value
+                    .get("country")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
+                country_code = country.clone();
+                timezone = value
+                    .get("timezone")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
+                city = value
+                    .get("city")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
+                if exit_ip.is_some() {
+                    message = "备用 HTTPS 出口检测成功".into();
+                }
+            }
+        }
+    }
+
+    if exit_ip.is_none() {
+        if let Ok(Ok(response)) = timeout(
+            Duration::from_secs(6),
+            client.get("https://api.ipify.org?format=json").send(),
+        )
+        .await
+        {
+            if let Ok(value) = response.json::<Value>().await {
+                exit_ip = value
+                    .get("ip")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
+                if exit_ip.is_some() {
+                    message = "备用 HTTPS 出口检测成功".into();
+                }
+            }
+        }
+    }
+
+    if exit_ip.is_none() {
         if let Ok(response) = client
             .get("http://ip-api.com/json/?fields=status,message,country,countryCode,timezone,city,query")
             .send()
@@ -244,7 +362,7 @@ fn build_proxy_url(proxy: &Proxy) -> Result<String> {
         "socks5" => "socks5",
         other => return Err(AppError::bad_request(format!("不支持的代理协议: {other}"))),
     };
-    let mut url = url::Url::parse(&format!("{scheme}://{}:{}", proxy.host, proxy.port))
+    let mut url = url::Url::parse(&format!("{scheme}://{}:{}", proxy.url_host(), proxy.port))
         .map_err(|e| AppError::bad_request(format!("代理地址无效: {e}")))?;
     if !proxy.username.is_empty() {
         url.set_username(&proxy.username)
@@ -264,7 +382,7 @@ pub fn build_proxy_url_with_auth(proxy: &Proxy, password: &str) -> Result<String
         "socks5" => "socks5",
         other => return Err(AppError::bad_request(format!("不支持的代理协议: {other}"))),
     };
-    let mut url = url::Url::parse(&format!("{scheme}://{}:{}", proxy.host, proxy.port))
+    let mut url = url::Url::parse(&format!("{scheme}://{}:{}", proxy.url_host(), proxy.port))
         .map_err(|e| AppError::bad_request(format!("代理地址无效: {e}")))?;
     if !proxy.username.is_empty() {
         url.set_username(&proxy.username)

@@ -14,7 +14,9 @@ use crate::{
     models::{
         now_iso, AccountExportRow, AccountInput, ApiKey, AuditFilter, CreateEnvironmentInput,
         CreatedApiKey, EnvironmentFilter, EnvironmentMember, EnvironmentMemberCandidate,
-        EnvironmentMemberInput, GroupInput, HostsEntryInput, OpenOptions, ProxyInput, Settings,
+        EnvironmentMemberInput, GroupInput, HostsEntryInput, OpenOptions, ProxyBatchCheckInput,
+        ProxyBatchUpdateInput, ProxyDiscoveryAddInput, ProxyDiscoveryInput, ProxyFilter,
+        ProxyImportInput, ProxyInput, ProxySubscriptionInput, ProxySubscriptionUpdate, Settings,
         ThemeConfig, UpdateAccountInput, UpdateEnvironmentInput, UpdateProxyInput,
         UpdateSettingsInput, UserInput, UserUpdateInput,
     },
@@ -1019,6 +1021,213 @@ pub async fn proxy_align(
     let user = state.require(Permission::EditFingerprintProxy)?;
     state.check_environment_access(&user, &env_id, EnvAccess::Manage)?;
     services::align_proxy(&state, &env_id, &user.username).await
+}
+
+#[tauri::command]
+pub fn proxy_query(
+    state: State<'_, SharedState>,
+    filter: ProxyFilter,
+) -> Result<crate::models::ProxyPage> {
+    let state = state.inner().clone();
+    state.require(Permission::ViewList)?;
+    services::query_proxies(&state, &filter)
+}
+
+#[tauri::command]
+pub fn proxy_stats(state: State<'_, SharedState>) -> Result<crate::models::ProxyStats> {
+    let state = state.inner().clone();
+    state.require(Permission::ViewList)?;
+    services::proxy_stats(&state)
+}
+
+#[tauri::command]
+pub fn proxy_import_preview(
+    state: State<'_, SharedState>,
+    input: ProxyImportInput,
+) -> Result<crate::models::ProxyImportPreview> {
+    let state = state.inner().clone();
+    state.require(Permission::EditFingerprintProxy)?;
+    services::preview_proxy_import(&state, &input)
+}
+
+#[tauri::command]
+pub fn proxy_import_commit(
+    state: State<'_, SharedState>,
+    input: ProxyImportInput,
+) -> Result<crate::models::ProxyImportResult> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    services::import_proxies(&state, &input, &user.username)
+}
+
+#[tauri::command]
+pub fn proxy_batch_check(
+    state: State<'_, SharedState>,
+    input: ProxyBatchCheckInput,
+) -> Result<crate::models::ProxyBatchCheckStart> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::ViewList)?;
+    services::start_proxy_batch_check(&state, &input, &user.username)
+}
+
+#[tauri::command]
+pub fn proxy_job_get(
+    state: State<'_, SharedState>,
+    job_id: String,
+) -> Result<crate::models::ProxyJobView> {
+    let state = state.inner().clone();
+    state.require(Permission::ViewList)?;
+    services::get_proxy_job(&state, &job_id)
+}
+
+#[tauri::command]
+pub fn proxy_job_cancel(state: State<'_, SharedState>, job_id: String) -> Result<()> {
+    let state = state.inner().clone();
+    state.require(Permission::ViewList)?;
+    services::cancel_proxy_job(&state, &job_id)
+}
+
+#[tauri::command]
+pub fn proxy_batch_set_enabled(
+    state: State<'_, SharedState>,
+    ids: Vec<String>,
+    enabled: bool,
+) -> Result<u32> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    services::set_proxies_enabled(&state, &ids, enabled, &user.username)
+}
+
+#[tauri::command]
+pub fn proxy_batch_update(
+    state: State<'_, SharedState>,
+    input: ProxyBatchUpdateInput,
+) -> Result<u32> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    services::update_proxies_meta(&state, &input, &user.username)
+}
+
+#[tauri::command]
+pub fn proxy_batch_delete(
+    state: State<'_, SharedState>,
+    ids: Vec<String>,
+    confirm: bool,
+) -> Result<crate::models::ProxyDeleteResult> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    if !confirm {
+        return Err(AppError::code_with(
+            "confirmation_required",
+            "批量删除代理需要二次确认",
+        ));
+    }
+    services::delete_proxies(&state, &ids, &user.username)
+}
+
+#[tauri::command]
+pub fn proxy_batch_delete_disabled(
+    state: State<'_, SharedState>,
+    filter: ProxyFilter,
+    confirm: bool,
+) -> Result<crate::models::ProxyDeleteResult> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    if !confirm {
+        return Err(AppError::code_with(
+            "confirmation_required",
+            "清理停用代理需要二次确认",
+        ));
+    }
+    services::delete_disabled_proxies(&state, &filter, &user.username)
+}
+
+#[tauri::command]
+pub fn proxy_subscription_list(
+    state: State<'_, SharedState>,
+) -> Result<Vec<crate::models::ProxySubscription>> {
+    let state = state.inner().clone();
+    state.require(Permission::ViewList)?;
+    services::list_proxy_subscriptions(&state)
+}
+
+#[tauri::command]
+pub fn proxy_subscription_create(
+    state: State<'_, SharedState>,
+    input: ProxySubscriptionInput,
+) -> Result<crate::models::ProxySubscription> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    services::create_proxy_subscription(&state, input, &user.username)
+}
+
+#[tauri::command]
+pub fn proxy_subscription_update(
+    state: State<'_, SharedState>,
+    id: String,
+    input: ProxySubscriptionUpdate,
+) -> Result<crate::models::ProxySubscription> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    services::update_proxy_subscription(&state, &id, input, &user.username)
+}
+
+#[tauri::command]
+pub fn proxy_subscription_delete(
+    state: State<'_, SharedState>,
+    id: String,
+    delete_proxies: bool,
+    confirm: bool,
+) -> Result<crate::models::ProxyDeleteResult> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    if !confirm {
+        return Err(AppError::code_with(
+            "confirmation_required",
+            "删除订阅需要二次确认",
+        ));
+    }
+    services::delete_proxy_subscription(&state, &id, delete_proxies, &user.username)
+}
+
+#[tauri::command]
+pub async fn proxy_subscription_refresh(
+    state: State<'_, SharedState>,
+    id: String,
+) -> Result<crate::models::ProxyRefreshResult> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    services::refresh_proxy_subscription(&state, &id, &user.username).await
+}
+
+#[tauri::command]
+pub async fn proxy_discovery_scan(
+    state: State<'_, SharedState>,
+    input: ProxyDiscoveryInput,
+) -> Result<crate::models::ProxyDiscoveryResult> {
+    let state = state.inner().clone();
+    state.require(Permission::ViewList)?;
+    crate::proxy_discovery::scan(&state, &input).await
+}
+
+#[tauri::command]
+pub async fn proxy_discovery_check(
+    state: State<'_, SharedState>,
+    id: String,
+) -> Result<crate::models::ProxyCheckResult> {
+    let state = state.inner().clone();
+    state.require(Permission::ViewList)?;
+    crate::proxy_discovery::check_candidate(&state, &id).await
+}
+
+#[tauri::command]
+pub fn proxy_discovery_add(
+    state: State<'_, SharedState>,
+    input: ProxyDiscoveryAddInput,
+) -> Result<crate::models::ProxyImportResult> {
+    let state = state.inner().clone();
+    let user = state.require(Permission::EditFingerprintProxy)?;
+    crate::proxy_discovery::add(&state, &input, &user.username)
 }
 
 // ---------------------------------------------------------------------------

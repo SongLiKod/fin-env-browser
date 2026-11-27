@@ -46,7 +46,27 @@ import {
   type PermissionDef,
   type BuiltinPluginInfo,
   type Proxy,
+  type ProxyBatchCheckInput,
+  type ProxyBatchCheckStart,
+  type ProxyBatchProgress,
+  type ProxyBatchUpdateInput,
   type ProxyCheckResult,
+  type ProxyChangedPayload,
+  type ProxyDeleteResult,
+  type ProxyDiscoveryAddInput,
+  type ProxyDiscoveryInput,
+  type ProxyDiscoveryResult,
+  type ProxyFilter,
+  type ProxyImportInput,
+  type ProxyImportPreview,
+  type ProxyImportResult,
+  type ProxyJobView,
+  type ProxyPage,
+  type ProxyRefreshResult,
+  type ProxyStats,
+  type ProxySubscription,
+  type ProxySubscriptionInput,
+  type ProxySubscriptionUpdate,
   type RememberedLogin,
   type ProxyInput,
   type RecordingResult,
@@ -220,6 +240,43 @@ export const ipc = {
   proxyAssign: (envIds: string[], proxyId: string | null) =>
     call<number>('proxy_assign', { envIds, proxyId }),
   proxyAlign: (envId: string) => call<AlignProxyResult>('proxy_align', { envId }),
+  proxyQuery: (filter: ProxyFilter) => call<ProxyPage>('proxy_query', { filter }),
+  proxyStats: () => call<ProxyStats>('proxy_stats'),
+  proxyImportPreview: (input: ProxyImportInput) =>
+    call<ProxyImportPreview>('proxy_import_preview', { input }),
+  proxyImportCommit: (input: ProxyImportInput) =>
+    call<ProxyImportResult>('proxy_import_commit', { input }),
+  proxyBatchCheck: (input: ProxyBatchCheckInput) =>
+    call<ProxyBatchCheckStart>('proxy_batch_check', { input }),
+  proxyJobGet: (jobId: string) => call<ProxyJobView>('proxy_job_get', { jobId }),
+  proxyJobCancel: (jobId: string) => call<void>('proxy_job_cancel', { jobId }),
+  proxyBatchSetEnabled: (ids: string[], enabled: boolean) =>
+    call<number>('proxy_batch_set_enabled', { ids, enabled }),
+  proxyBatchUpdate: (input: ProxyBatchUpdateInput) =>
+    call<number>('proxy_batch_update', { input }),
+  proxyBatchDelete: (ids: string[], confirm: boolean) =>
+    call<ProxyDeleteResult>('proxy_batch_delete', { ids, confirm }),
+  proxyBatchDeleteDisabled: (filter: ProxyFilter, confirm: boolean) =>
+    call<ProxyDeleteResult>('proxy_batch_delete_disabled', { filter, confirm }),
+  proxySubscriptionList: () => call<ProxySubscription[]>('proxy_subscription_list'),
+  proxySubscriptionCreate: (input: ProxySubscriptionInput) =>
+    call<ProxySubscription>('proxy_subscription_create', { input }),
+  proxySubscriptionUpdate: (id: string, input: ProxySubscriptionUpdate) =>
+    call<ProxySubscription>('proxy_subscription_update', { id, input }),
+  proxySubscriptionDelete: (id: string, deleteProxies: boolean, confirm: boolean) =>
+    call<ProxyDeleteResult>('proxy_subscription_delete', { id, deleteProxies, confirm }),
+  proxySubscriptionRefresh: (id: string) =>
+    call<ProxyRefreshResult>('proxy_subscription_refresh', { id }),
+  proxyDiscoveryScan: (input: ProxyDiscoveryInput) =>
+    call<ProxyDiscoveryResult>('proxy_discovery_scan', { input }),
+  proxyDiscoveryCheck: (id: string) =>
+    call<ProxyCheckResult>('proxy_discovery_check', { id }),
+  proxyDiscoveryAdd: (input: ProxyDiscoveryAddInput) =>
+    call<ProxyImportResult>('proxy_discovery_add', { input }),
+  onProxyBatch: (handler: (progress: ProxyBatchProgress) => void) =>
+    listen<ProxyBatchProgress>('proxy://batch', (event) => handler(event.payload)),
+  onProxyChanged: (handler: (payload: ProxyChangedPayload) => void) =>
+    listen<ProxyChangedPayload>('proxy://changed', (event) => handler(event.payload)),
 
   // browser
   browserOpen: (envId: string, options: OpenOptions = {}) =>

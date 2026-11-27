@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { ColorPicker } from '@/components/ui/color-picker';
 import { Dialog } from '@/components/ui/dialog';
 import { Field, Input, Select, Textarea } from '@/components/ui/input';
+import { ProxyLocationSummary, proxyOptionLabel } from '@/components/ui/proxy-location';
 import { Switch } from '@/components/ui/switch';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
@@ -60,6 +61,7 @@ export function CreateEnvironmentDialog({
 
   const update = (key: keyof typeof form, value: string | boolean | number) =>
     setForm((current) => ({ ...current, [key]: value }));
+  const selectedProxy = proxies.find((proxy) => proxy.id === form.proxyId) ?? null;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -155,15 +157,18 @@ export function CreateEnvironmentDialog({
           </Select>
         </Field>
         <Field label="绑定代理">
-          <Select value={form.proxyId} onChange={(event) => update('proxyId', event.target.value)} placeholder="直连">
-            {proxies
-              .filter((proxy) => proxy.enabled)
-              .map((proxy) => (
-                <option key={proxy.id} value={proxy.id}>
-                  {proxy.name} · {proxy.protocol}://{proxy.host}:{proxy.port}
-                </option>
-              ))}
-          </Select>
+          <div className="space-y-2">
+            <Select value={form.proxyId} onChange={(event) => update('proxyId', event.target.value)} placeholder="直连">
+              {proxies
+                .filter((proxy) => proxy.enabled)
+                .map((proxy) => (
+                  <option key={proxy.id} value={proxy.id}>
+                    {proxyOptionLabel(proxy)}
+                  </option>
+                ))}
+            </Select>
+            <ProxyLocationSummary proxy={selectedProxy} />
+          </div>
         </Field>
         <Field label="项目">
           <Input value={form.project} onChange={(event) => update('project', event.target.value)} placeholder="例如：交易中台" />
@@ -540,6 +545,7 @@ export function AssignProxyDialog({
   const [proxyId, setProxyId] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const running = envs.filter((env) => env.runtime).length;
+  const selectedProxy = proxies.find((proxy) => proxy.id === proxyId) ?? null;
   return (
     <Dialog
       open={open}
@@ -578,13 +584,16 @@ export function AssignProxyDialog({
       }
     >
       <Field label="目标代理">
-        <Select value={proxyId} onChange={(event) => setProxyId(event.target.value)} placeholder="直连（清除代理）">
-          {proxies.map((proxy) => (
-            <option key={proxy.id} value={proxy.id}>
-              {proxy.name} · {proxy.protocol}://{proxy.host}:{proxy.port}
-            </option>
-          ))}
-        </Select>
+        <div className="space-y-2">
+          <Select value={proxyId} onChange={(event) => setProxyId(event.target.value)} placeholder="直连（清除代理）">
+            {proxies.map((proxy) => (
+              <option key={proxy.id} value={proxy.id}>
+                {proxyOptionLabel(proxy)}
+              </option>
+            ))}
+          </Select>
+          <ProxyLocationSummary proxy={selectedProxy} />
+        </div>
       </Field>
       {running > 0 ? (
         <p className="mt-3 rounded-md bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-xs text-[var(--warning)]">

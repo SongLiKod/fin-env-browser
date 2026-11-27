@@ -310,9 +310,27 @@ fn import_one(
                     exit_ip: None,
                     exit_country: None,
                     exit_timezone: None,
+                    group_name: String::new(),
+                    tags: Vec::new(),
+                    note: String::new(),
+                    source: "manual".into(),
+                    subscription_id: None,
+                    weight: 1,
+                    last_check_ok: None,
+                    last_check_message: None,
+                    last_check_city: None,
+                    fail_count: 0,
+                    disabled_reason: if proxy.enabled {
+                        String::new()
+                    } else {
+                        "manual".into()
+                    },
+                    endpoint_key: String::new(),
                     created_at: now.clone(),
                     updated_at: now,
                 };
+                let mut proxy_record = proxy_record;
+                proxy_record.endpoint_key = proxy_record.endpoint_key();
                 db.insert_proxy(&proxy_record)?;
                 id
             }

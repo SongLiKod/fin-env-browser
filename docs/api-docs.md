@@ -62,7 +62,7 @@
 无需认证。
 
 ```json
-{ "status": "ok", "app": "FinEnv", "version": "4.3.0", "time": "2026-10-26T08:00:00.000Z" }
+{ "status": "ok", "app": "FinEnv", "version": "4.3.6", "time": "2026-10-26T08:00:00.000Z" }
 ```
 
 ### GET /stats
@@ -639,6 +639,200 @@ TCP 连通性 + 通过代理请求出口 IP 服务：
   "checkedAt": "..."
 }
 ```
+
+### GET /proxies/page
+
+分页与筛选；`limit` 默认 100、最大 500。返回 `{ items, total }`。
+
+查询参数：`search`、`groupName`、`tag`、`source`、`subscriptionId`、`enabled`、`status`（`ok` / `fail` / `untested` / `disabled` / `enabled`）、`disabledReason`、`limit`、`offset`。
+
+### GET /proxies/stats
+
+返回代理池统计：`total`、`enabled`、`available`、`failed`、`untested`、`disabled`、`subscriptions`。
+
+### POST /proxies/import/preview
+
+```json
+{
+  "text": "socks5://user:pass@1.2.3.4:1080\n1.2.3.5:8080",
+  "options": {
+    "defaultProtocol": "http",
+    "enabled": true,
+    "groupName": "US",
+    "tags": ["residential"],
+    "namePrefix": "US-",
+    "onDuplicate": "skip"
+  }
+}
+```
+
+返回解析统计、前 200 行预览和逐行错误。支持纯文本、Base64、URI、JSON 与常见 Clash HTTP/HTTPS/SOCKS5 节点。
+
+### POST /proxies/import
+
+请求体同上；后端重新解析并在一个事务内写入。返回：
+
+```json
+{
+  "total": 10, "valid": 10, "inserted": 8, "updated": 1, "skipped": 1,
+  "failed": 0, "errors": [], "proxyIds": ["..."]
+}
+```
+
+### POST /proxies/batch/check
+
+```json
+{ "ids": ["proxy-1", "proxy-2"], "concurrency": 8 }
+```
+
+也可用 `filter` 代替 `ids`，`onlyEnabled` 默认 `true`。返回 `202`：
+
+```json
+{ "jobId": "job-uuid", "total": 2 }
+```
+
+后台执行，进度通过 Tauri 事件 `proxy://batch` 推送；HTTP 客户端使用 `GET /proxy-jobs/{jobId}` 轮询。
+
+### GET /proxy-jobs/{jobId}
+
+返回 `{ progress, results }`。`progress.state` 为 `running` / `done` / `cancelled` / `failed`。
+
+### POST /proxy-jobs/{jobId}/cancel
+
+请求取消后台检测任务。
+
+### POST /proxies/batch/enable
+
+```json
+{ "ids": ["proxy-1"], "enabled": false }
+```
+
+### POST /proxies/batch/update
+
+```json
+{ "ids": ["proxy-1"], "groupName": "US", "addTags": ["new"], "removeTags": ["old"], "note": "..." }
+```
+
+### POST /proxies/batch/delete
+
+```json
+{ "ids": ["proxy-1"] }
+```
+
+需要 `X-FinEnv-Confirm: true`。返回 `{ deleted, affectedEnvs }`。
+
+### POST /proxies/batch/delete-disabled
+
+请求体可为空 `{}`，或使用 `ProxyFilter` 缩小范围（如 `subscriptionId`、`disabledReason`）。需要 `X-FinEnv-Confirm: true`。
+
+### GET /proxy-subscriptions
+
+返回订阅列表。`url` 与 `headers` 为解密后的明文；数据库仍加密存储。
+
+### POST /proxy-subscriptions
+
+```json
+{
+  "name": "供应商 A",
+  "url": "https://provider.example.com/sub?token=...",
+  "headers": "{\"Authorization\":\"Bearer ...\"}",
+  "defaultProtocol": "socks5",
+  "groupName": "A",
+  "tags": ["subscription"],
+  "enabled": true,
+  "autoRefresh": false,
+  "refreshIntervalMin": 360
+}
+```
+
+### PATCH /proxy-subscriptions/{id}
+
+字段均可选；`url` 传空字符串表示保持原 URL 不变，`headers` 传空字符串表示清空请求头。
+
+### DELETE /proxy-subscriptions/{id}
+
+```json
+{ "deleteProxies": false }
+```
+
+需要 `X-FinEnv-Confirm: true`。默认保留代理并转为手工；`deleteProxies=true` 同时删除订阅代理。
+
+### POST /proxy-subscriptions/{id}/refresh
+
+拉取并应用订阅。源中消失的节点会停用并标记 `disabledReason=subscription_missing`，不会自动删除；重新出现时自动恢复。返回：
+
+```json
+{
+  "subscriptionId": "...", "added": 3, "updated": 1, "unchanged": 18,
+  "disabled": 1, "restored": 0, "skipped": 0, "unsupported": 0,
+  "totalInFeed": 22, "message": "订阅刷新完成：..."
+}
+```
+
+### POST /proxy-discovery/scan
+
+从搜索引擎、GitHub 仓库 README 和友情链接页面抓取公开代理节点。返回候选节点；候选密码只保存在后端内存，30 分钟内可凭 `candidateId` 添加。
+
+```json
+{
+  "searchQueries": ["free proxy list"],
+  "engines": ["bing", "duckduckgo"],
+  "githubQueries": ["free proxy list"],
+  "friendLinks": ["https://example.com/proxy-list"],
+  "followLinks": true,
+  "defaultProtocol": "http",
+  "maxResults": 200
+}
+```
+
+返回：
+
+```json
+{
+  "candidates": [
+    {
+      "id": "candidate-uuid",
+      "name": "1.2.3.4:8080",
+      "protocol": "http",
+      "host": "1.2.3.4",
+      "port": 8080,
+      "username": "user",
+      "hasPassword": true,
+      "source": "Bing",
+      "sourceUrl": "https://www.bing.com/search?q=...",
+      "duplicate": false,
+      "existingId": null
+    }
+  ],
+  "sources": [
+    { "kind": "Bing", "target": "https://...", "ok": true, "count": 12, "message": "" }
+  ],
+  "scanned": 12,
+  "errors": []
+}
+```
+
+说明：
+
+- 只抓取 `http/https` 页面，单页上限 2MB，不执行页面脚本。
+- 搜索引擎默认可选 Bing / DuckDuckGo / Google；Google 可能因反爬返回空结果。
+- GitHub 使用匿名仓库搜索 API + README，受匿名限流影响；失败会在 `sources` / `errors` 返回。
+- 友情链接会抓取给定页面；`followLinks=true` 时额外跟进页面内最多 8 个链接。
+- 结果按协议 + 主机 + 端口去重，带凭据的节点优先。
+
+### POST /proxy-discovery/add
+
+```json
+{
+  "candidateIds": ["candidate-uuid"],
+  "groupName": "在线发现",
+  "tags": ["discovered"],
+  "enabled": true,
+  "onDuplicate": "skip"
+}
+```
+
+`onDuplicate`：`skip` / `update` / `error`。返回与批量导入相同的 `ProxyImportResult`。
 
 ### POST /envs/{id}/proxy
 

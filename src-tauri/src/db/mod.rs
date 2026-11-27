@@ -192,6 +192,119 @@ mod tests {
     }
 
     #[test]
+    fn proxy_pool_fields_filters_and_subscriptions_round_trip() {
+        use crate::models::{Proxy, ProxyCheckResult, ProxyFilter, ProxySubscription};
+
+        let (db, dir) = temp_db();
+        let crypto = db.crypto().expect("crypto attached");
+        let now = now_iso();
+        let mut proxy = Proxy {
+            id: new_id(),
+            name: "US residential".into(),
+            protocol: "socks5".into(),
+            host: "Proxy.Example.com".into(),
+            port: 1080,
+            username: "User".into(),
+            password_enc: crypto.encrypt("secret").unwrap(),
+            has_password: true,
+            enabled: true,
+            last_check_at: None,
+            latency_ms: None,
+            exit_ip: None,
+            exit_country: None,
+            exit_timezone: None,
+            group_name: "US".into(),
+            tags: vec!["residential".into()],
+            note: "note".into(),
+            source: "manual".into(),
+            subscription_id: None,
+            weight: 1,
+            last_check_ok: None,
+            last_check_message: None,
+            last_check_city: None,
+            fail_count: 0,
+            disabled_reason: String::new(),
+            endpoint_key: String::new(),
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        proxy.endpoint_key = proxy.endpoint_key();
+        db.insert_proxy(&proxy).unwrap();
+
+        let page = db
+            .query_proxies(&ProxyFilter {
+                search: Some("example".into()),
+                group_name: Some("US".into()),
+                status: Some("untested".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(
+            page.items[0].endpoint_key,
+            "socks5://proxy.example.com:1080|User"
+        );
+        assert_eq!(page.items[0].tags, vec!["residential"]);
+
+        db.save_proxy_checks(&[ProxyCheckResult {
+            proxy_id: proxy.id.clone(),
+            ok: false,
+            latency_ms: Some(8000),
+            exit_ip: None,
+            country: None,
+            timezone: None,
+            city: None,
+            message: "TCP 连接超时".into(),
+            checked_at: now_iso(),
+        }])
+        .unwrap();
+        let checked = db.get_proxy(&proxy.id).unwrap();
+        assert_eq!(checked.last_check_ok, Some(false));
+        assert_eq!(checked.fail_count, 1);
+        assert_eq!(checked.last_check_message.as_deref(), Some("TCP 连接超时"));
+
+        let subscription = ProxySubscription {
+            id: new_id(),
+            name: "Provider".into(),
+            url: "https://provider.example.com/sub?token=secret".into(),
+            url_enc: crypto
+                .encrypt("https://provider.example.com/sub?token=secret")
+                .unwrap(),
+            headers: Some(r#"{"Authorization":"Bearer secret"}"#.into()),
+            headers_enc: crypto
+                .encrypt(r#"{"Authorization":"Bearer secret"}"#)
+                .unwrap(),
+            default_protocol: "socks5".into(),
+            group_name: "Provider".into(),
+            tags: vec!["sub".into()],
+            enabled: true,
+            auto_refresh: false,
+            refresh_interval_min: 360,
+            last_refresh_at: None,
+            last_refresh_status: None,
+            last_refresh_message: None,
+            proxy_count: 0,
+            created_at: now_iso(),
+            updated_at: now_iso(),
+        };
+        db.insert_subscription(&subscription).unwrap();
+        let loaded = db.get_subscription(&subscription.id).unwrap();
+        assert_eq!(loaded.url, subscription.url);
+        assert_eq!(loaded.headers, subscription.headers);
+        assert!(!loaded.auto_refresh);
+
+        let mut linked = db.get_proxy(&proxy.id).unwrap();
+        linked.subscription_id = Some(subscription.id.clone());
+        linked.source = "subscription".into();
+        db.update_proxy(&linked).unwrap();
+        db.detach_subscription_proxies(&subscription.id).unwrap();
+        let detached = db.get_proxy(&proxy.id).unwrap();
+        assert_eq!(detached.source, "manual");
+        assert!(detached.subscription_id.is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn environment_identity_and_ip_round_trip() {
         let (db, dir) = temp_db();
         let env = sample_environment();
@@ -336,6 +449,10 @@ impl Db {
             (
                 "010_environment_plugins",
                 include_str!("../../migrations/010_environment_plugins.sql"),
+            ),
+            (
+                "011_proxy_pool",
+                include_str!("../../migrations/011_proxy_pool.sql"),
             ),
         ];
         let current: i64 =

@@ -201,6 +201,17 @@ export interface Proxy {
   exitIp: string | null;
   exitCountry: string | null;
   exitTimezone: string | null;
+  groupName: string;
+  tags: string[];
+  note: string;
+  source: 'manual' | 'import' | 'subscription' | 'discovery' | string;
+  subscriptionId: string | null;
+  weight: number;
+  lastCheckOk: boolean | null;
+  lastCheckMessage: string | null;
+  lastCheckCity: string | null;
+  failCount: number;
+  disabledReason: '' | 'manual' | 'subscription_missing' | string;
   createdAt: string;
   updatedAt: string;
 }
@@ -448,6 +459,9 @@ export interface ProxyInput {
   username?: string | null;
   password?: string | null;
   enabled?: boolean | null;
+  groupName?: string | null;
+  tags?: string[] | null;
+  note?: string | null;
 }
 
 export interface UpdateProxyInput {
@@ -458,6 +472,9 @@ export interface UpdateProxyInput {
   username?: string;
   password?: string;
   enabled?: boolean;
+  groupName?: string;
+  tags?: string[];
+  note?: string;
 }
 
 export interface ProxyCheckResult {
@@ -475,6 +492,249 @@ export interface ProxyCheckResult {
 export interface AlignProxyResult {
   environment: EnvironmentView;
   check: ProxyCheckResult;
+}
+
+export interface ProxyFilter {
+  search?: string;
+  groupName?: string;
+  tag?: string;
+  source?: string;
+  subscriptionId?: string;
+  enabled?: boolean;
+  status?: 'ok' | 'fail' | 'untested' | 'disabled' | 'enabled' | string;
+  statuses?: string[];
+  disabledReason?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ProxyPage {
+  items: Proxy[];
+  total: number;
+}
+
+export interface ProxyStats {
+  total: number;
+  enabled: number;
+  available: number;
+  failed: number;
+  untested: number;
+  disabled: number;
+  subscriptions: number;
+}
+
+export interface ProxyImportOptions {
+  defaultProtocol?: 'http' | 'https' | 'socks5';
+  enabled?: boolean;
+  groupName?: string;
+  tags?: string[];
+  namePrefix?: string;
+  onDuplicate?: 'skip' | 'update' | 'error';
+}
+
+export interface ProxyImportInput {
+  text: string;
+  options?: ProxyImportOptions;
+}
+
+export interface ProxyImportRow {
+  line: number;
+  name: string;
+  protocol: string;
+  host: string;
+  port: number;
+  username: string;
+  hasPassword: boolean;
+  duplicate: boolean;
+  duplicateKind: string | null;
+  error: string | null;
+}
+
+export interface ProxyImportError {
+  line: number;
+  raw: string;
+  message: string;
+}
+
+export interface ProxyImportPreview {
+  totalLines: number;
+  valid: number;
+  invalid: number;
+  duplicates: number;
+  unsupported: number;
+  rows: ProxyImportRow[];
+  errors: ProxyImportError[];
+}
+
+export interface ProxyImportResult {
+  total: number;
+  valid: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  errors: ProxyImportError[];
+  proxyIds: string[];
+}
+
+export interface ProxyBatchCheckInput {
+  ids?: string[];
+  filter?: ProxyFilter;
+  onlyEnabled?: boolean;
+  concurrency?: number;
+}
+
+export interface ProxyBatchCheckStart {
+  jobId: string;
+  total: number;
+}
+
+export interface ProxyBatchProgress {
+  jobId: string;
+  kind: string;
+  state: 'running' | 'done' | 'cancelled' | 'failed';
+  total: number;
+  completed: number;
+  ok: number;
+  failed: number;
+  startedAt: string;
+  finishedAt: string | null;
+  message: string;
+  recent: ProxyCheckResult[];
+}
+
+export interface ProxyJobView {
+  progress: ProxyBatchProgress;
+  results: ProxyCheckResult[];
+}
+
+export interface ProxyDeleteResult {
+  deleted: number;
+  affectedEnvs: number;
+}
+
+export interface ProxyBatchUpdateInput {
+  ids: string[];
+  groupName?: string;
+  addTags?: string[];
+  removeTags?: string[];
+  note?: string;
+}
+
+export interface ProxySubscription {
+  id: string;
+  name: string;
+  url: string;
+  headers: string | null;
+  defaultProtocol: 'http' | 'https' | 'socks5';
+  groupName: string;
+  tags: string[];
+  enabled: boolean;
+  autoRefresh: boolean;
+  refreshIntervalMin: number;
+  lastRefreshAt: string | null;
+  lastRefreshStatus: string | null;
+  lastRefreshMessage: string | null;
+  proxyCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProxySubscriptionInput {
+  name: string;
+  url: string;
+  headers?: string | null;
+  defaultProtocol?: 'http' | 'https' | 'socks5';
+  groupName?: string;
+  tags?: string[];
+  enabled?: boolean;
+  autoRefresh?: boolean;
+  refreshIntervalMin?: number;
+}
+
+export interface ProxySubscriptionUpdate {
+  name?: string;
+  url?: string;
+  headers?: string;
+  defaultProtocol?: 'http' | 'https' | 'socks5';
+  groupName?: string;
+  tags?: string[];
+  enabled?: boolean;
+  autoRefresh?: boolean;
+  refreshIntervalMin?: number;
+}
+
+export interface ProxyRefreshResult {
+  subscriptionId: string;
+  added: number;
+  updated: number;
+  unchanged: number;
+  disabled: number;
+  restored: number;
+  skipped: number;
+  unsupported: number;
+  totalInFeed: number;
+  message: string;
+}
+
+export interface ProxyChangedPayload {
+  reason: string;
+  subscriptionId?: string;
+}
+
+export interface ProxyDiscoveryInput {
+  searchQueries?: string[];
+  engines?: string[];
+  githubQueries?: string[];
+  friendLinks?: string[];
+  followLinks?: boolean;
+  defaultProtocol?: 'http' | 'https' | 'socks5';
+  maxResults?: number;
+  includePublicLists?: boolean;
+  verify?: boolean;
+}
+
+export interface ProxyDiscoveryCandidate {
+  id: string;
+  name: string;
+  protocol: string;
+  host: string;
+  port: number;
+  username: string;
+  hasPassword: boolean;
+  source: string;
+  sourceUrl: string;
+  duplicate: boolean;
+  existingId: string | null;
+  verified: boolean;
+  latencyMs: number | null;
+  exitIp: string | null;
+  checkMessage: string | null;
+}
+
+export interface ProxyDiscoverySourceStatus {
+  kind: string;
+  target: string;
+  ok: boolean;
+  count: number;
+  message: string;
+}
+
+export interface ProxyDiscoveryResult {
+  candidates: ProxyDiscoveryCandidate[];
+  sources: ProxyDiscoverySourceStatus[];
+  scanned: number;
+  verified: number;
+  rejected: number;
+  errors: string[];
+}
+
+export interface ProxyDiscoveryAddInput {
+  candidateIds: string[];
+  groupName?: string;
+  tags?: string[];
+  enabled?: boolean;
+  onDuplicate?: 'skip' | 'update' | 'error';
 }
 
 export interface OpenOptions {

@@ -22,13 +22,18 @@
 | 指纹检测面板 | `fingerprint_report::detect`、`PROBE_SCRIPT`、`DetectionPanel.tsx` |
 | 一键调用检测服务 | 新开 CDP 标签页访问 `detectionServiceUrl`，探针比对并评分 |
 
-## 3. 代理管理（P0）
+## 3. 代理管理（P0/P1）
 
 - 每环境绑定 HTTP/HTTPS/SOCKS5：`environments.proxy_id` + 启动参数 `--proxy-server`。
-- 连通性 + 出口 IP/国家/时区：`proxy_check.rs`、`Proxies.tsx`。
+- 连通性 + 出口 IP/国家/时区：`proxy_check.rs`、`Proxies.tsx`；批量检测使用 `proxy_jobs.rs` 后台 Job，支持并发、进度事件、取消。
 - IP/时区对齐：`services::align_proxy` + `fingerprint::apply_country_locale`。
 - 代理池批量分配：`proxy_assign` / `AssignEnvsDialog`。
-- 代理密码 AES-256-GCM：`proxies.password_enc`。
+- 批量导入：`proxy_import.rs` 支持纯文本、Base64、URI、JSON 与常见 Clash HTTP/SOCKS5 节点；`proxy_import_preview` 预览、`proxy_import_commit` 事务提交。
+- 订阅源：`proxy_subscriptions` + `proxy_subscription.rs`；手动刷新与可选自动刷新（默认关闭），源中消失节点停用并标记 `subscription_missing`，支持批量清理停用节点。
+- 在线发现：`proxy_discovery.rs` 从 Bing/DuckDuckGo/Google、GitHub 仓库 README、友情链接页面抓取候选节点，勾选后直接加入代理池；候选密码只存后端内存，接口不返回明文。
+- 分组/标签/备注/来源/分页筛选：`proxies` 新字段 + `ProxyFilter`。
+- 代理密码 AES-256-GCM；订阅 URL/Headers 落库加密、接口可回显明文。
+- 检测结论持久化：`last_check_ok` / `last_check_message` / `last_check_city` / `fail_count`，修复旧 `exit_ip` 导致的状态误判。
 
 ## 4. 浏览器内核隔离（P0）
 
@@ -114,6 +119,16 @@ cargo test
 
 ## 13. 本轮校验记录
 
+### 13.1 代理池增强（V4.3.x）
+
+- `cargo check --all-targets`：通过（0 warning）
+- `cargo test --no-run`：通过（测试目标编译成功；本机测试运行器因 `STATUS_ENTRYPOINT_NOT_FOUND` 无法启动，属于本机 Tauri/WebView2 链接环境问题）
+- `npm --prefix frontend run check`：通过（`tsc --noEmit` 0 error；Vitest 20 用例；Vite 生产构建成功）
+- `node scripts/verify.mjs`：通过（163 个 Tauri 命令、54 条 API 路由）
+- 迁移 SQL 使用 Python `sqlite3` 独立执行 001 + 011 验证：表/字段/索引创建成功，旧代理 `endpoint_key` 回填正确
+
+### 13.2 历史校验记录
+
 - `npm --prefix frontend run check`：通过（`tsc --noEmit` 0 error；Vitest 4 个文件 / 20 用例；Vite 生产构建成功，产物 `frontend/dist`）
 - `sdk/js npm test`：4/4 通过（URL/Header/JSON/错误映射）
 - `sdk/python python -m unittest`：4/4 通过（查询构造/请求体/错误映射/环境变量）
@@ -140,7 +155,7 @@ cargo test
   - Cookie 写入/读取/加密缓存落盘，应用重启后自动恢复
   - 连续录制 4 帧并生成 manifest；HAR 1.2 文件导出
   - 浏览器关闭与进程回收
-- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"4.3.0"}`。
+- `cargo build`：通过；重新构建后的 `fin-env-browser.exe` 以临时数据目录启动，`GET /api/v1/health` 返回 `{"app":"FinEnv","status":"ok","version":"4.3.6"}`。
 - Windows GNU 链接阶段会输出 `.rsrc merge failure: multiple non-default manifests` 警告（MinGW 默认清单与 Tauri 资源清单合并提示），构建退出码为 0，产物可正常启动；CI 使用 MSVC 工具链，不涉及该提示。
 - 完整 `cargo test` 的 Tauri 测试二进制在当前 MinGW 沙箱启动阶段报 `STATUS_ENTRYPOINT_NOT_FOUND`（WebView2/工具链运行环境限制）；`cargo check`、`clippy --all-targets` 已完整编译所有测试代码。`.github/workflows/build.yml` 在 Ubuntu 上执行完整单元测试，并在 Windows/macOS/Linux 矩阵中构建安装包。
 - 浏览器预览：登录页亮/暗主题渲染正常，无 console error。
