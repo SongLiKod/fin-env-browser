@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Field, Input, Select, Textarea } from '@/components/ui/input';
+import { ProxyLocationSummary, proxyOptionLabel } from '@/components/ui/proxy-location';
 
 type Mode =
   | { kind: 'list' }
@@ -80,6 +81,7 @@ export function TemplateManagerDialog({
     () => new Map(proxies.map((proxy) => [proxy.id, proxy.name])),
     [proxies],
   );
+  const selectedEditProxy = proxies.find((proxy) => proxy.id === editProxyId) ?? null;
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -482,20 +484,23 @@ export function TemplateManagerDialog({
                 label="固定代理"
                 hint={editProxyMode === 'pool' ? '代理池按启用代理顺序轮询' : undefined}
               >
-                <Select
-                  value={editProxyId}
-                  disabled={editProxyMode !== 'fixed'}
-                  onChange={(event) => setEditProxyId(event.target.value)}
-                  placeholder={editProxyMode === 'fixed' ? '选择代理' : '仅固定代理模式可用'}
-                >
-                  {proxies
-                    .filter((proxy) => proxy.enabled)
-                    .map((proxy) => (
-                      <option key={proxy.id} value={proxy.id}>
-                        {proxy.name} · {proxy.protocol}://{proxy.host}:{proxy.port}
-                      </option>
-                    ))}
-                </Select>
+                <div className="space-y-2">
+                  <Select
+                    value={editProxyId}
+                    disabled={editProxyMode !== 'fixed'}
+                    onChange={(event) => setEditProxyId(event.target.value)}
+                    placeholder={editProxyMode === 'fixed' ? '选择代理' : '仅固定代理模式可用'}
+                  >
+                    {proxies
+                      .filter((proxy) => proxy.enabled)
+                      .map((proxy) => (
+                        <option key={proxy.id} value={proxy.id}>
+                          {proxyOptionLabel(proxy)}
+                        </option>
+                      ))}
+                  </Select>
+                  {editProxyMode === 'fixed' ? <ProxyLocationSummary proxy={selectedEditProxy} /> : null}
+                </div>
               </Field>
             </div>
             <div className="rounded-lg border border-border bg-surface-secondary/60 p-3 text-[11px] text-content-hint">

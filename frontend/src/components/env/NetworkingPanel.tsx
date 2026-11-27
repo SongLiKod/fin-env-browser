@@ -22,13 +22,13 @@ import type {
 import { ipc } from '@/ipc/client';
 import { useAuthStore } from '@/store/auth';
 import { toastError, useToastStore } from '@/store/toast';
-import { formatDateShort } from '@/utils';
 import { envHasAccess } from '@/utils/environment';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, EmptyState, Spinner } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { Field, Input, Select, Textarea } from '@/components/ui/input';
+import { ProxyLocationSummary, proxyOptionLabel } from '@/components/ui/proxy-location';
 import { Switch } from '@/components/ui/switch';
 
 export function NetworkingPanel({
@@ -190,7 +190,7 @@ export function NetworkingPanel({
               <Select value={proxyId} onChange={(event) => setProxyId(event.target.value)} placeholder="直连（不使用代理）">
                 {proxies.map((proxy) => (
                   <option key={proxy.id} value={proxy.id}>
-                    {proxy.name} · {proxy.protocol}://{proxy.host}:{proxy.port}
+                    {proxyOptionLabel(proxy)}
                   </option>
                 ))}
               </Select>
@@ -214,21 +214,24 @@ export function NetworkingPanel({
           ) : null}
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-md border border-border bg-surface-secondary p-3">
-              <p className="text-[10px] uppercase tracking-widest text-content-hint">当前代理</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] uppercase tracking-widest text-content-hint">当前代理 / 节点位置</p>
+                {selected?.groupName ? <Badge tone="outline">{selected.groupName}</Badge> : null}
+              </div>
+              <ProxyLocationSummary proxy={selected} className="mt-2" />
               {selected ? (
-                <div className="mt-1.5 space-y-1 text-xs">
+                <div className="mt-2 space-y-1 text-xs">
                   <p className="font-medium text-content-main">{selected.name}</p>
                   <p className="font-mono text-[11px] text-content-weak">
                     {selected.protocol}://{selected.username ? `${selected.username}@` : ''}
                     {selected.host}:{selected.port}
                   </p>
                   <p className="text-content-hint">
-                    认证 {selected.username ? (selected.hasPassword ? '已配置' : '仅用户名') : '无'} ·{' '}
-                    {selected.lastCheckAt ? `上次检测 ${formatDateShort(selected.lastCheckAt)}` : '未检测'}
+                    认证 {selected.username ? (selected.hasPassword ? '已配置' : '仅用户名') : '无'}
                   </p>
                 </div>
               ) : (
-                <p className="mt-1.5 text-xs text-content-weak">直连（无代理）。生产测试建议绑定独立 IP。</p>
+                <p className="mt-2 text-xs text-content-weak">直连（无代理）。生产测试建议绑定独立 IP。</p>
               )}
             </div>
             <div className="rounded-md border border-border bg-surface-secondary p-3">

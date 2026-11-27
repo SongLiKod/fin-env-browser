@@ -43,6 +43,7 @@ import { Card, EmptyState, Spinner, StatCard } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Dialog } from '@/components/ui/dialog';
 import { Field, Input, Select, Textarea } from '@/components/ui/input';
+import { ProxyLocationSummary } from '@/components/ui/proxy-location';
 import { Switch } from '@/components/ui/switch';
 import { Tabs } from '@/components/ui/tabs';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -2481,6 +2482,7 @@ function AssignEnvsDialog({
         </>
       }
     >
+      <ProxyLocationSummary proxy={proxy} className="mb-3" />
       <div className="mb-2 flex items-center justify-between text-[11px] text-content-hint">
         <span>已选 {selected.length} 个环境</span>
         <button
