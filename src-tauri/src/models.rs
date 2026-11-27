@@ -520,12 +520,7 @@ impl Proxy {
     }
 
     pub fn endpoint_key(&self) -> String {
-        crate::proxy_import::endpoint_key(
-            &self.protocol,
-            &self.host,
-            self.port,
-            &self.username,
-        )
+        crate::proxy_import::endpoint_key(&self.protocol, &self.host, self.port, &self.username)
     }
 }
 

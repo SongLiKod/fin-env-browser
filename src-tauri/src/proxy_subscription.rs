@@ -9,9 +9,7 @@ use tauri::Emitter;
 use crate::{
     audit_log::{actions, Audit},
     error::{AppError, Result},
-    models::{
-        new_id, now_iso, Proxy, ProxyImportOptions, ProxyRefreshResult, ProxySubscription,
-    },
+    models::{new_id, now_iso, Proxy, ProxyImportOptions, ProxyRefreshResult, ProxySubscription},
     proxy_import,
     state::SharedState,
 };
@@ -135,12 +133,7 @@ async fn refresh_inner(
         .iter()
         .filter(|entry| !entry.duplicate)
         .map(|entry| {
-            proxy_import::endpoint_key(
-                &entry.protocol,
-                &entry.host,
-                entry.port,
-                &entry.username,
-            )
+            proxy_import::endpoint_key(&entry.protocol, &entry.host, entry.port, &entry.username)
         })
         .collect::<HashSet<_>>();
     let all_existing = state
@@ -166,12 +159,8 @@ async fn refresh_inner(
             skipped += 1;
             continue;
         }
-        let key = proxy_import::endpoint_key(
-            &entry.protocol,
-            &entry.host,
-            entry.port,
-            &entry.username,
-        );
+        let key =
+            proxy_import::endpoint_key(&entry.protocol, &entry.host, entry.port, &entry.username);
         if !handled.insert(key.clone()) {
             skipped += 1;
             continue;
@@ -197,8 +186,7 @@ async fn refresh_inner(
                         proxy.password_enc = state.crypto.encrypt(password)?;
                         proxy.has_password = true;
                         proxy.last_check_ok = None;
-                        proxy.last_check_message =
-                            Some("凭据已更新，待重新检测".into());
+                        proxy.last_check_message = Some("凭据已更新，待重新检测".into());
                         proxy.fail_count = 0;
                         changed = true;
                     }
@@ -317,10 +305,8 @@ async fn refresh_inner(
 }
 
 async fn fetch_subscription(subscription: &ProxySubscription) -> Result<String> {
-    let target = raw_content_url(&subscription.url)
-        .unwrap_or_else(|| subscription.url.clone());
-    let url = url::Url::parse(&target)
-        .map_err(|_| AppError::bad_request("订阅 URL 无效"))?;
+    let target = raw_content_url(&subscription.url).unwrap_or_else(|| subscription.url.clone());
+    let url = url::Url::parse(&target).map_err(|_| AppError::bad_request("订阅 URL 无效"))?;
     if !matches!(url.scheme(), "http" | "https") {
         return Err(AppError::bad_request("订阅 URL 仅支持 http/https"));
     }
@@ -336,7 +322,11 @@ async fn fetch_subscription(subscription: &ProxySubscription) -> Result<String> 
     if !username.is_empty() {
         request = request.basic_auth(username, password);
     }
-    if let Some(headers) = subscription.headers.as_deref().filter(|value| !value.is_empty()) {
+    if let Some(headers) = subscription
+        .headers
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
         request = request.headers(parse_headers(headers)?);
     }
     let response = request

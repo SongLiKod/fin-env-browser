@@ -17,8 +17,7 @@ use crate::{
         ProxyBatchCheckStart, ProxyBatchUpdateInput, ProxyCheckResult, ProxyDeleteResult,
         ProxyFilter, ProxyImportInput, ProxyImportOptions, ProxyImportPreview, ProxyImportResult,
         ProxyImportRow, ProxyInput, ProxyJobView, ProxyPage, ProxyRefreshResult, ProxyStats,
-        ProxySubscription,
-        ProxySubscriptionInput, ProxySubscriptionUpdate, Settings, ThemeConfig,
+        ProxySubscription, ProxySubscriptionInput, ProxySubscriptionUpdate, Settings, ThemeConfig,
         UpdateAccountInput, UpdateEnvironmentInput, UpdateProxyInput, UpdateSettingsInput,
         UpdateTemplateInput, User, UserInput, UserUpdateInput,
     },
@@ -1300,7 +1299,13 @@ fn normalize_import_options(options: &ProxyImportOptions) -> ProxyImportOptions 
             .default_protocol
             .as_deref()
             .map(|value| value.trim().to_ascii_lowercase())
-            .map(|value| if value == "socks5h" { "socks5".into() } else { value })
+            .map(|value| {
+                if value == "socks5h" {
+                    "socks5".into()
+                } else {
+                    value
+                }
+            })
             .filter(|value| crate::models::PROXY_PROTOCOLS.contains(&value.as_str()))
             .or_else(|| Some("http".into())),
         enabled: options.enabled.or(Some(true)),
@@ -1330,12 +1335,7 @@ pub fn preview_proxy_import(
         .entries
         .iter()
         .map(|entry| {
-            proxy_import::endpoint_key(
-                &entry.protocol,
-                &entry.host,
-                entry.port,
-                &entry.username,
-            )
+            proxy_import::endpoint_key(&entry.protocol, &entry.host, entry.port, &entry.username)
         })
         .collect::<Vec<_>>();
     let existing = state
@@ -1373,7 +1373,10 @@ pub fn preview_proxy_import(
                 host: entry.host.clone(),
                 port: entry.port,
                 username: entry.username.clone(),
-                has_password: entry.password.as_deref().is_some_and(|value| !value.is_empty()),
+                has_password: entry
+                    .password
+                    .as_deref()
+                    .is_some_and(|value| !value.is_empty()),
                 duplicate,
                 duplicate_kind,
                 error: None,
@@ -1416,12 +1419,7 @@ pub fn import_proxies(
         .entries
         .iter()
         .map(|entry| {
-            proxy_import::endpoint_key(
-                &entry.protocol,
-                &entry.host,
-                entry.port,
-                &entry.username,
-            )
+            proxy_import::endpoint_key(&entry.protocol, &entry.host, entry.port, &entry.username)
         })
         .collect::<Vec<_>>();
     let existing = state
@@ -1440,12 +1438,8 @@ pub fn import_proxies(
     let mut seen = HashSet::new();
 
     for entry in parsed.entries {
-        let key = proxy_import::endpoint_key(
-            &entry.protocol,
-            &entry.host,
-            entry.port,
-            &entry.username,
-        );
+        let key =
+            proxy_import::endpoint_key(&entry.protocol, &entry.host, entry.port, &entry.username);
         if entry.duplicate || !seen.insert(key.clone()) {
             skipped += 1;
             continue;
@@ -1502,7 +1496,12 @@ pub fn import_proxies(
             exit_ip: None,
             exit_country: None,
             exit_timezone: None,
-            group_name: options.group_name.clone().unwrap_or_default().trim().to_string(),
+            group_name: options
+                .group_name
+                .clone()
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
             tags: options.tags.clone().unwrap_or_default(),
             note: String::new(),
             source: "import".into(),
@@ -1529,7 +1528,7 @@ pub fn import_proxies(
     let (inserted, updated) = state.db.apply_proxy_import(&inserts, &updates)?;
     let result = ProxyImportResult {
         total: parsed.total_lines,
-        valid: (inserted + updated + skipped) as u32,
+        valid: inserted + updated + skipped,
         inserted,
         updated,
         skipped,
@@ -1620,9 +1619,7 @@ pub fn set_proxies_enabled(
     enabled: bool,
     actor: &str,
 ) -> Result<u32> {
-    let count = state
-        .db
-        .set_proxies_enabled(ids, enabled, "manual")?;
+    let count = state.db.set_proxies_enabled(ids, enabled, "manual")?;
     Audit::global(
         &state.db,
         actor,
@@ -1659,7 +1656,9 @@ pub fn update_proxies_meta(
             }
         }
         if let Some(remove_tags) = input.remove_tags.as_deref() {
-            proxy.tags.retain(|tag| !remove_tags.iter().any(|value| value == tag));
+            proxy
+                .tags
+                .retain(|tag| !remove_tags.iter().any(|value| value == tag));
         }
         if let Some(note) = input.note.as_deref() {
             proxy.note = note.trim().to_string();
@@ -1719,8 +1718,7 @@ pub fn list_proxy_subscriptions(state: &SharedState) -> Result<Vec<ProxySubscrip
 
 fn normalize_subscription_url(value: &str) -> Result<String> {
     let trimmed = value.trim();
-    let url = url::Url::parse(trimmed)
-        .map_err(|_| AppError::bad_request("订阅 URL 无效"))?;
+    let url = url::Url::parse(trimmed).map_err(|_| AppError::bad_request("订阅 URL 无效"))?;
     if !matches!(url.scheme(), "http" | "https") {
         return Err(AppError::bad_request("订阅 URL 仅支持 http/https"));
     }
@@ -1755,9 +1753,7 @@ pub fn create_proxy_subscription(
     }
     let url = normalize_subscription_url(&input.url)?;
     let headers = normalize_headers(input.headers.as_deref())?;
-    let default_protocol = input
-        .default_protocol
-        .unwrap_or_else(|| "http".into());
+    let default_protocol = input.default_protocol.unwrap_or_else(|| "http".into());
     if !crate::models::PROXY_PROTOCOLS.contains(&default_protocol.as_str()) {
         return Err(AppError::bad_request("默认协议仅支持 http/https/socks5"));
     }
@@ -1808,7 +1804,12 @@ pub fn update_proxy_subscription(
         }
         subscription.name = name.trim().to_string();
     }
-    if let Some(url) = input.url.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(url) = input
+        .url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         let url = normalize_subscription_url(url)?;
         subscription.url_enc = state.crypto.encrypt(&url)?;
         subscription.url = url;

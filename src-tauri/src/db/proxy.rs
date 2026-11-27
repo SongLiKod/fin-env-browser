@@ -131,7 +131,12 @@ fn placeholders(count: usize) -> String {
 fn filter_clauses(filter: &ProxyFilter) -> (Vec<String>, Vec<Value>) {
     let mut clauses = Vec::new();
     let mut values = Vec::new();
-    if let Some(search) = filter.search.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(search) = filter
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         let like = format!("%{search}%");
         clauses.push(
             "(name LIKE ? OR host LIKE ? OR username LIKE ? OR exit_ip LIKE ? OR note LIKE ?)"
@@ -150,7 +155,12 @@ fn filter_clauses(filter: &ProxyFilter) -> (Vec<String>, Vec<Value>) {
         clauses.push("group_name = ?".into());
         values.push(Value::Text(group.to_string()));
     }
-    if let Some(tag) = filter.tag.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(tag) = filter
+        .tag
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         clauses.push("tags LIKE ?".into());
         values.push(Value::Text(format!("%\"{tag}\"%")));
     }
@@ -347,11 +357,7 @@ impl Db {
         })
     }
 
-    pub fn apply_proxy_import(
-        &self,
-        inserts: &[Proxy],
-        updates: &[Proxy],
-    ) -> Result<(u32, u32)> {
+    pub fn apply_proxy_import(&self, inserts: &[Proxy], updates: &[Proxy]) -> Result<(u32, u32)> {
         self.with(|conn| {
             let tx = conn.transaction()?;
             let mut inserted = 0u32;
@@ -401,7 +407,10 @@ impl Db {
 
     pub fn delete_disabled_proxies(&self, filter: &ProxyFilter) -> Result<ProxyDeleteResult> {
         fn known_status(value: &str) -> bool {
-            matches!(value.trim(), "ok" | "fail" | "untested" | "disabled" | "enabled")
+            matches!(
+                value.trim(),
+                "ok" | "fail" | "untested" | "disabled" | "enabled"
+            )
         }
         let mut filter = filter.clone();
         let requested = !filter.statuses.is_empty();
@@ -626,7 +635,8 @@ impl Db {
 
     pub fn delete_subscription_row(&self, id: &str) -> Result<()> {
         self.with(|conn| {
-            let changed = conn.execute("DELETE FROM proxy_subscriptions WHERE id = ?1", params![id])?;
+            let changed =
+                conn.execute("DELETE FROM proxy_subscriptions WHERE id = ?1", params![id])?;
             if changed == 0 {
                 return Err(AppError::not_found("订阅不存在"));
             }
@@ -659,7 +669,8 @@ impl Db {
                 params![id],
                 |row| row.get(0),
             )?;
-            let deleted = conn.execute("DELETE FROM proxies WHERE subscription_id=?1", params![id])?;
+            let deleted =
+                conn.execute("DELETE FROM proxies WHERE subscription_id=?1", params![id])?;
             Ok(ProxyDeleteResult {
                 deleted: deleted as u32,
                 affected_envs: affected_envs as u32,
@@ -707,7 +718,6 @@ impl Db {
             Ok(())
         })
     }
-
 }
 
 fn insert_proxy_row(conn: &rusqlite::Connection, proxy: &Proxy) -> rusqlite::Result<usize> {

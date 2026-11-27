@@ -17,7 +17,8 @@ use crate::{
         new_id, now_iso, Proxy, ProxyBatchCheckStart, ProxyBatchProgress, ProxyCheckResult,
         ProxyJobView,
     },
-    proxy_check, state::SharedState,
+    proxy_check,
+    state::SharedState,
 };
 
 pub struct ProxyJob {
@@ -67,7 +68,9 @@ impl ProxyJobManager {
             })
             .count();
         if running >= 4 {
-            return Err(AppError::conflict("同时最多运行 4 个代理检测任务，请稍后再试"));
+            return Err(AppError::conflict(
+                "同时最多运行 4 个代理检测任务，请稍后再试",
+            ));
         }
         let total = proxies.len() as u32;
         if total == 0 {
@@ -257,7 +260,9 @@ async fn run_check_job(
         &state.db,
         &actor,
         actions::PROXY_BATCH_CHECK,
-        format!("批量检测代理：完成 {completed}/{total}，成功 {ok}，失败 {failed}，取消 {cancelled}"),
+        format!(
+            "批量检测代理：完成 {completed}/{total}，成功 {ok}，失败 {failed}，取消 {cancelled}"
+        ),
     );
 }
 

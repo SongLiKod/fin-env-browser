@@ -13,10 +13,9 @@ use crate::{
     audit_log::{actions, Audit},
     error::{AppError, Result},
     models::{
-        new_id, now_iso, Proxy, ProxyCheckResult, ProxyDiscoveryAddInput,
-        ProxyDiscoveryCandidate, ProxyDiscoveryInput, ProxyDiscoveryResult,
-        ProxyDiscoverySourceStatus, ProxyImportError, ProxyImportOptions, ProxyImportResult,
-        PROXY_PROTOCOLS,
+        new_id, now_iso, Proxy, ProxyCheckResult, ProxyDiscoveryAddInput, ProxyDiscoveryCandidate,
+        ProxyDiscoveryInput, ProxyDiscoveryResult, ProxyDiscoverySourceStatus, ProxyImportError,
+        ProxyImportOptions, ProxyImportResult, PROXY_PROTOCOLS,
     },
     proxy_check::check_proxy_core,
     proxy_import,
@@ -93,7 +92,10 @@ struct SourceOutcome {
     entries: Vec<FoundProxy>,
 }
 
-pub async fn scan(state: &SharedState, input: &ProxyDiscoveryInput) -> Result<ProxyDiscoveryResult> {
+pub async fn scan(
+    state: &SharedState,
+    input: &ProxyDiscoveryInput,
+) -> Result<ProxyDiscoveryResult> {
     let options = discovery_options(input);
     let follow = input.follow_links.unwrap_or(true);
     let max_results = input.max_results.unwrap_or(200).clamp(1, 500);
@@ -116,7 +118,10 @@ pub async fn scan(state: &SharedState, input: &ProxyDiscoveryInput) -> Result<Pr
     let mut drafts: HashMap<String, FoundProxy> = HashMap::new();
     for outcome in outcomes {
         if !outcome.status.ok {
-            errors.push(format!("{}: {}", outcome.status.target, outcome.status.message));
+            errors.push(format!(
+                "{}: {}",
+                outcome.status.target, outcome.status.message
+            ));
         }
         scanned += outcome.status.count;
         sources.push(outcome.status);
@@ -210,10 +215,7 @@ pub async fn scan(state: &SharedState, input: &ProxyDiscoveryInput) -> Result<Pr
 
 /// Check one scanned candidate without persisting it. Results are returned to
 /// the discovery dialog so users can see latency before adding nodes.
-pub async fn check_candidate(
-    state: &SharedState,
-    candidate_id: &str,
-) -> Result<ProxyCheckResult> {
+pub async fn check_candidate(state: &SharedState, candidate_id: &str) -> Result<ProxyCheckResult> {
     state.proxy_discovery.cleanup();
     let record = state
         .proxy_discovery
@@ -249,7 +251,12 @@ pub fn add(
         .filter(|value| matches!(*value, "skip" | "update" | "error"))
         .unwrap_or("skip");
     let enabled = input.enabled.unwrap_or(true);
-    let group_name = input.group_name.clone().unwrap_or_default().trim().to_string();
+    let group_name = input
+        .group_name
+        .clone()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let tags = input.tags.clone().unwrap_or_default();
     let now = now_iso();
 
@@ -366,8 +373,8 @@ pub fn add(
 
     let (inserted, updated) = state.db.apply_proxy_import(&inserts, &updates)?;
     let result = ProxyImportResult {
-        total: (inserted + updated + skipped) as u32,
-        valid: (inserted + updated + skipped) as u32,
+        total: inserted + updated + skipped,
+        valid: inserted + updated + skipped,
         inserted,
         updated,
         skipped,
@@ -517,15 +524,13 @@ async fn run_page(
         let fetched = fetch_pages(client, links).await;
         for (link, page) in fetched {
             if let Ok(page) = page {
-                entries.extend(
-                    extract_proxies(&page, options)
-                        .into_iter()
-                        .map(|parsed| FoundProxy {
-                            parsed,
-                            source_url: link.clone(),
-                            source_label: label.to_string(),
-                        }),
-                );
+                entries.extend(extract_proxies(&page, options).into_iter().map(|parsed| {
+                    FoundProxy {
+                        parsed,
+                        source_url: link.clone(),
+                        source_label: label.to_string(),
+                    }
+                }));
             }
         }
     }
@@ -564,13 +569,7 @@ async fn run_github(
         .append_pair("q", query)
         .append_pair("sort", "updated")
         .append_pair("per_page", "5");
-    let body = match fetch_text(
-        client,
-        api.as_str(),
-        Some("application/vnd.github+json"),
-    )
-    .await
-    {
+    let body = match fetch_text(client, api.as_str(), Some("application/vnd.github+json")).await {
         Ok(body) => body,
         Err(error) => {
             status.ok = false;
@@ -640,15 +639,13 @@ async fn run_github(
             let fetched = fetch_pages(client, links).await;
             for (link, page) in fetched {
                 if let Ok(page) = page {
-                    entries.extend(
-                        extract_proxies(&page, options)
-                            .into_iter()
-                            .map(|parsed| FoundProxy {
-                                parsed,
-                                source_url: link.clone(),
-                                source_label: "GitHub".into(),
-                            }),
-                    );
+                    entries.extend(extract_proxies(&page, options).into_iter().map(|parsed| {
+                        FoundProxy {
+                            parsed,
+                            source_url: link.clone(),
+                            source_label: "GitHub".into(),
+                        }
+                    }));
                 }
             }
         }
@@ -666,10 +663,7 @@ fn search_url(engine: &str, query: &str) -> String {
             "https://www.google.com/search",
             vec![("q", query), ("num", "30")],
         ),
-        "duckduckgo" => (
-            "https://html.duckduckgo.com/html/",
-            vec![("q", query)],
-        ),
+        "duckduckgo" => ("https://html.duckduckgo.com/html/", vec![("q", query)]),
         _ => (
             "https://www.bing.com/search",
             vec![("q", query), ("count", "30")],
@@ -694,11 +688,7 @@ fn build_client() -> Result<reqwest::Client> {
         .map_err(AppError::from)
 }
 
-async fn fetch_text(
-    client: &reqwest::Client,
-    url: &str,
-    accept: Option<&str>,
-) -> Result<String> {
+async fn fetch_text(client: &reqwest::Client, url: &str, accept: Option<&str>) -> Result<String> {
     let target = raw_content_url(url).unwrap_or_else(|| url.to_string());
     let parsed = url::Url::parse(&target).map_err(|_| AppError::bad_request("抓取 URL 无效"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
@@ -786,9 +776,7 @@ fn extract_proxies(text: &str, options: &ProxyImportOptions) -> Vec<proxy_import
             }
             let key = merge_key(&parsed);
             match found.get(&key) {
-                Some(existing)
-                    if existing.password.is_none() && parsed.password.is_some() =>
-                {
+                Some(existing) if existing.password.is_none() && parsed.password.is_some() => {
                     found.insert(key, parsed);
                 }
                 Some(_) => {}
@@ -853,10 +841,18 @@ fn resolve_link(base: &str, href: &str) -> Option<String> {
                 .map(|(_, value)| value.to_string())?;
             decode_bing_url(&value)?
         } else {
-            url::Url::parse(base).ok()?.join(&candidate).ok()?.to_string()
+            url::Url::parse(base)
+                .ok()?
+                .join(&candidate)
+                .ok()?
+                .to_string()
         }
     } else {
-        url::Url::parse(base).ok()?.join(&candidate).ok()?.to_string()
+        url::Url::parse(base)
+            .ok()?
+            .join(&candidate)
+            .ok()?
+            .to_string()
     };
     let parsed = url::Url::parse(&absolute).ok()?;
     if !matches!(parsed.scheme(), "http" | "https") {
@@ -873,9 +869,12 @@ fn resolve_link(base: &str, href: &str) -> Option<String> {
         return None;
     }
     let path = parsed.path().to_ascii_lowercase();
-    if [".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".pdf", ".zip"]
-        .iter()
-        .any(|extension| path.ends_with(extension))
+    if [
+        ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".pdf",
+        ".zip",
+    ]
+    .iter()
+    .any(|extension| path.ends_with(extension))
     {
         return None;
     }
@@ -1004,10 +1003,9 @@ fn decode_entities(value: &str) -> String {
                     .ok()
                     .and_then(char::from_u32)
             }
-            _ if entity.starts_with('#') => entity[1..]
-                .parse::<u32>()
-                .ok()
-                .and_then(char::from_u32),
+            _ if entity.starts_with('#') => {
+                entity[1..].parse::<u32>().ok().and_then(char::from_u32)
+            }
             _ => None,
         };
         if let Some(character) = decoded {
@@ -1048,9 +1046,6 @@ mod tests {
 
     #[test]
     fn decodes_common_entities() {
-        assert_eq!(
-            decode_entities("a&amp;b&#x2F;c&#47;d&#64;e"),
-            "a&b/c/d@e"
-        );
+        assert_eq!(decode_entities("a&amp;b&#x2F;c&#47;d&#64;e"), "a&b/c/d@e");
     }
 }

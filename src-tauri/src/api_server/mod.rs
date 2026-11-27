@@ -207,7 +207,10 @@ fn build_router(state: SharedState) -> Router {
         .route("/proxies/batch/enable", post(batch_enable_proxies))
         .route("/proxies/batch/update", post(batch_update_proxies))
         .route("/proxies/batch/delete", post(batch_delete_proxies))
-        .route("/proxies/batch/delete-disabled", post(batch_delete_disabled_proxies))
+        .route(
+            "/proxies/batch/delete-disabled",
+            post(batch_delete_disabled_proxies),
+        )
         .route("/proxies/:id", patch(update_proxy).delete(delete_proxy))
         .route("/proxies/:id/check", post(check_proxy))
         .route(
@@ -1045,11 +1048,7 @@ async fn import_proxies(
     Json(input): Json<ProxyImportInput>,
 ) -> Result<Json<crate::models::ProxyImportResult>, AppError> {
     permit(&auth, Permission::EditFingerprintProxy)?;
-    Ok(Json(services::import_proxies(
-        &state,
-        &input,
-        &auth.actor,
-    )?))
+    Ok(Json(services::import_proxies(&state, &input, &auth.actor)?))
 }
 
 async fn batch_check_proxies(
@@ -1093,12 +1092,7 @@ async fn batch_enable_proxies(
     Json(input): Json<ProxyBatchEnableInput>,
 ) -> Result<Json<Value>, AppError> {
     permit(&auth, Permission::EditFingerprintProxy)?;
-    let count = services::set_proxies_enabled(
-        &state,
-        &input.ids,
-        input.enabled,
-        &auth.actor,
-    )?;
+    let count = services::set_proxies_enabled(&state, &input.ids, input.enabled, &auth.actor)?;
     Ok(Json(json!({ "updated": count })))
 }
 
@@ -1230,9 +1224,7 @@ async fn scan_proxy_discovery(
     Json(input): Json<ProxyDiscoveryInput>,
 ) -> Result<Json<crate::models::ProxyDiscoveryResult>, AppError> {
     permit(&auth, Permission::ViewList)?;
-    Ok(Json(
-        crate::proxy_discovery::scan(&state, &input).await?,
-    ))
+    Ok(Json(crate::proxy_discovery::scan(&state, &input).await?))
 }
 
 async fn add_proxy_discovery(

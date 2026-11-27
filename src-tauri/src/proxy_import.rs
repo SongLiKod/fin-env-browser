@@ -260,10 +260,7 @@ fn parse_lines(text: &str, options: &ProxyImportOptions) -> ParsedImport {
     result
 }
 
-pub fn parse_proxy_line(
-    line: &str,
-    options: &ProxyImportOptions,
-) -> Option<ParsedProxy> {
+pub fn parse_proxy_line(line: &str, options: &ProxyImportOptions) -> Option<ParsedProxy> {
     let line = strip_inline_comment(line.trim()).trim();
     if line.is_empty() {
         return None;
@@ -518,10 +515,7 @@ fn parse_json(value: &Value, options: &ProxyImportOptions) -> ParsedImport {
             .unwrap_or_else(|| options.default_protocol.as_deref().unwrap_or("http"))
             .to_string();
         if protocol.eq_ignore_ascii_case("http")
-            && object
-                .get("tls")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
+            && object.get("tls").and_then(|v| v.as_bool()).unwrap_or(false)
         {
             protocol = "https".into();
         }
@@ -615,14 +609,12 @@ fn parse_clash(text: &str, options: &ProxyImportOptions) -> ParsedImport {
                 .find(|(name, _)| name == key)
                 .map(|(_, value)| value.clone())
         };
-        let mut protocol = get("type")
-            .or_else(|| get("protocol"))
-            .unwrap_or_else(|| {
-                options
-                    .default_protocol
-                    .clone()
-                    .unwrap_or_else(|| "http".into())
-            });
+        let mut protocol = get("type").or_else(|| get("protocol")).unwrap_or_else(|| {
+            options
+                .default_protocol
+                .clone()
+                .unwrap_or_else(|| "http".into())
+        });
         if protocol.eq_ignore_ascii_case("http")
             && get("tls").is_some_and(|value| value.eq_ignore_ascii_case("true"))
         {
@@ -637,15 +629,7 @@ fn parse_clash(text: &str, options: &ProxyImportOptions) -> ParsedImport {
         let name = get("name");
         let raw = format!("{host}:{port}");
         match finish_entry(
-            line,
-            options,
-            *index,
-            name,
-            protocol,
-            host,
-            port,
-            username,
-            password,
+            line, options, *index, name, protocol, host, port, username, password,
         ) {
             Ok(entry) if entry.unsupported => {
                 result.unsupported += 1;
@@ -656,11 +640,7 @@ fn parse_clash(text: &str, options: &ProxyImportOptions) -> ParsedImport {
                 });
             }
             Ok(entry) => result.entries.push(entry),
-            Err(message) => result.errors.push(ProxyImportError {
-                line,
-                raw,
-                message,
-            }),
+            Err(message) => result.errors.push(ProxyImportError { line, raw, message }),
         }
     };
 
@@ -703,7 +683,9 @@ fn parse_clash(text: &str, options: &ProxyImportOptions) -> ParsedImport {
         }
         if let Some(current) = current.as_mut() {
             if let Some((key, value)) = trimmed.split_once(':') {
-                current.1.push((key.trim().to_string(), strip_quotes(value)));
+                current
+                    .1
+                    .push((key.trim().to_string(), strip_quotes(value)));
             }
         }
     }

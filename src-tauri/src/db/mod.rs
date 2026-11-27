@@ -240,7 +240,10 @@ mod tests {
             })
             .unwrap();
         assert_eq!(page.total, 1);
-        assert_eq!(page.items[0].endpoint_key, "socks5://proxy.example.com:1080|User");
+        assert_eq!(
+            page.items[0].endpoint_key,
+            "socks5://proxy.example.com:1080|User"
+        );
         assert_eq!(page.items[0].tags, vec!["residential"]);
 
         db.save_proxy_checks(&[ProxyCheckResult {
@@ -288,7 +291,7 @@ mod tests {
         let loaded = db.get_subscription(&subscription.id).unwrap();
         assert_eq!(loaded.url, subscription.url);
         assert_eq!(loaded.headers, subscription.headers);
-        assert_eq!(loaded.auto_refresh, false);
+        assert!(!loaded.auto_refresh);
 
         let mut linked = db.get_proxy(&proxy.id).unwrap();
         linked.subscription_id = Some(subscription.id.clone());
