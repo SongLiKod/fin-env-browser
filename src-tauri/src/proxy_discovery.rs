@@ -1,6 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{OnceLock, RwLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock, RwLock,
+    },
     time::{Duration, Instant},
 };
 
@@ -8,6 +11,7 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use futures_util::{stream, StreamExt};
 use regex::Regex;
 use serde_json::Value;
+use tauri::Emitter;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
@@ -16,8 +20,9 @@ use crate::{
     error::{AppError, Result},
     models::{
         new_id, now_iso, Proxy, ProxyCheckResult, ProxyDiscoveryAddInput, ProxyDiscoveryCandidate,
-        ProxyDiscoveryInput, ProxyDiscoveryResult, ProxyDiscoverySourceStatus, ProxyImportError,
-        ProxyImportOptions, ProxyImportResult, PROXY_PROTOCOLS,
+        ProxyDiscoveryEvent, ProxyDiscoveryInput, ProxyDiscoveryProgress, ProxyDiscoveryResult,
+        ProxyDiscoverySourceStatus, ProxyImportError, ProxyImportOptions, ProxyImportResult,
+        PROXY_PROTOCOLS,
     },
     proxy_check::check_proxy_core,
     proxy_import,
@@ -39,6 +44,7 @@ pub struct DiscoveredCandidate {
 
 pub struct ProxyDiscoveryStore {
     inner: RwLock<HashMap<String, DiscoveredCandidate>>,
+    scans: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
 impl Default for ProxyDiscoveryStore {
@@ -51,6 +57,31 @@ impl ProxyDiscoveryStore {
     pub fn new() -> Self {
         Self {
             inner: RwLock::new(HashMap::new()),
+            scans: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn begin_scan(&self, scan_id: &str) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
+        if let Ok(mut scans) = self.scans.lock() {
+            scans.insert(scan_id.to_string(), flag.clone());
+        }
+        flag
+    }
+
+    pub fn cancel_scan(&self, scan_id: &str) -> bool {
+        if let Ok(scans) = self.scans.lock() {
+            if let Some(flag) = scans.get(scan_id) {
+                flag.store(true, Ordering::Relaxed);
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn end_scan(&self, scan_id: &str) {
+        if let Ok(mut scans) = self.scans.lock() {
+            scans.remove(scan_id);
         }
     }
 
@@ -110,28 +141,52 @@ pub async fn scan(
     state: &SharedState,
     input: &ProxyDiscoveryInput,
 ) -> Result<ProxyDiscoveryResult> {
+    let scan_id = input.scan_id.clone();
+    let cancel = scan_id
+        .as_deref()
+        .map(|id| state.proxy_discovery.begin_scan(id));
+    let result = scan_inner(state, input, scan_id.as_deref(), &cancel).await;
+    if let Some(id) = scan_id.as_deref() {
+        state.proxy_discovery.end_scan(id);
+    }
+    result
+}
+
+async fn scan_inner(
+    state: &SharedState,
+    input: &ProxyDiscoveryInput,
+    scan_id: Option<&str>,
+    cancel: &Option<Arc<AtomicBool>>,
+) -> Result<ProxyDiscoveryResult> {
     let options = discovery_options(input);
     let follow = input.follow_links.unwrap_or(true);
     let max_results = input.max_results.unwrap_or(200).clamp(1, 500);
     let per_source_limit = input.per_source_limit.unwrap_or(5000).clamp(100, 20000) as usize;
     let tasks = build_tasks(input);
+    let task_count = tasks.len();
     let client = build_client()?;
+    emit_log(
+        state,
+        scan_id,
+        &format!("开始扫描：{task_count} 个来源，单来源上限 {per_source_limit} 条"),
+    );
 
-    let outcomes = stream::iter(tasks)
+    let mut outcomes = stream::iter(tasks)
         .map(|task| {
             let client = client.clone();
             let options = options.clone();
             async move { run_task(&client, task, &options, follow, per_source_limit).await }
         })
-        .buffer_unordered(6)
-        .collect::<Vec<_>>()
-        .await;
+        .buffer_unordered(6);
 
     let mut sources = Vec::new();
     let mut scanned = 0u32;
     let mut errors = Vec::new();
     let mut drafts: HashMap<String, FoundProxy> = HashMap::new();
-    for outcome in outcomes {
+    while let Some(outcome) = outcomes.next().await {
+        if scan_cancelled(cancel) {
+            break;
+        }
         if !outcome.status.ok {
             errors.push(format!(
                 "{}: {}",
@@ -139,6 +194,26 @@ pub async fn scan(
             ));
         }
         scanned += outcome.status.count;
+        let message = if outcome.status.ok {
+            format!("{}：抓取 {} 条", outcome.status.kind, outcome.status.count)
+        } else {
+            format!(
+                "{}：抓取失败（{}）",
+                outcome.status.kind, outcome.status.message
+            )
+        };
+        emit_log(state, scan_id, &message);
+        emit_source(state, scan_id, &outcome.status);
+        emit_progress(
+            state,
+            scan_id,
+            "fetch",
+            scanned,
+            drafts.len() as u32,
+            0,
+            0,
+            &message,
+        );
         sources.push(outcome.status);
         for entry in outcome.entries {
             let key = merge_key(&entry.parsed);
@@ -156,6 +231,19 @@ pub async fn scan(
         }
     }
 
+    if scan_cancelled(cancel) {
+        emit_log(state, scan_id, "已停止扫描");
+        emit_progress(state, scan_id, "done", scanned, 0, 0, 0, "扫描已停止");
+        return Ok(ProxyDiscoveryResult {
+            candidates: Vec::new(),
+            sources,
+            scanned,
+            verified: 0,
+            rejected: 0,
+            errors,
+        });
+    }
+
     let mut drafts = drafts.into_iter().collect::<Vec<_>>();
     drafts.sort_by(|(_, left), (_, right)| {
         left.parsed
@@ -167,6 +255,11 @@ pub async fn scan(
     if !verify {
         drafts.truncate(max_results as usize);
     }
+    emit_log(
+        state,
+        scan_id,
+        &format!("抓取完成：去重后 {} 个候选节点", drafts.len()),
+    );
 
     let keys = drafts
         .iter()
@@ -231,9 +324,10 @@ pub async fn scan(
     let mut rejected = 0u32;
     if verify && !candidates.is_empty() {
         let total = candidates.len() as u32;
-        // 免费代理列表里大量节点端口未开放，先用短超时 TCP 预筛，
-        // 避免对每个死节点都发起完整的 Google / YouTube 检测。
-        let reachable = stream::iter(candidates)
+        emit_progress(state, scan_id, "tcp", 0, total, 0, 0, "正在做 TCP 预筛");
+        let mut reachable = Vec::new();
+        let mut checked_tcp = 0u32;
+        let mut tcp_stream = stream::iter(candidates)
             .map(|candidate| async move {
                 if tcp_reachable(&candidate.host, candidate.port).await {
                     Some(candidate)
@@ -241,17 +335,68 @@ pub async fn scan(
                     None
                 }
             })
-            .buffer_unordered(128)
-            .filter_map(|candidate| async move { candidate })
-            .collect::<Vec<_>>()
-            .await;
+            .buffer_unordered(128);
+        while let Some(candidate) = tcp_stream.next().await {
+            if scan_cancelled(cancel) {
+                break;
+            }
+            checked_tcp += 1;
+            if let Some(candidate) = candidate {
+                reachable.push(candidate);
+            }
+            if checked_tcp % 200 == 0 || checked_tcp == total {
+                emit_progress(
+                    state,
+                    scan_id,
+                    "tcp",
+                    checked_tcp,
+                    total,
+                    reachable.len() as u32,
+                    0,
+                    &format!(
+                        "TCP 预筛 {checked_tcp}/{total}，端口可达 {}",
+                        reachable.len()
+                    ),
+                );
+            }
+        }
+
+        if scan_cancelled(cancel) {
+            emit_log(state, scan_id, "已停止扫描");
+            emit_progress(state, scan_id, "done", scanned, 0, 0, total, "扫描已停止");
+            return Ok(ProxyDiscoveryResult {
+                candidates: Vec::new(),
+                sources,
+                scanned,
+                verified: 0,
+                rejected: total,
+                errors,
+            });
+        }
+
         if reachable.is_empty() {
             errors.push("候选节点均无法建立 TCP 连接".into());
+            emit_log(state, scan_id, "TCP 预筛完成：没有可连接的节点");
             candidates = Vec::new();
         } else {
-            // 第二层先用 Google 204 快速探测，过滤掉开放端口但不是代理的节点，
-            // 再对通过者做完整的 Google / YouTube / 出口信息检测。
-            let quick = stream::iter(reachable)
+            emit_log(
+                state,
+                scan_id,
+                &format!("TCP 预筛完成：{} 个节点端口可达", reachable.len()),
+            );
+            emit_progress(
+                state,
+                scan_id,
+                "google",
+                0,
+                reachable.len() as u32,
+                0,
+                0,
+                "正在做 Google 快速探测",
+            );
+            let mut quick = Vec::new();
+            let mut checked_quick = 0u32;
+            let mut quick_stream = stream::iter(reachable)
                 .map(|candidate| {
                     let state = state.clone();
                     async move {
@@ -262,15 +407,66 @@ pub async fn scan(
                         }
                     }
                 })
-                .buffer_unordered(48)
-                .filter_map(|candidate| async move { candidate })
-                .collect::<Vec<_>>()
-                .await;
+                .buffer_unordered(48);
+            while let Some(candidate) = quick_stream.next().await {
+                if scan_cancelled(cancel) {
+                    break;
+                }
+                checked_quick += 1;
+                if let Some(candidate) = candidate {
+                    quick.push(candidate);
+                }
+                if checked_quick % 50 == 0 {
+                    emit_progress(
+                        state,
+                        scan_id,
+                        "google",
+                        checked_quick,
+                        checked_quick + quick.len() as u32,
+                        quick.len() as u32,
+                        0,
+                        &format!("Google 探测 {checked_quick} 个，通过 {} 个", quick.len()),
+                    );
+                }
+            }
+
+            if scan_cancelled(cancel) {
+                emit_log(state, scan_id, "已停止扫描");
+                emit_progress(state, scan_id, "done", scanned, 0, 0, total, "扫描已停止");
+                return Ok(ProxyDiscoveryResult {
+                    candidates: Vec::new(),
+                    sources,
+                    scanned,
+                    verified: 0,
+                    rejected: total,
+                    errors,
+                });
+            }
+
             if quick.is_empty() {
                 errors.push("TCP 可连接，但没有节点通过 Google 探测".into());
+                emit_log(state, scan_id, "Google 探测完成：没有节点通过");
                 candidates = Vec::new();
             } else {
-                let checked = stream::iter(quick)
+                emit_log(
+                    state,
+                    scan_id,
+                    &format!("Google 探测完成：{} 个节点通过，开始完整验证", quick.len()),
+                );
+                emit_progress(
+                    state,
+                    scan_id,
+                    "verify",
+                    0,
+                    quick.len() as u32,
+                    0,
+                    0,
+                    "正在验证 Google / YouTube / 出口信息",
+                );
+                let mut valid = Vec::new();
+                let mut checked_verify = 0u32;
+                let quick_total = quick.len() as u32;
+                let mut verify_stream = stream::iter(quick)
                     .map(|mut candidate| {
                         let state = state.clone();
                         async move {
@@ -289,22 +485,72 @@ pub async fn scan(
                             }
                         }
                     })
-                    .buffer_unordered(24)
-                    .collect::<Vec<_>>()
-                    .await;
-                candidates = checked
-                    .into_iter()
-                    .filter_map(|(candidate, ok)| ok.then_some(candidate))
-                    .collect();
+                    .buffer_unordered(24);
+                while let Some((candidate, ok)) = verify_stream.next().await {
+                    if scan_cancelled(cancel) {
+                        break;
+                    }
+                    checked_verify += 1;
+                    if ok {
+                        emit_log(
+                            state,
+                            scan_id,
+                            &format!(
+                                "有效节点：{}://{}:{} · {}ms · {}",
+                                candidate.protocol,
+                                candidate.host,
+                                candidate.port,
+                                candidate.latency_ms.unwrap_or(0),
+                                candidate.exit_ip.as_deref().unwrap_or("未知出口")
+                            ),
+                        );
+                        if valid.len() < max_results as usize {
+                            emit_candidate(state, scan_id, &candidate);
+                            valid.push(candidate);
+                        }
+                    }
+                    emit_progress(
+                        state,
+                        scan_id,
+                        "verify",
+                        checked_verify,
+                        quick_total,
+                        valid.len() as u32,
+                        checked_verify.saturating_sub(valid.len() as u32),
+                        &format!(
+                            "完整验证 {checked_verify}/{quick_total}，已有 {} 个可用",
+                            valid.len()
+                        ),
+                    );
+                }
+                candidates = valid;
             }
         }
         candidates.sort_by_key(|candidate| candidate.latency_ms.unwrap_or(u64::MAX));
         candidates.truncate(max_results as usize);
         verified = candidates.len() as u32;
         rejected = total.saturating_sub(verified);
-        if candidates.is_empty() {
+        if candidates.is_empty() && !errors.iter().any(|error| error.contains("没有")) {
             errors.push("候选节点均未通过 Google / YouTube 可达性验证".into());
         }
+    }
+
+    emit_progress(
+        state,
+        scan_id,
+        "done",
+        scanned,
+        candidates.len() as u32,
+        verified,
+        rejected,
+        if scan_cancelled(cancel) {
+            "扫描已停止"
+        } else {
+            "扫描完成"
+        },
+    );
+    if scan_cancelled(cancel) {
+        emit_log(state, scan_id, "已停止扫描，保留当前已找到的节点");
     }
 
     Ok(ProxyDiscoveryResult {
@@ -315,6 +561,109 @@ pub async fn scan(
         rejected,
         errors,
     })
+}
+
+fn scan_cancelled(cancel: &Option<Arc<AtomicBool>>) -> bool {
+    cancel
+        .as_ref()
+        .is_some_and(|flag| flag.load(Ordering::Relaxed))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_progress(
+    state: &SharedState,
+    scan_id: Option<&str>,
+    phase: &str,
+    scanned: u32,
+    candidates: u32,
+    verified: u32,
+    rejected: u32,
+    message: &str,
+) {
+    let Some(scan_id) = scan_id else {
+        return;
+    };
+    let Some(app) = state.app_handle() else {
+        return;
+    };
+    let _ = app.emit(
+        "proxy://discovery",
+        ProxyDiscoveryEvent {
+            scan_id: scan_id.to_string(),
+            kind: "progress".into(),
+            message: message.to_string(),
+            candidate: None,
+            source: None,
+            progress: Some(ProxyDiscoveryProgress {
+                phase: phase.into(),
+                scanned,
+                candidates,
+                verified,
+                rejected,
+                message: message.to_string(),
+            }),
+        },
+    );
+}
+
+fn emit_log(state: &SharedState, scan_id: Option<&str>, message: &str) {
+    let Some(scan_id) = scan_id else {
+        return;
+    };
+    let Some(app) = state.app_handle() else {
+        return;
+    };
+    let _ = app.emit(
+        "proxy://discovery",
+        ProxyDiscoveryEvent {
+            scan_id: scan_id.to_string(),
+            kind: "log".into(),
+            message: message.to_string(),
+            candidate: None,
+            source: None,
+            progress: None,
+        },
+    );
+}
+
+fn emit_source(state: &SharedState, scan_id: Option<&str>, source: &ProxyDiscoverySourceStatus) {
+    let Some(scan_id) = scan_id else {
+        return;
+    };
+    let Some(app) = state.app_handle() else {
+        return;
+    };
+    let _ = app.emit(
+        "proxy://discovery",
+        ProxyDiscoveryEvent {
+            scan_id: scan_id.to_string(),
+            kind: "source".into(),
+            message: source.message.clone(),
+            candidate: None,
+            source: Some(source.clone()),
+            progress: None,
+        },
+    );
+}
+
+fn emit_candidate(state: &SharedState, scan_id: Option<&str>, candidate: &ProxyDiscoveryCandidate) {
+    let Some(scan_id) = scan_id else {
+        return;
+    };
+    let Some(app) = state.app_handle() else {
+        return;
+    };
+    let _ = app.emit(
+        "proxy://discovery",
+        ProxyDiscoveryEvent {
+            scan_id: scan_id.to_string(),
+            kind: "candidate".into(),
+            message: candidate.check_message.clone().unwrap_or_default(),
+            candidate: Some(candidate.clone()),
+            source: None,
+            progress: None,
+        },
+    );
 }
 
 async fn tcp_reachable(host: &str, port: u16) -> bool {

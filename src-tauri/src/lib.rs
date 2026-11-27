@@ -301,6 +301,7 @@ pub fn run() {
             commands::proxy_subscription_refresh,
             commands::proxy_discovery_scan,
             commands::proxy_discovery_check,
+            commands::proxy_discovery_cancel,
             commands::proxy_discovery_add,
             commands::browser_open,
             commands::browser_close,

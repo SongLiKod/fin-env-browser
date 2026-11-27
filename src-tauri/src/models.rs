@@ -901,6 +901,9 @@ pub struct ProxyDiscoveryInput {
     /// 每个来源最多抓取多少条候选，默认 5000。
     #[serde(default)]
     pub per_source_limit: Option<u32>,
+    /// 前端生成的扫描 ID，用于实时事件和取消。
+    #[serde(default)]
+    pub scan_id: Option<String>,
     /// 是否抓取内置的公开代理列表（Proxifly / TheSpeedX 等）。
     #[serde(default)]
     pub include_public_lists: Option<bool>,
@@ -952,6 +955,29 @@ pub struct ProxyDiscoveryResult {
     pub verified: u32,
     pub rejected: u32,
     pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyDiscoveryProgress {
+    pub phase: String,
+    pub scanned: u32,
+    pub candidates: u32,
+    pub verified: u32,
+    pub rejected: u32,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyDiscoveryEvent {
+    pub scan_id: String,
+    /// log | source | candidate | progress | done | cancelled | error
+    pub kind: String,
+    pub message: String,
+    pub candidate: Option<ProxyDiscoveryCandidate>,
+    pub source: Option<ProxyDiscoverySourceStatus>,
+    pub progress: Option<ProxyDiscoveryProgress>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

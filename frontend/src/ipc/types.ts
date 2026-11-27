@@ -691,6 +691,7 @@ export interface ProxyDiscoveryInput {
   defaultProtocol?: 'http' | 'https' | 'socks5';
   maxResults?: number;
   perSourceLimit?: number;
+  scanId?: string;
   includePublicLists?: boolean;
   verify?: boolean;
 }
@@ -728,6 +729,24 @@ export interface ProxyDiscoveryResult {
   verified: number;
   rejected: number;
   errors: string[];
+}
+
+export interface ProxyDiscoveryProgress {
+  phase: string;
+  scanned: number;
+  candidates: number;
+  verified: number;
+  rejected: number;
+  message: string;
+}
+
+export interface ProxyDiscoveryEvent {
+  scanId: string;
+  kind: 'log' | 'source' | 'candidate' | 'progress' | 'done' | 'cancelled' | 'error' | string;
+  message: string;
+  candidate: ProxyDiscoveryCandidate | null;
+  source: ProxyDiscoverySourceStatus | null;
+  progress: ProxyDiscoveryProgress | null;
 }
 
 export interface ProxyDiscoveryAddInput {

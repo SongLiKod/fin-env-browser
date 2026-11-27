@@ -24,6 +24,7 @@ import type {
   ProxyBatchProgress,
   ProxyCheckResult,
   ProxyDiscoveryInput,
+  ProxyDiscoveryProgress,
   ProxyDiscoveryResult,
   ProxyFilter,
   ProxyImportOptions,
@@ -1141,6 +1142,85 @@ function ProxyDiscoveryDialog({
   const [result, setResult] = React.useState<ProxyDiscoveryResult | null>(null);
   const [selected, setSelected] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState(false);
+  const [scanning, setScanning] = React.useState(false);
+  const [logs, setLogs] = React.useState<string[]>([]);
+  const [progress, setProgress] = React.useState<ProxyDiscoveryProgress | null>(null);
+  const [cancelling, setCancelling] = React.useState(false);
+  const scanIdRef = React.useRef<string | null>(null);
+  const logRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void ipc
+      .onProxyDiscovery((event) => {
+        if (scanIdRef.current !== event.scanId) return;
+        const stamp = new Date().toLocaleTimeString();
+        if (event.kind === 'log') {
+          setLogs((current) => [...current.slice(-199), `[${stamp}] ${event.message}`]);
+        } else if (event.kind === 'source' && event.source) {
+          const source = event.source;
+          setResult((current) => {
+            if (!current) return current;
+            const sources = current.sources.filter(
+              (item) => !(item.kind === source.kind && item.target === source.target),
+            );
+            return { ...current, sources: [...sources, source] };
+          });
+        } else if (event.kind === 'candidate' && event.candidate) {
+          const candidate = event.candidate;
+          setResult((current) => {
+            const base =
+              current ?? {
+                candidates: [],
+                sources: [],
+                scanned: 0,
+                verified: 0,
+                rejected: 0,
+                errors: [],
+              };
+            if (base.candidates.some((item) => item.id === candidate.id)) return base;
+            const candidates = [...base.candidates, candidate];
+            return {
+              ...base,
+              candidates,
+              verified: candidates.length,
+            };
+          });
+          if (!candidate.duplicate) {
+            setSelected((current) =>
+              current.includes(candidate.id) ? current : [...current, candidate.id],
+            );
+          }
+        } else if (event.kind === 'progress' && event.progress) {
+          const next = event.progress;
+          setProgress(next);
+          setResult((current) =>
+            current
+              ? {
+                  ...current,
+                  scanned: next.scanned,
+                  verified: Math.max(current.verified, next.verified),
+                  rejected: next.rejected,
+                }
+              : current,
+          );
+        }
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const node = logRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [logs]);
   const [groupName, setGroupName] = React.useState('');
   const [tags, setTags] = React.useState('');
   const [enabled, setEnabled] = React.useState(true);
@@ -1156,6 +1236,11 @@ function ProxyDiscoveryDialog({
     setSelected([]);
     setChecks({});
     setChecking([]);
+    setLogs([]);
+    setProgress(null);
+    setCancelling(false);
+    setScanning(false);
+    scanIdRef.current = null;
     try {
       const saved = window.localStorage.getItem('finenv:proxy-discovery');
       if (!saved) return;
@@ -1217,13 +1302,26 @@ function ProxyDiscoveryDialog({
       return;
     }
     setBusy(true);
-    setResult(null);
+    setScanning(true);
+    setCancelling(false);
+    setResult({
+      candidates: [],
+      sources: [],
+      scanned: 0,
+      verified: 0,
+      rejected: 0,
+      errors: [],
+    });
+    setProgress(null);
+    setLogs([`[${new Date().toLocaleTimeString()}] 正在启动扫描…`]);
     setSelected([]);
     setChecks({});
     setChecking([]);
     saveSettings();
+    const scanId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    scanIdRef.current = scanId;
     try {
-      const next = await ipc.proxyDiscoveryScan(input);
+      const next = await ipc.proxyDiscoveryScan({ ...input, scanId });
       setResult(next);
       setSelected(
         next.candidates
@@ -1244,7 +1342,34 @@ function ProxyDiscoveryDialog({
       toastError(error);
     } finally {
       setBusy(false);
+      setScanning(false);
+      setCancelling(false);
+      if (scanIdRef.current === scanId) scanIdRef.current = null;
     }
+  };
+
+  const stopScan = async () => {
+    const scanId = scanIdRef.current;
+    if (!scanId) return;
+    setCancelling(true);
+    try {
+      const accepted = await ipc.proxyDiscoveryCancel(scanId);
+      if (accepted) {
+        toast.info('已请求停止扫描', '正在结束当前检测，已找到的节点会保留');
+      } else {
+        toast.info('扫描已结束');
+      }
+    } catch (error) {
+      toastError(error);
+      setCancelling(false);
+    }
+  };
+
+  const closeDialog = (value: boolean) => {
+    if (!value && scanIdRef.current) {
+      void ipc.proxyDiscoveryCancel(scanIdRef.current);
+    }
+    onOpenChange(value);
   };
 
   const addSelected = async () => {
@@ -1331,23 +1456,28 @@ function ProxyDiscoveryDialog({
   return (
     <Dialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={closeDialog}
       title="在线获取代理节点"
       description="从内置公开列表、搜索引擎、GitHub 和友情链接抓取公开页面，提取 HTTP/HTTPS/SOCKS5 节点；扫描后实测 Google / YouTube，只保留真正可用的节点。"
       width="max-w-5xl"
       footer={
         <>
-          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={busy}>
+          <Button variant="secondary" onClick={() => closeDialog(false)}>
             关闭
           </Button>
-          <Button variant="secondary" onClick={() => void scan()} loading={busy}>
-            <Search className="h-4 w-4" /> 开始扫描
-          </Button>
+          {scanning ? (
+            <Button variant="danger" onClick={() => void stopScan()} loading={cancelling}>
+              停止扫描
+            </Button>
+          ) : (
+            <Button variant="secondary" onClick={() => void scan()} disabled={busy}>
+              <Search className="h-4 w-4" /> 开始扫描
+            </Button>
+          )}
           <Button
             variant="primary"
             onClick={() => void addSelected()}
-            loading={busy}
-            disabled={!canEdit || selected.length === 0}
+            disabled={!canEdit || selected.length === 0 || scanning || busy}
           >
             添加选中 {selected.length > 0 ? `(${selected.length})` : ''}
           </Button>
@@ -1483,6 +1613,35 @@ function ProxyDiscoveryDialog({
           </div>
         </div>
 
+        {scanning || logs.length > 0 ? (
+          <div className="rounded-md border border-border bg-surface-secondary">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-1.5 text-[11px]">
+              <span className="font-medium text-content-main">实时日志</span>
+              <span className="text-content-hint">
+                {progress
+                  ? `${discoveryPhaseLabel(progress.phase)} · ${progress.message}`
+                  : scanning
+                    ? '准备中…'
+                    : '扫描结束'}
+              </span>
+            </div>
+            <div
+              ref={logRef}
+              className="max-h-36 overflow-y-auto px-3 py-2 font-mono text-[10px] leading-5 text-content-weak"
+            >
+              {logs.length === 0 ? (
+                <p className="text-content-hint">等待日志…</p>
+              ) : (
+                logs.map((line, index) => (
+                  <p key={`${index}-${line}`} className="whitespace-pre-wrap break-all">
+                    {line}
+                  </p>
+                ))
+              )}
+            </div>
+          </div>
+        ) : null}
+
         {result ? (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-xs text-content-weak">
@@ -1542,8 +1701,12 @@ function ProxyDiscoveryDialog({
             {result.candidates.length === 0 ? (
               <EmptyState
                 icon={<CloudDownload className="h-5 w-5" />}
-                title="没有发现可用节点"
-                description="尝试更换关键词、放宽页面链接抓取，或添加新的友情链接。"
+                title={scanning ? '正在扫描中…' : '没有发现可用节点'}
+                description={
+                  scanning
+                    ? '每验证到一个可用节点都会立即加入结果列表。'
+                    : '尝试更换关键词、放宽页面链接抓取，或添加新的友情链接。'
+                }
               />
             ) : (
               <div className="table-wrap max-h-[320px] overflow-y-auto rounded-md border border-border">
@@ -2616,8 +2779,21 @@ function cleanupStatusLabel(status: string): string {
         : status;
 }
 
-function PromptChips({ items, onPick }: { items: string[]; onPick: (value: string) => void }) {
-  return (
+function discoveryPhaseLabel(phase: string): string {
+  return phase === 'fetch'
+    ? '抓取来源'
+    : phase === 'tcp'
+      ? 'TCP 预筛'
+      : phase === 'google'
+        ? 'Google 探测'
+        : phase === 'verify'
+          ? '完整验证'
+          : phase === 'done'
+            ? '完成'
+            : phase;
+}
+
+function PromptChips({ items, onPick }: { items: string[]; onPick: (value: string) => void }) {  return (
     <div className="flex flex-wrap gap-1">
       {items.map((item) => (
         <button

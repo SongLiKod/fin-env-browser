@@ -1221,6 +1221,13 @@ pub async fn proxy_discovery_check(
 }
 
 #[tauri::command]
+pub fn proxy_discovery_cancel(state: State<'_, SharedState>, scan_id: String) -> Result<bool> {
+    let state = state.inner().clone();
+    state.require(Permission::ViewList)?;
+    Ok(state.proxy_discovery.cancel_scan(&scan_id))
+}
+
+#[tauri::command]
 pub fn proxy_discovery_add(
     state: State<'_, SharedState>,
     input: ProxyDiscoveryAddInput,

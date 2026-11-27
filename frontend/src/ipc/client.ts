@@ -54,6 +54,7 @@ import {
   type ProxyChangedPayload,
   type ProxyDeleteResult,
   type ProxyDiscoveryAddInput,
+  type ProxyDiscoveryEvent,
   type ProxyDiscoveryInput,
   type ProxyDiscoveryResult,
   type ProxyFilter,
@@ -269,10 +270,14 @@ export const ipc = {
     call<ProxyRefreshResult>('proxy_subscription_refresh', { id }),
   proxyDiscoveryScan: (input: ProxyDiscoveryInput) =>
     call<ProxyDiscoveryResult>('proxy_discovery_scan', { input }),
+  proxyDiscoveryCancel: (scanId: string) =>
+    call<boolean>('proxy_discovery_cancel', { scanId }),
   proxyDiscoveryCheck: (id: string) =>
     call<ProxyCheckResult>('proxy_discovery_check', { id }),
   proxyDiscoveryAdd: (input: ProxyDiscoveryAddInput) =>
     call<ProxyImportResult>('proxy_discovery_add', { input }),
+  onProxyDiscovery: (handler: (event: ProxyDiscoveryEvent) => void) =>
+    listen<ProxyDiscoveryEvent>('proxy://discovery', (event) => handler(event.payload)),
   onProxyBatch: (handler: (progress: ProxyBatchProgress) => void) =>
     listen<ProxyBatchProgress>('proxy://batch', (event) => handler(event.payload)),
   onProxyChanged: (handler: (payload: ProxyChangedPayload) => void) =>
