@@ -317,7 +317,9 @@ async fn refresh_inner(
 }
 
 async fn fetch_subscription(subscription: &ProxySubscription) -> Result<String> {
-    let url = url::Url::parse(&subscription.url)
+    let target = raw_content_url(&subscription.url)
+        .unwrap_or_else(|| subscription.url.clone());
+    let url = url::Url::parse(&target)
         .map_err(|_| AppError::bad_request("订阅 URL 无效"))?;
     if !matches!(url.scheme(), "http" | "https") {
         return Err(AppError::bad_request("订阅 URL 仅支持 http/https"));
@@ -395,4 +397,47 @@ fn emit_changed(state: &SharedState, reason: &str, subscription_id: &str) {
         "proxy://changed",
         json!({ "reason": reason, "subscriptionId": subscription_id }),
     );
+}
+
+/// GitHub 网页版文件链接（/blob/）返回的是 HTML，订阅和在线抓取都需要
+/// 自动转换为 raw 文件地址才能直接解析代理列表。
+pub fn raw_content_url(value: &str) -> Option<String> {
+    let url = url::Url::parse(value).ok()?;
+    let host = url.host_str()?.to_ascii_lowercase();
+    if host != "github.com" && host != "www.github.com" {
+        return None;
+    }
+    let segments = url.path_segments()?.collect::<Vec<_>>();
+    if segments.len() < 5 || segments[2] != "blob" {
+        return None;
+    }
+    let owner = segments[0];
+    let repo = segments[1];
+    let branch = segments[3];
+    let path = segments[4..].join("/");
+    if owner.is_empty() || repo.is_empty() || branch.is_empty() || path.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::raw_content_url;
+
+    #[test]
+    fn converts_github_blob_links_to_raw() {
+        assert_eq!(
+            raw_content_url("https://github.com/HankNovic/ProxyClean/blob/main/SOCKS5.txt")
+                .as_deref(),
+            Some("https://raw.githubusercontent.com/HankNovic/ProxyClean/main/SOCKS5.txt")
+        );
+        assert!(raw_content_url(
+            "https://raw.githubusercontent.com/HankNovic/ProxyClean/main/SOCKS5.txt"
+        )
+        .is_none());
+        assert!(raw_content_url("https://github.com/HankNovic/ProxyClean").is_none());
+    }
 }

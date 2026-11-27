@@ -224,6 +224,7 @@ fn build_router(state: SharedState) -> Router {
         )
         .route("/proxy-discovery/scan", post(scan_proxy_discovery))
         .route("/proxy-discovery/add", post(add_proxy_discovery))
+        .route("/proxy-discovery/:id/check", post(check_proxy_discovery))
         .route("/audit-logs", get(list_audit))
         .route("/audit-logs/verify", get(verify_audit))
         .route_layer(middleware::from_fn_with_state(
@@ -1245,6 +1246,17 @@ async fn add_proxy_discovery(
         &input,
         &auth.actor,
     )?))
+}
+
+async fn check_proxy_discovery(
+    State(state): State<SharedState>,
+    Extension(auth): Extension<ApiAuth>,
+    Path(id): Path<String>,
+) -> Result<Json<crate::models::ProxyCheckResult>, AppError> {
+    permit(&auth, Permission::ViewList)?;
+    Ok(Json(
+        crate::proxy_discovery::check_candidate(&state, &id).await?,
+    ))
 }
 
 async fn list_audit(

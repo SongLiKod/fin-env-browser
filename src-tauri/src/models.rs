@@ -614,6 +614,9 @@ pub struct ProxyFilter {
     /// ok | fail | untested | disabled
     #[serde(default)]
     pub status: Option<String>,
+    /// 多个状态按 OR 组合；用于批量清理等场景。
+    #[serde(default)]
+    pub statuses: Vec<String>,
     #[serde(default)]
     pub disabled_reason: Option<String>,
     #[serde(default)]

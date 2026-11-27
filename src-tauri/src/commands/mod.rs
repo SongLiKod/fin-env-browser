@@ -1211,6 +1211,16 @@ pub async fn proxy_discovery_scan(
 }
 
 #[tauri::command]
+pub async fn proxy_discovery_check(
+    state: State<'_, SharedState>,
+    id: String,
+) -> Result<crate::models::ProxyCheckResult> {
+    let state = state.inner().clone();
+    state.require(Permission::ViewList)?;
+    crate::proxy_discovery::check_candidate(&state, &id).await
+}
+
+#[tauri::command]
 pub fn proxy_discovery_add(
     state: State<'_, SharedState>,
     input: ProxyDiscoveryAddInput,

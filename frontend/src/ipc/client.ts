@@ -269,6 +269,8 @@ export const ipc = {
     call<ProxyRefreshResult>('proxy_subscription_refresh', { id }),
   proxyDiscoveryScan: (input: ProxyDiscoveryInput) =>
     call<ProxyDiscoveryResult>('proxy_discovery_scan', { input }),
+  proxyDiscoveryCheck: (id: string) =>
+    call<ProxyCheckResult>('proxy_discovery_check', { id }),
   proxyDiscoveryAdd: (input: ProxyDiscoveryAddInput) =>
     call<ProxyImportResult>('proxy_discovery_add', { input }),
   onProxyBatch: (handler: (progress: ProxyBatchProgress) => void) =>

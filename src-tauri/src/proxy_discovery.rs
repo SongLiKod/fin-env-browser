@@ -13,11 +13,14 @@ use crate::{
     audit_log::{actions, Audit},
     error::{AppError, Result},
     models::{
-        new_id, now_iso, Proxy, ProxyDiscoveryAddInput, ProxyDiscoveryCandidate,
-        ProxyDiscoveryInput, ProxyDiscoveryResult, ProxyDiscoverySourceStatus, ProxyImportError,
-        ProxyImportOptions, ProxyImportResult, PROXY_PROTOCOLS,
+        new_id, now_iso, Proxy, ProxyCheckResult, ProxyDiscoveryAddInput,
+        ProxyDiscoveryCandidate, ProxyDiscoveryInput, ProxyDiscoveryResult,
+        ProxyDiscoverySourceStatus, ProxyImportError, ProxyImportOptions, ProxyImportResult,
+        PROXY_PROTOCOLS,
     },
+    proxy_check::check_proxy_core,
     proxy_import,
+    proxy_subscription::raw_content_url,
     state::SharedState,
 };
 
@@ -203,6 +206,32 @@ pub async fn scan(state: &SharedState, input: &ProxyDiscoveryInput) -> Result<Pr
         scanned,
         errors,
     })
+}
+
+/// Check one scanned candidate without persisting it. Results are returned to
+/// the discovery dialog so users can see latency before adding nodes.
+pub async fn check_candidate(
+    state: &SharedState,
+    candidate_id: &str,
+) -> Result<ProxyCheckResult> {
+    state.proxy_discovery.cleanup();
+    let record = state
+        .proxy_discovery
+        .get(candidate_id)
+        .ok_or_else(|| AppError::not_found("节点已过期，请重新扫描"))?;
+    let password = record.password.clone().filter(|value| !value.is_empty());
+    let proxy = Proxy {
+        id: record.candidate.id.clone(),
+        name: record.candidate.name.clone(),
+        protocol: record.candidate.protocol.clone(),
+        host: record.candidate.host.clone(),
+        port: record.candidate.port,
+        username: record.candidate.username.clone(),
+        has_password: password.is_some(),
+        enabled: true,
+        ..Default::default()
+    };
+    Ok(check_proxy_core(&proxy, password.as_deref()).await)
 }
 
 pub fn add(
@@ -670,7 +699,8 @@ async fn fetch_text(
     url: &str,
     accept: Option<&str>,
 ) -> Result<String> {
-    let parsed = url::Url::parse(url).map_err(|_| AppError::bad_request("抓取 URL 无效"))?;
+    let target = raw_content_url(url).unwrap_or_else(|| url.to_string());
+    let parsed = url::Url::parse(&target).map_err(|_| AppError::bad_request("抓取 URL 无效"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(AppError::bad_request("仅支持 http/https 抓取"));
     }

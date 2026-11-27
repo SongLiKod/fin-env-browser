@@ -502,6 +502,7 @@ export interface ProxyFilter {
   subscriptionId?: string;
   enabled?: boolean;
   status?: 'ok' | 'fail' | 'untested' | 'disabled' | 'enabled' | string;
+  statuses?: string[];
   disabledReason?: string;
   limit?: number;
   offset?: number;

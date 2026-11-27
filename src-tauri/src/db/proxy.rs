@@ -184,6 +184,23 @@ fn filter_clauses(filter: &ProxyFilter) -> (Vec<String>, Vec<Value>) {
         Some("enabled") => clauses.push("enabled = 1".into()),
         _ => {}
     }
+    if !filter.statuses.is_empty() {
+        let groups = filter
+            .statuses
+            .iter()
+            .filter_map(|status| match status.trim() {
+                "ok" => Some("(enabled = 1 AND last_check_ok = 1)"),
+                "fail" => Some("(enabled = 1 AND last_check_ok = 0)"),
+                "untested" => Some("(enabled = 1 AND last_check_ok IS NULL)"),
+                "disabled" => Some("(enabled = 0)"),
+                "enabled" => Some("(enabled = 1)"),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if !groups.is_empty() {
+            clauses.push(format!("({})", groups.join(" OR ")));
+        }
+    }
     if let Some(reason) = filter
         .disabled_reason
         .as_deref()
@@ -383,9 +400,26 @@ impl Db {
     }
 
     pub fn delete_disabled_proxies(&self, filter: &ProxyFilter) -> Result<ProxyDeleteResult> {
+        fn known_status(value: &str) -> bool {
+            matches!(value.trim(), "ok" | "fail" | "untested" | "disabled" | "enabled")
+        }
+        let mut filter = filter.clone();
+        let requested = !filter.statuses.is_empty();
+        filter.statuses.retain(|value| known_status(value));
+        if requested && filter.statuses.is_empty() {
+            return Err(AppError::bad_request("清理状态不合法"));
+        }
+        if filter.statuses.is_empty() {
+            match filter.status.as_deref() {
+                Some(status) if known_status(status) => {
+                    filter.status = Some(status.trim().to_string());
+                }
+                Some(_) => return Err(AppError::bad_request("清理状态不合法")),
+                None => filter.status = Some("disabled".into()),
+            }
+        }
         self.with(|conn| {
-            let (mut clauses, values) = filter_clauses(filter);
-            clauses.push("enabled = 0".into());
+            let (clauses, values) = filter_clauses(&filter);
             let where_clause = where_sql(&clauses);
             let affected_envs: i64 = conn.query_row(
                 &format!(

@@ -80,7 +80,7 @@ export function ProxiesPage() {
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
   const [bulkMetaOpen, setBulkMetaOpen] = React.useState(false);
   const [cleanupOpen, setCleanupOpen] = React.useState(false);
-  const [cleanupOnlyMissing, setCleanupOnlyMissing] = React.useState(false);
+  const [cleanupStatuses, setCleanupStatuses] = React.useState<string[]>(['disabled', 'fail']);
   const [importOpen, setImportOpen] = React.useState(false);
   const [discoveryOpen, setDiscoveryOpen] = React.useState(false);
   const [checkingId, setCheckingId] = React.useState<string | null>(null);
@@ -365,7 +365,7 @@ export function ProxiesPage() {
         {tab === 'list' ? (
           <>
             <div className="flex flex-wrap items-center gap-2 border-b border-border p-4">
-              <div className="relative w-full max-w-xs">
+              <div className="relative w-full min-w-[200px] flex-1 sm:max-w-xs">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-content-hint" />
                 <Input
                   className="pl-9"
@@ -378,7 +378,7 @@ export function ProxiesPage() {
                 />
               </div>
               <Select
-                className="w-36"
+                wrapperClassName="w-32 shrink-0"
                 value={groupFilter}
                 onChange={(event) => {
                   setGroupFilter(event.target.value);
@@ -393,7 +393,7 @@ export function ProxiesPage() {
                 ))}
               </Select>
               <Select
-                className="w-32"
+                wrapperClassName="w-28 shrink-0"
                 value={sourceFilter}
                 onChange={(event) => {
                   setSourceFilter(event.target.value);
@@ -407,7 +407,7 @@ export function ProxiesPage() {
                 <option value="discovery">在线发现</option>
               </Select>
               <Select
-                className="w-32"
+                wrapperClassName="w-28 shrink-0"
                 value={statusFilter}
                 onChange={(event) => {
                   setStatusFilter(event.target.value);
@@ -424,17 +424,21 @@ export function ProxiesPage() {
                 <Button
                   variant="ghost"
                   size="sm"
+                  className="shrink-0"
                   onClick={() => {
-                    setCleanupOnlyMissing(false);
+                    setCleanupStatuses(['disabled', 'fail']);
                     setCleanupOpen(true);
                   }}
                 >
-                  <Trash2 className="h-3.5 w-3.5" /> 清理停用
+                  <Trash2 className="h-3.5 w-3.5" /> 清理节点
                 </Button>
               ) : null}
-              <p className="ml-auto text-[11px] text-content-hint">
-                密码使用 AES-256-GCM 加密保存，列表不返回明文。
-              </p>
+              <span
+                className="ml-auto hidden shrink-0 items-center gap-1 text-[11px] text-content-hint lg:flex"
+                title="密码使用 AES-256-GCM 加密保存，列表不返回明文。"
+              >
+                <ShieldCheck className="h-3.5 w-3.5" /> 加密存储
+              </span>
             </div>
 
             {selected.length > 0 ? (
@@ -827,16 +831,22 @@ export function ProxiesPage() {
       <PostDeleteDialog
         open={cleanupOpen}
         onOpenChange={setCleanupOpen}
-        title="清理停用代理"
-        description="将删除已停用节点，并从绑定环境解绑。订阅缺失节点会标记为 subscription_missing。"
-        confirmLabel="清理停用节点"
+        title="清理代理节点"
+        description={`将删除选中状态的节点（${cleanupStatuses
+          .map((status) => cleanupStatusLabel(status))
+          .join('、') || '未选择'}），并从绑定环境解绑。该操作不可撤销。`}
+        confirmLabel="清理节点"
         onConfirm={async () => {
+          if (cleanupStatuses.length === 0) {
+            toast.warning('请至少选择一种要清理的状态');
+            return;
+          }
           try {
             const result = await ipc.proxyBatchDeleteDisabled(
-              cleanupOnlyMissing ? { disabledReason: 'subscription_missing' } : {},
+              { statuses: cleanupStatuses },
               true,
             );
-            toast.success('停用代理已清理', `${result.deleted} 个，影响 ${result.affectedEnvs} 个环境`);
+            toast.success('代理节点已清理', `${result.deleted} 个，影响 ${result.affectedEnvs} 个环境`);
             setCleanupOpen(false);
             await load();
           } catch (error) {
@@ -844,15 +854,38 @@ export function ProxiesPage() {
           }
         }}
       >
-        <label className="flex items-center gap-2 text-xs text-content-weak">
-          <input
-            type="checkbox"
-            className="accent-[var(--color-primary)]"
-            checked={cleanupOnlyMissing}
-            onChange={(event) => setCleanupOnlyMissing(event.target.checked)}
-          />
-          仅删除订阅缺失导致停用的节点
-        </label>
+        <div className="space-y-2">
+          {[
+            { value: 'disabled', label: '已停用', count: stats.disabled, hint: '手动停用或订阅缺失的节点' },
+            { value: 'fail', label: '检测失败', count: stats.failed, hint: '已启用但最近一次检测失败' },
+            { value: 'untested', label: '未检测', count: stats.untested, hint: '已启用且尚未执行过检测' },
+          ].map((option) => (
+            <label
+              key={option.value}
+              className="flex cursor-pointer items-start gap-2 rounded-md border border-border px-3 py-2 text-xs text-content-weak hover:bg-surface-secondary"
+            >
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-[var(--color-primary)]"
+                checked={cleanupStatuses.includes(option.value)}
+                onChange={(event) =>
+                  setCleanupStatuses((current) =>
+                    event.target.checked
+                      ? [...current, option.value]
+                      : current.filter((value) => value !== option.value),
+                  )
+                }
+              />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-content-main">{option.label}</span>
+                  <Badge tone="neutral">{option.count}</Badge>
+                </span>
+                <span className="mt-0.5 block text-[10px] text-content-hint">{option.hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
       </PostDeleteDialog>
 
       <SubscriptionEditorDialog
@@ -1096,11 +1129,15 @@ function ProxyDiscoveryDialog({
   const [tags, setTags] = React.useState('');
   const [enabled, setEnabled] = React.useState(true);
   const [onDuplicate, setOnDuplicate] = React.useState<'skip' | 'update' | 'error'>('skip');
+  const [checks, setChecks] = React.useState<Record<string, ProxyCheckResult>>({});
+  const [checking, setChecking] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     if (!open) return;
     setResult(null);
     setSelected([]);
+    setChecks({});
+    setChecking([]);
     try {
       const saved = window.localStorage.getItem('finenv:proxy-discovery');
       if (!saved) return;
@@ -1157,6 +1194,8 @@ function ProxyDiscoveryDialog({
     setBusy(true);
     setResult(null);
     setSelected([]);
+    setChecks({});
+    setChecking([]);
     saveSettings();
     try {
       const next = await ipc.proxyDiscoveryScan(input);
@@ -1199,6 +1238,32 @@ function ProxyDiscoveryDialog({
     }
   };
 
+  const checkCandidates = async (ids: string[]) => {
+    const unique = ids.filter(
+      (id, index) => ids.indexOf(id) === index && !checking.includes(id),
+    );
+    if (unique.length === 0) return;
+    setChecking((current) => [...current, ...unique]);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < unique.length) {
+        const id = unique[cursor];
+        cursor += 1;
+        try {
+          const result = await ipc.proxyDiscoveryCheck(id);
+          setChecks((current) => ({ ...current, [id]: result }));
+        } catch {
+          // Expired candidates are reported when adding; keep the row usable.
+        } finally {
+          setChecking((current) => current.filter((value) => value !== id));
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(6, unique.length) }, () => worker()),
+    );
+  };
+
   const toggleEngine = (engine: string, checked: boolean) => {
     setEngines((current) => (checked ? [...current, engine] : current.filter((value) => value !== engine)));
   };
@@ -1209,13 +1274,15 @@ function ProxyDiscoveryDialog({
 
   const duplicates = result?.candidates.filter((candidate) => candidate.duplicate).length ?? 0;
   const allSelected = !!result && result.candidates.length > 0 && result.candidates.every((candidate) => selected.includes(candidate.id));
+  const tested = Object.keys(checks).length;
+  const testedOk = Object.values(checks).filter((result) => result.ok).length;
 
   return (
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
       title="在线获取代理节点"
-      description="从搜索引擎、GitHub 和友情链接抓取公开页面，提取 HTTP/HTTPS/SOCKS5 节点；勾选后加入代理池。"
+      description="从搜索引擎、GitHub 和友情链接抓取公开页面，提取 HTTP/HTTPS/SOCKS5 节点；可先检测延迟，再勾选加入代理池。"
       width="max-w-5xl"
       footer={
         <>
@@ -1336,14 +1403,34 @@ function ProxyDiscoveryDialog({
               <Badge tone="primary">候选 {result.candidates.length}</Badge>
               <Badge tone={duplicates > 0 ? 'warning' : 'neutral'}>已存在 {duplicates}</Badge>
               <Badge tone="neutral">扫描 {result.scanned}</Badge>
+              {tested > 0 ? <Badge tone="success">可用 {testedOk}/{tested}</Badge> : null}
               <span className="text-content-hint">已选 {selected.length}</span>
-              <button
-                type="button"
-                className="ml-auto text-primary"
-                onClick={() => setSelected(allSelected ? [] : result.candidates.map((candidate) => candidate.id))}
-              >
-                {allSelected ? '取消全选' : '全选'}
-              </button>
+              <div className="ml-auto flex flex-wrap items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  loading={checking.length > 0}
+                  disabled={selected.length === 0}
+                  onClick={() => void checkCandidates(selected)}
+                >
+                  <Wifi className="h-3.5 w-3.5" /> 检测选中
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={checking.length > 0 || result.candidates.length === 0}
+                  onClick={() => void checkCandidates(result.candidates.map((candidate) => candidate.id))}
+                >
+                  <Wifi className="h-3.5 w-3.5" /> 全部检测
+                </Button>
+                <button
+                  type="button"
+                  className="px-1 text-primary"
+                  onClick={() => setSelected(allSelected ? [] : result.candidates.map((candidate) => candidate.id))}
+                >
+                  {allSelected ? '取消全选' : '全选'}
+                </button>
+              </div>
             </div>
             <div className="flex flex-wrap gap-1">
               {result.sources.map((source, index) => (
@@ -1377,39 +1464,70 @@ function ProxyDiscoveryDialog({
                       <th>来源</th>
                       <th>认证</th>
                       <th>状态</th>
+                      <th className="text-right">检测</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {result.candidates.map((candidate) => (
-                      <tr key={candidate.id}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            className="accent-[var(--color-primary)]"
-                            checked={selected.includes(candidate.id)}
-                            onChange={(event) => toggleCandidate(candidate.id, event.target.checked)}
-                          />
-                        </td>
-                        <td>
-                          <span className="font-mono text-[11px] text-content-main">
-                            {candidate.protocol}://{candidate.host}:{candidate.port}
-                          </span>
-                          <p className="max-w-[240px] truncate text-[10px] text-content-hint" title={candidate.sourceUrl}>
-                            {candidate.name}
-                          </p>
-                        </td>
-                        <td>
-                          <Badge tone="outline">{candidate.source}</Badge>
-                        </td>
-                        <td className="text-[11px] text-content-weak">
-                          {candidate.username || '无'}
-                          {candidate.hasPassword ? <Badge tone="success" className="ml-1">密码</Badge> : null}
-                        </td>
-                        <td>
-                          {candidate.duplicate ? <Badge tone="warning">已存在</Badge> : <Badge tone="success">新节点</Badge>}
-                        </td>
-                      </tr>
-                    ))}
+                    {result.candidates.map((candidate) => {
+                      const check = checks[candidate.id];
+                      return (
+                        <tr key={candidate.id}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              className="accent-[var(--color-primary)]"
+                              checked={selected.includes(candidate.id)}
+                              onChange={(event) => toggleCandidate(candidate.id, event.target.checked)}
+                            />
+                          </td>
+                          <td>
+                            <span className="font-mono text-[11px] text-content-main">
+                              {candidate.protocol}://{candidate.host}:{candidate.port}
+                            </span>
+                            <p className="max-w-[240px] truncate text-[10px] text-content-hint" title={candidate.sourceUrl}>
+                              {candidate.name}
+                            </p>
+                          </td>
+                          <td>
+                            <Badge tone="outline">{candidate.source}</Badge>
+                          </td>
+                          <td className="text-[11px] text-content-weak">
+                            {candidate.username || '无'}
+                            {candidate.hasPassword ? <Badge tone="success" className="ml-1">密码</Badge> : null}
+                          </td>
+                          <td>
+                            {candidate.duplicate ? <Badge tone="warning">已存在</Badge> : <Badge tone="success">新节点</Badge>}
+                          </td>
+                          <td>
+                            <div className="flex items-center justify-end gap-1">
+                              {check ? (
+                                check.ok ? (
+                                  <Tooltip
+                                    content={`${check.exitIp ?? '连通'}${check.city ? ` · ${check.city}` : ''}${check.country ? ` · ${check.country}` : ''}`}
+                                  >
+                                    <Badge tone="success">
+                                      {check.latencyMs != null ? `${check.latencyMs}ms` : '可用'}
+                                    </Badge>
+                                  </Tooltip>
+                                ) : (
+                                  <Tooltip content={check.message}>
+                                    <Badge tone="danger">失败</Badge>
+                                  </Tooltip>
+                                )
+                              ) : null}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                loading={checking.includes(candidate.id)}
+                                onClick={() => void checkCandidates([candidate.id])}
+                              >
+                                <Wifi className="h-3 w-3" /> 检测
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1711,7 +1829,7 @@ function ProxyImportDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="批量导入代理"
-      description="支持纯文本、Base64、URI、JSON 与常见 Clash HTTP/SOCKS5 节点；提交时后端会重新解析。"
+      description="支持纯文本、Base64、URI、JSON 与常见 Clash HTTP/SOCKS5 节点；行尾 # 注释（如 #cn）会被忽略。提交时后端会重新解析。"
       width="max-w-4xl"
       footer={
         <>
@@ -1753,7 +1871,7 @@ function ProxyImportDialog({
               setText(event.target.value);
               setPreview(null);
             }}
-            placeholder={`socks5://user:pass@1.2.3.4:1080\n1.2.3.5:8080\n1.2.3.6:8080:user:pass`}
+            placeholder={`socks5://user:pass@1.2.3.4:1080\nsocks5://1.2.3.4:1080 #cn\n1.2.3.5:8080\n1.2.3.6:8080:user:pass`}
           />
           <div className="grid grid-cols-2 gap-3">
             <Field label="默认协议">
@@ -2091,8 +2209,13 @@ function SubscriptionEditorDialog({
         <Field label="订阅名称" required className="col-span-2">
           <Input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} autoFocus />
         </Field>
-        <Field label="订阅 URL" required className="col-span-2" hint="仅支持 http/https">
-          <Input value={form.url} onChange={(event) => setForm((current) => ({ ...current, url: event.target.value }))} placeholder="https://provider.example.com/sub?token=..." />
+        <Field
+          label="订阅 URL"
+          required
+          className="col-span-2"
+          hint="支持 http/https；GitHub 文件页（/blob/）链接会自动转换为 raw 内容地址"
+        >
+          <Input value={form.url} onChange={(event) => setForm((current) => ({ ...current, url: event.target.value }))} placeholder="https://github.com/HankNovic/ProxyClean/blob/main/SOCKS5.txt" />
         </Field>
         <Field label="默认协议">
           <Select value={form.protocol} onChange={(event) => setForm((current) => ({ ...current, protocol: event.target.value as typeof form.protocol }))}>
@@ -2325,6 +2448,16 @@ function splitTags(value: string): string[] {
     .split(/[,，\s]+/)
     .map((tag) => tag.trim())
     .filter(Boolean);
+}
+
+function cleanupStatusLabel(status: string): string {
+  return status === 'disabled'
+    ? '已停用'
+    : status === 'fail'
+      ? '检测失败'
+      : status === 'untested'
+        ? '未检测'
+        : status;
 }
 
 function formatInterval(minutes: number): string {

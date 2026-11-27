@@ -227,7 +227,7 @@ fn parse_lines(text: &str, options: &ProxyImportOptions) -> ParsedImport {
     let mut line_no = 0usize;
     for raw in text.lines() {
         line_no += 1;
-        let line = raw.trim();
+        let line = strip_inline_comment(raw.trim()).trim();
         if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
             continue;
         }
@@ -264,6 +264,10 @@ pub fn parse_proxy_line(
     line: &str,
     options: &ProxyImportOptions,
 ) -> Option<ParsedProxy> {
+    let line = strip_inline_comment(line.trim()).trim();
+    if line.is_empty() {
+        return None;
+    }
     parse_line(line, 1, options, 1)
         .ok()
         .filter(|entry| !entry.unsupported)
@@ -725,6 +729,23 @@ mod tests {
             default_protocol: Some("http".into()),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn parses_uri_with_inline_country_comment() {
+        let parsed = parse_proxy_text("socks5://182.18.83.37:7890 #cn\n", &options());
+        assert_eq!(parsed.entries.len(), 1);
+        assert_eq!(parsed.entries[0].protocol, "socks5");
+        assert_eq!(parsed.entries[0].host, "182.18.83.37");
+        assert_eq!(parsed.entries[0].port, 7890);
+        assert!(parsed.errors.is_empty());
+    }
+
+    #[test]
+    fn parses_uri_fragment_as_name_without_stripping_it() {
+        let parsed = parse_proxy_text("socks5://1.2.3.4:1080#tokyo\n", &options());
+        assert_eq!(parsed.entries.len(), 1);
+        assert_eq!(parsed.entries[0].name, "tokyo");
     }
 
     #[test]

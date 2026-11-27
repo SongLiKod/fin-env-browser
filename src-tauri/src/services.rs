@@ -1706,7 +1706,7 @@ pub fn delete_disabled_proxies(
         actor,
         actions::PROXY_BATCH_DELETE,
         format!(
-            "清理停用代理 {} 个，影响 {} 个环境",
+            "清理代理 {} 个，影响 {} 个环境",
             result.deleted, result.affected_envs
         ),
     )?;
