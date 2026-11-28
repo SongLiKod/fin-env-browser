@@ -12,8 +12,13 @@ use crate::{
 
 /// Check a proxy end to end without persisting the result. Batch checks use
 /// this and flush all results in one transaction at the end.
-pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyCheckResult {
+pub async fn check_proxy_core(
+    proxy: &Proxy,
+    password: Option<&str>,
+    target: &str,
+) -> ProxyCheckResult {
     let checked_at = now_iso();
+    let target = crate::models::normalize_proxy_check_target(Some(target));
     let connect_start = Instant::now();
     let tcp = timeout(
         Duration::from_secs(8),
@@ -32,6 +37,7 @@ pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyChe
                 timezone: None,
                 city: None,
                 message: format!("TCP 连接失败: {e}"),
+                target: target.clone(),
                 checked_at,
             };
         }
@@ -45,6 +51,7 @@ pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyChe
                 timezone: None,
                 city: None,
                 message: "TCP 连接超时".into(),
+                target: target.clone(),
                 checked_at,
             };
         }
@@ -67,6 +74,7 @@ pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyChe
                 timezone: None,
                 city: None,
                 message: e.message().to_string(),
+                target: target.clone(),
                 checked_at,
             }
         }
@@ -83,6 +91,7 @@ pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyChe
                 timezone: None,
                 city: None,
                 message: format!("代理 URL 无效: {e}"),
+                target: target.clone(),
                 checked_at,
             }
         }
@@ -104,6 +113,7 @@ pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyChe
                 timezone: None,
                 city: None,
                 message: format!("检测客户端创建失败: {e}"),
+                target: target.clone(),
                 checked_at,
             }
         }
@@ -112,37 +122,54 @@ pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyChe
     let http_start = Instant::now();
     let socks_auth_unsupported =
         proxy.protocol.eq_ignore_ascii_case("socks5") && !proxy.username.is_empty();
-    let (lookup, google_ok, youtube_ok) = if socks_auth_unsupported {
+    let (first_url, second_url, target_label, first_label, second_label) = if target == "github" {
+        (
+            "https://github.com/robots.txt",
+            "https://api.github.com/",
+            "GitHub",
+            "GitHub 主站",
+            "GitHub API",
+        )
+    } else {
+        (
+            "https://www.google.com/generate_204",
+            "https://www.youtube.com/robots.txt",
+            "Google / YouTube",
+            "Google",
+            "YouTube",
+        )
+    };
+    let (lookup, first_ok, second_ok) = if socks_auth_unsupported {
         (lookup_exit(&client).await, false, false)
     } else {
         tokio::join!(
             lookup_exit(&client),
-            probe_https(&client, "https://www.google.com/generate_204"),
-            probe_https(&client, "https://www.youtube.com/robots.txt")
+            probe_https(&client, first_url),
+            probe_https(&client, second_url)
         )
     };
     let has_exit = lookup.ip.is_some();
     let message = if socks_auth_unsupported {
         "Chromium 不支持 SOCKS5 用户名/密码认证，浏览器无法使用该代理；请改用 HTTP 代理或本地转发"
             .into()
-    } else if google_ok && youtube_ok {
+    } else if first_ok && second_ok {
         if has_exit {
-            "Google / YouTube 可访问，出口信息解析成功".into()
+            format!("{target_label} 可访问，出口信息解析成功")
         } else {
-            "Google / YouTube 可访问，但出口 IP 解析失败".into()
+            format!("{target_label} 可访问，但出口 IP 解析失败")
         }
-    } else if google_ok {
-        "Google 可访问，但 YouTube 不可访问".into()
-    } else if youtube_ok {
-        "YouTube 可访问，但 Google 不可访问".into()
+    } else if first_ok {
+        format!("{first_label} 可访问，但 {second_label} 不可访问")
+    } else if second_ok {
+        format!("{second_label} 可访问，但 {first_label} 不可访问")
     } else if has_exit {
-        "出口信息解析成功，但 Google / YouTube 均不可访问".into()
+        format!("出口信息解析成功，但 {target_label} 不可访问")
     } else {
-        format!("{}；Google / YouTube 均不可访问", lookup.message)
+        format!("{}；{target_label} 不可访问", lookup.message)
     };
     ProxyCheckResult {
         proxy_id: proxy.id.clone(),
-        ok: google_ok && youtube_ok,
+        ok: first_ok && second_ok,
         latency_ms: Some(tcp_latency + http_start.elapsed().as_millis() as u64),
         exit_ip: lookup.ip,
         country: lookup.country_code.clone().or(lookup.country),
@@ -155,6 +182,7 @@ pub async fn check_proxy_core(proxy: &Proxy, password: Option<&str>) -> ProxyChe
         city: lookup.city,
         message,
         checked_at,
+        target,
     }
 }
 
@@ -171,8 +199,9 @@ pub async fn check_proxy(
     db: &Db,
     proxy: &Proxy,
     password: Option<&str>,
+    target: &str,
 ) -> Result<ProxyCheckResult> {
-    let result = check_proxy_core(proxy, password).await;
+    let result = check_proxy_core(proxy, password, target).await;
     db.save_proxy_check(&result)?;
     Ok(result)
 }

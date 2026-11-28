@@ -18,6 +18,13 @@ where
 pub const ACCOUNT_STATUSES: [&str; 4] = ["pending", "in_use", "frozen", "deprecated"];
 pub const ENV_STATUSES: [&str; 3] = ["active", "disabled", "archived"];
 pub const PROXY_PROTOCOLS: [&str; 3] = ["http", "https", "socks5"];
+
+pub fn normalize_proxy_check_target(value: Option<&str>) -> String {
+    match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("github") => "github".into(),
+        _ => "google_youtube".into(),
+    }
+}
 pub const ROLES: [&str; 4] = ["super_admin", "test_lead", "test_engineer", "viewer"];
 
 pub fn now_iso() -> String {
@@ -495,6 +502,8 @@ pub struct Proxy {
     #[serde(default)]
     pub last_check_message: Option<String>,
     #[serde(default)]
+    pub last_check_target: String,
+    #[serde(default)]
     pub last_check_city: Option<String>,
     #[serde(default)]
     pub fail_count: u32,
@@ -582,6 +591,9 @@ pub struct ProxyCheckResult {
     pub city: Option<String>,
     pub message: String,
     pub checked_at: String,
+    /// google_youtube | github
+    #[serde(default)]
+    pub target: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -724,6 +736,9 @@ pub struct ProxyBatchCheckInput {
     pub only_enabled: Option<bool>,
     #[serde(default)]
     pub concurrency: Option<u32>,
+    /// google_youtube | github
+    #[serde(default)]
+    pub target: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -901,6 +916,9 @@ pub struct ProxyDiscoveryInput {
     /// 每个来源最多抓取多少条候选，默认 5000。
     #[serde(default)]
     pub per_source_limit: Option<u32>,
+    /// google_youtube | github
+    #[serde(default)]
+    pub check_target: Option<String>,
     /// 前端生成的扫描 ID，用于实时事件和取消。
     #[serde(default)]
     pub scan_id: Option<String>,
@@ -926,6 +944,8 @@ pub struct ProxyDiscoveryCandidate {
     pub source_url: String,
     pub duplicate: bool,
     pub existing_id: Option<String>,
+    #[serde(default)]
+    pub check_target: String,
     #[serde(default)]
     pub verified: bool,
     #[serde(default)]

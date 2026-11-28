@@ -28,7 +28,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, EmptyState, Spinner } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { Field, Input, Select, Textarea } from '@/components/ui/input';
-import { ProxyLocationSummary, proxyOptionLabel } from '@/components/ui/proxy-location';
+import { ProxyLocationSummary, proxyCheckTargetLabel, proxyOptionLabel } from '@/components/ui/proxy-location';
 import { Switch } from '@/components/ui/switch';
 
 export function NetworkingPanel({
@@ -50,6 +50,7 @@ export function NetworkingPanel({
   const [checking, setChecking] = React.useState(false);
   const [aligning, setAligning] = React.useState(false);
   const [checkResult, setCheckResult] = React.useState<ProxyCheckResult | null>(null);
+  const [checkTarget, setCheckTarget] = React.useState<'google_youtube' | 'github'>('google_youtube');
   const selected = proxies.find((proxy) => proxy.id === proxyId) ?? null;
 
   const [hosts, setHosts] = React.useState<HostsEntry[]>([]);
@@ -105,9 +106,9 @@ export function NetworkingPanel({
     }
     setChecking(true);
     try {
-      const result = await ipc.proxyCheck(proxyId);
+      const result = await ipc.proxyCheck(proxyId, checkTarget);
       setCheckResult(result);
-      if (result.ok) toast.success('代理连通', `${result.exitIp ?? '未知出口'} · ${result.latencyMs ?? '—'}ms · ${result.message}`);
+      if (result.ok) toast.success('代理连通', `${proxyCheckTargetLabel(result.target)} · ${result.exitIp ?? '未知出口'} · ${result.latencyMs ?? '—'}ms · ${result.message}`);
       else toast.error('代理检测失败', result.message);
     } catch (error) {
       toastError(error);
@@ -185,7 +186,7 @@ export function NetworkingPanel({
           }
         />
         <CardBody className="space-y-3">
-          <div className="grid items-end gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+          <div className="grid items-end gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
             <Field label="绑定代理">
               <Select value={proxyId} onChange={(event) => setProxyId(event.target.value)} placeholder="直连（不使用代理）">
                 {proxies.map((proxy) => (
@@ -193,6 +194,17 @@ export function NetworkingPanel({
                     {proxyOptionLabel(proxy)}
                   </option>
                 ))}
+              </Select>
+            </Field>
+            <Field label="检测目标">
+              <Select
+                value={checkTarget}
+                onChange={(event) =>
+                  setCheckTarget(event.target.value as 'google_youtube' | 'github')
+                }
+              >
+                <option value="google_youtube">Google + YouTube</option>
+                <option value="github">GitHub</option>
               </Select>
             </Field>
             <Button variant="secondary" onClick={() => void check()} loading={checking} disabled={!proxyId}>
@@ -239,7 +251,7 @@ export function NetworkingPanel({
               {checkResult ? (
                 <div className="mt-1.5 space-y-1 text-xs">
                   <p className={checkResult.ok ? 'text-[var(--success)]' : 'text-danger'}>
-                    {checkResult.ok ? '出口可用' : '出口不可用'} · {checkResult.latencyMs ?? '—'}ms
+                    {proxyCheckTargetLabel(checkResult.target)} · {checkResult.ok ? '出口可用' : '出口不可用'} · {checkResult.latencyMs ?? '—'}ms
                   </p>
                   <p className="font-mono text-[11px] text-content-main">{checkResult.exitIp ?? '未解析到出口 IP'}</p>
                   <p className="text-content-hint">

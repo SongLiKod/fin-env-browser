@@ -992,10 +992,17 @@ pub fn proxy_delete(state: State<'_, SharedState>, id: String, confirm: bool) ->
 pub async fn proxy_check(
     state: State<'_, SharedState>,
     id: String,
+    target: Option<String>,
 ) -> Result<crate::models::ProxyCheckResult> {
     let state = state.inner().clone();
     let actor = state.require(Permission::ViewList)?.username;
-    services::check_proxy(&state, &id, &actor).await
+    services::check_proxy(
+        &state,
+        &id,
+        &actor,
+        target.as_deref().unwrap_or("google_youtube"),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1214,10 +1221,16 @@ pub async fn proxy_discovery_scan(
 pub async fn proxy_discovery_check(
     state: State<'_, SharedState>,
     id: String,
+    target: Option<String>,
 ) -> Result<crate::models::ProxyCheckResult> {
     let state = state.inner().clone();
     state.require(Permission::ViewList)?;
-    crate::proxy_discovery::check_candidate(&state, &id).await
+    crate::proxy_discovery::check_candidate(
+        &state,
+        &id,
+        target.as_deref().unwrap_or("google_youtube"),
+    )
+    .await
 }
 
 #[tauri::command]

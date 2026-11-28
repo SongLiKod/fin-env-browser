@@ -209,6 +209,7 @@ export interface Proxy {
   weight: number;
   lastCheckOk: boolean | null;
   lastCheckMessage: string | null;
+  lastCheckTarget: string;
   lastCheckCity: string | null;
   failCount: number;
   disabledReason: '' | 'manual' | 'subscription_missing' | string;
@@ -487,6 +488,7 @@ export interface ProxyCheckResult {
   city: string | null;
   message: string;
   checkedAt: string;
+  target: string;
 }
 
 export interface AlignProxyResult {
@@ -582,6 +584,7 @@ export interface ProxyBatchCheckInput {
   filter?: ProxyFilter;
   onlyEnabled?: boolean;
   concurrency?: number;
+  target?: string;
 }
 
 export interface ProxyBatchCheckStart {
@@ -691,6 +694,7 @@ export interface ProxyDiscoveryInput {
   defaultProtocol?: 'http' | 'https' | 'socks5';
   maxResults?: number;
   perSourceLimit?: number;
+  checkTarget?: string;
   scanId?: string;
   includePublicLists?: boolean;
   verify?: boolean;
@@ -708,6 +712,7 @@ export interface ProxyDiscoveryCandidate {
   sourceUrl: string;
   duplicate: boolean;
   existingId: string | null;
+  checkTarget: string;
   verified: boolean;
   latencyMs: number | null;
   exitIp: string | null;

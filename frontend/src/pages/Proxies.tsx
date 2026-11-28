@@ -44,7 +44,7 @@ import { Card, EmptyState, Spinner, StatCard } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Dialog } from '@/components/ui/dialog';
 import { Field, Input, Select, Textarea } from '@/components/ui/input';
-import { ProxyLocationSummary } from '@/components/ui/proxy-location';
+import { ProxyLocationSummary, proxyCheckTargetLabel } from '@/components/ui/proxy-location';
 import { Switch } from '@/components/ui/switch';
 import { Tabs } from '@/components/ui/tabs';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -63,6 +63,7 @@ export function ProxiesPage() {
   const [groupFilter, setGroupFilter] = React.useState('');
   const [sourceFilter, setSourceFilter] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('');
+  const [checkTarget, setCheckTarget] = React.useState<'google_youtube' | 'github'>('google_youtube');
   const [data, setData] = React.useState<ProxyPage>({ items: [], total: 0 });
   const [stats, setStats] = React.useState<ProxyStats>({
     total: 0,
@@ -202,11 +203,11 @@ export function ProxiesPage() {
   const checkOne = async (proxy: Proxy) => {
     setCheckingId(proxy.id);
     try {
-      const result = await ipc.proxyCheck(proxy.id);
+      const result = await ipc.proxyCheck(proxy.id, checkTarget);
       if (result.ok) {
         toast.success(
           `代理 ${proxy.name} 连通`,
-          `${result.exitIp ?? '未知出口'} · ${result.latencyMs ?? '—'}ms · ${result.message}`,
+          `${proxyCheckTargetLabel(result.target)} · ${result.exitIp ?? '未知出口'} · ${result.latencyMs ?? '—'}ms · ${result.message}`,
         );
       } else {
         toast.error(`代理 ${proxy.name} 检测失败`, result.message);
@@ -246,9 +247,14 @@ export function ProxiesPage() {
 
   const runBatchCheck = () => {
     if (selected.length > 0) {
-      void startBatch({ ids: selected, concurrency: 8 });
+      void startBatch({ ids: selected, concurrency: 8, target: checkTarget });
     } else {
-      void startBatch({ filter: { ...filter, limit: undefined, offset: undefined }, onlyEnabled: true, concurrency: 8 });
+      void startBatch({
+        filter: { ...filter, limit: undefined, offset: undefined },
+        onlyEnabled: true,
+        concurrency: 8,
+        target: checkTarget,
+      });
     }
   };
 
@@ -298,7 +304,12 @@ export function ProxiesPage() {
   };
 
   const checkSubscription = (subscription: ProxySubscription) => {
-    void startBatch({ filter: { subscriptionId: subscription.id }, onlyEnabled: true, concurrency: 8 });
+    void startBatch({
+      filter: { subscriptionId: subscription.id },
+      onlyEnabled: true,
+      concurrency: 8,
+      target: checkTarget,
+    });
   };
 
   return (
@@ -310,10 +321,22 @@ export function ProxiesPage() {
           </p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight text-content-main">代理池</h1>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-content-weak">
-            管理 HTTP / HTTPS / SOCKS5 代理与订阅源，支持批量导入、批量检测、分组标签和停用节点清理。检测会同时验证 Google / YouTube 可达性。
+            管理 HTTP / HTTPS / SOCKS5 代理与订阅源，支持批量导入、批量检测、分组标签和停用节点清理。可选择按 Google / YouTube 或 GitHub 目标检测。
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Select
+            wrapperClassName="w-36 shrink-0"
+            value={checkTarget}
+            onChange={(event) =>
+              setCheckTarget(event.target.value as 'google_youtube' | 'github')
+            }
+            aria-label="检测目标"
+            title="检测目标"
+          >
+            <option value="google_youtube">Google + YouTube</option>
+            <option value="github">GitHub</option>
+          </Select>
           <Button
             variant="secondary"
             onClick={() => (job?.state === 'running' ? setJobOpen(true) : runBatchCheck())}
@@ -612,6 +635,11 @@ export function ProxiesPage() {
                             {proxy.failCount > 0 && proxy.enabled ? (
                               <p className="mt-1 text-[10px] text-content-hint">连续失败 {proxy.failCount} 次</p>
                             ) : null}
+                            {proxy.lastCheckTarget ? (
+                              <p className="mt-1 text-[10px] text-content-hint">
+                                检测目标：{proxyCheckTargetLabel(proxy.lastCheckTarget)}
+                              </p>
+                            ) : null}
                           </td>
                           <td>
                             {proxy.exitIp ? (
@@ -793,7 +821,7 @@ export function ProxiesPage() {
             toast.info('没有失败项可重试');
             return;
           }
-          void startBatch({ ids: failedIds, concurrency: 8 });
+          void startBatch({ ids: failedIds, concurrency: 8, target: checkTarget });
         }}
         onSelectWorking={() => {
           const ids = (jobResults.length > 0 ? jobResults : job?.recent ?? [])
@@ -1139,6 +1167,7 @@ function ProxyDiscoveryDialog({
   const [protocol, setProtocol] = React.useState<'http' | 'https' | 'socks5'>('http');
   const [maxResults, setMaxResults] = React.useState('200');
   const [perSourceLimit, setPerSourceLimit] = React.useState('5000');
+  const [discoveryTarget, setDiscoveryTarget] = React.useState<'google_youtube' | 'github'>('google_youtube');
   const [result, setResult] = React.useState<ProxyDiscoveryResult | null>(null);
   const [selected, setSelected] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState(false);
@@ -1251,6 +1280,7 @@ function ProxyDiscoveryDialog({
       if (typeof value.friendLinks === 'string') setFriendLinks(value.friendLinks);
       if (typeof value.followLinks === 'boolean') setFollowLinks(value.followLinks);
       if (value.protocol === 'http' || value.protocol === 'https' || value.protocol === 'socks5') setProtocol(value.protocol);
+      if (value.discoveryTarget === 'google_youtube' || value.discoveryTarget === 'github') setDiscoveryTarget(value.discoveryTarget);
       if (typeof value.maxResults === 'string') setMaxResults(value.maxResults);
       if (typeof value.perSourceLimit === 'string') setPerSourceLimit(value.perSourceLimit);
       if (typeof value.includePublicLists === 'boolean') setIncludePublicLists(value.includePublicLists);
@@ -1264,7 +1294,7 @@ function ProxyDiscoveryDialog({
     try {
       window.localStorage.setItem(
         'finenv:proxy-discovery',
-        JSON.stringify({ searchQuery, engines, githubQuery, friendLinks, followLinks, protocol, maxResults, perSourceLimit, includePublicLists, verify }),
+        JSON.stringify({ searchQuery, engines, githubQuery, friendLinks, followLinks, protocol, maxResults, perSourceLimit, includePublicLists, verify, discoveryTarget }),
       );
     } catch {
       // Ignore storage failures.
@@ -1286,6 +1316,7 @@ function ProxyDiscoveryDialog({
     defaultProtocol: protocol,
     maxResults: Number(maxResults) || 200,
     perSourceLimit: Math.min(20000, Math.max(100, Number(perSourceLimit) || 5000)),
+    checkTarget: discoveryTarget,
     includePublicLists,
     verify,
   });
@@ -1409,7 +1440,7 @@ function ProxyDiscoveryDialog({
         const id = unique[cursor];
         cursor += 1;
         try {
-          const result = await ipc.proxyDiscoveryCheck(id);
+          const result = await ipc.proxyDiscoveryCheck(id, discoveryTarget);
           setChecks((current) => ({ ...current, [id]: result }));
         } catch {
           // Expired candidates are reported when adding; keep the row usable.
@@ -1570,6 +1601,17 @@ function ProxyDiscoveryDialog({
               <option value="socks5">SOCKS5</option>
             </Select>
           </Field>
+          <Field label="检测目标">
+            <Select
+              value={discoveryTarget}
+              onChange={(event) =>
+                setDiscoveryTarget(event.target.value as 'google_youtube' | 'github')
+              }
+            >
+              <option value="google_youtube">Google + YouTube</option>
+              <option value="github">GitHub</option>
+            </Select>
+          </Field>
           <Field label="最大结果">
             <Input
               type="number"
@@ -1646,6 +1688,7 @@ function ProxyDiscoveryDialog({
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-xs text-content-weak">
               <Badge tone="primary">候选 {result.candidates.length}</Badge>
+              <Badge tone="outline">检测目标：{proxyCheckTargetLabel(discoveryTarget)}</Badge>
               <Badge tone={duplicates > 0 ? 'warning' : 'neutral'}>已存在 {duplicates}</Badge>
               <Badge tone="neutral">扫描 {result.scanned}</Badge>
               {result.verified > 0 ? <Badge tone="success">已验证 {result.verified}</Badge> : null}
@@ -1746,7 +1789,7 @@ function ProxyDiscoveryDialog({
                             </p>
                             {verified ? (
                               <p className="text-[10px] text-[var(--success)]">
-                                已验证
+                                已验证 · {proxyCheckTargetLabel(check?.target ?? candidate.checkTarget)}
                                 {latency != null ? ` · ${latency}ms` : ''}
                                 {exitIp ? ` · ${exitIp}` : ''}
                               </p>
@@ -1767,14 +1810,14 @@ function ProxyDiscoveryDialog({
                               {check ? (
                                 check.ok ? (
                                   <Tooltip
-                                    content={`${check.exitIp ?? '连通'}${check.city ? ` · ${check.city}` : ''}${check.country ? ` · ${check.country}` : ''}`}
+                                    content={`${proxyCheckTargetLabel(check.target)} · ${check.exitIp ?? '连通'}${check.city ? ` · ${check.city}` : ''}${check.country ? ` · ${check.country}` : ''}`}
                                   >
                                     <Badge tone="success">
                                       {check.latencyMs != null ? `${check.latencyMs}ms` : '可用'}
                                     </Badge>
                                   </Tooltip>
                                 ) : (
-                                  <Tooltip content={check.message}>
+                                  <Tooltip content={`${proxyCheckTargetLabel(check.target)}：${check.message}`}>
                                     <Badge tone="danger">失败</Badge>
                                   </Tooltip>
                                 )
@@ -2293,6 +2336,9 @@ function ProxyBatchPanel({
                 <span className="min-w-0 flex-1 truncate font-mono text-content-weak">{result.proxyId.slice(0, 8)}…</span>
                 <span className={result.ok ? 'text-[var(--success)]' : 'text-danger'}>
                   {result.ok ? result.exitIp ?? '连通' : result.message}
+                </span>
+                <span className="w-24 text-right text-[10px] text-content-hint">
+                  {proxyCheckTargetLabel(result.target)}
                 </span>
                 <span className="w-14 text-right tabular-nums text-content-hint">
                   {result.latencyMs != null ? `${result.latencyMs}ms` : '—'}

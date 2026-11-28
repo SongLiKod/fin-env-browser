@@ -15,8 +15,8 @@ use super::{bool_int, int_bool, Db};
 
 const PROXY_COLUMNS: &str = "id, name, protocol, host, port, username, password_enc, enabled, \
     last_check_at, latency_ms, exit_ip, exit_country, exit_timezone, group_name, tags, note, \
-    source, subscription_id, weight, last_check_ok, last_check_message, last_check_city, \
-    fail_count, disabled_reason, endpoint_key, created_at, updated_at";
+    source, subscription_id, weight, last_check_ok, last_check_message, last_check_target, \
+    last_check_city, fail_count, disabled_reason, endpoint_key, created_at, updated_at";
 
 const SUBSCRIPTION_COLUMNS: &str = "s.id, s.name, s.url_enc, s.headers_enc, s.default_protocol, \
     s.group_name, s.tags, s.enabled, s.auto_refresh, s.refresh_interval_min, s.last_refresh_at, \
@@ -50,6 +50,7 @@ fn row_to_proxy(row: &Row<'_>) -> rusqlite::Result<Proxy> {
             .get::<_, Option<i64>>("last_check_ok")?
             .map(|value| value != 0),
         last_check_message: row.get("last_check_message")?,
+        last_check_target: row.get("last_check_target").unwrap_or_default(),
         last_check_city: row.get("last_check_city")?,
         fail_count: row.get::<_, i64>("fail_count")? as u32,
         disabled_reason: row.get("disabled_reason")?,
@@ -498,6 +499,7 @@ impl Db {
                         last_check_city=CASE WHEN ?8=1 THEN ?7 ELSE last_check_city END,
                         last_check_ok=?8,
                         last_check_message=?9,
+                        last_check_target=?10,
                         fail_count=CASE WHEN ?8=1 THEN 0 ELSE fail_count + 1 END,
                         updated_at=?2
                      WHERE id=?1",
@@ -511,6 +513,7 @@ impl Db {
                         result.city,
                         ok,
                         result.message,
+                        result.target,
                     ],
                 )?;
             }
@@ -725,10 +728,10 @@ fn insert_proxy_row(conn: &rusqlite::Connection, proxy: &Proxy) -> rusqlite::Res
         "INSERT INTO proxies
          (id, name, protocol, host, port, username, password_enc, enabled, last_check_at,
           latency_ms, exit_ip, exit_country, exit_timezone, group_name, tags, note, source,
-          subscription_id, weight, last_check_ok, last_check_message, last_check_city,
-          fail_count, disabled_reason, endpoint_key, created_at, updated_at)
+          subscription_id, weight, last_check_ok, last_check_message, last_check_target,
+          last_check_city, fail_count, disabled_reason, endpoint_key, created_at, updated_at)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,
-                 ?20,?21,?22,?23,?24,?25,?26,?27)",
+                 ?20,?21,?22,?23,?24,?25,?26,?27,?28)",
         params![
             proxy.id,
             proxy.name,
@@ -751,6 +754,7 @@ fn insert_proxy_row(conn: &rusqlite::Connection, proxy: &Proxy) -> rusqlite::Res
             proxy.weight,
             opt_bool_int(proxy.last_check_ok),
             proxy.last_check_message,
+            proxy.last_check_target,
             proxy.last_check_city,
             proxy.fail_count,
             proxy.disabled_reason,
@@ -767,8 +771,8 @@ fn update_proxy_row(conn: &rusqlite::Connection, proxy: &Proxy) -> rusqlite::Res
             name=?2, protocol=?3, host=?4, port=?5, username=?6, password_enc=?7, enabled=?8,
             last_check_at=?9, latency_ms=?10, exit_ip=?11, exit_country=?12, exit_timezone=?13,
             group_name=?14, tags=?15, note=?16, source=?17, subscription_id=?18, weight=?19,
-            last_check_ok=?20, last_check_message=?21, last_check_city=?22, fail_count=?23,
-            disabled_reason=?24, endpoint_key=?25, updated_at=?26
+            last_check_ok=?20, last_check_message=?21, last_check_target=?22, last_check_city=?23,
+            fail_count=?24, disabled_reason=?25, endpoint_key=?26, updated_at=?27
          WHERE id=?1",
         params![
             proxy.id,
@@ -792,6 +796,7 @@ fn update_proxy_row(conn: &rusqlite::Connection, proxy: &Proxy) -> rusqlite::Res
             proxy.weight,
             opt_bool_int(proxy.last_check_ok),
             proxy.last_check_message,
+            proxy.last_check_target,
             proxy.last_check_city,
             proxy.fail_count,
             proxy.disabled_reason,

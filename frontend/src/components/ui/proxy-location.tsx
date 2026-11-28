@@ -9,6 +9,10 @@ export function proxyLocationText(proxy: Proxy): string {
   );
 }
 
+export function proxyCheckTargetLabel(target: string | null | undefined): string {
+  return target === 'github' ? 'GitHub' : 'Google + YouTube';
+}
+
 export function proxyOptionLabel(proxy: Proxy): string {
   const location = [proxy.exitCountry, proxy.lastCheckCity].filter(Boolean).join(' / ');
   const latency = proxy.latencyMs != null ? ` · ${proxy.latencyMs}ms` : '';
@@ -61,6 +65,7 @@ export function ProxyLocationSummary({
         {proxy.latencyMs != null ? `${proxy.latencyMs}ms` : '—'}
         {' · '}
         {proxy.lastCheckAt ? formatDateShort(proxy.lastCheckAt) : '未检测'}
+        {proxy.lastCheckTarget ? ` · ${proxyCheckTargetLabel(proxy.lastCheckTarget)}` : ''}
         {proxy.lastCheckMessage ? ` · ${proxy.lastCheckMessage}` : ''}
       </p>
     </div>

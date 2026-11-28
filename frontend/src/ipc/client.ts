@@ -237,7 +237,8 @@ export const ipc = {
     call<Proxy>('proxy_update', { id, input }),
   proxyDelete: (id: string, confirm: boolean) =>
     call<void>('proxy_delete', { id, confirm }),
-  proxyCheck: (id: string) => call<ProxyCheckResult>('proxy_check', { id }),
+  proxyCheck: (id: string, target?: string) =>
+    call<ProxyCheckResult>('proxy_check', { id, target }),
   proxyAssign: (envIds: string[], proxyId: string | null) =>
     call<number>('proxy_assign', { envIds, proxyId }),
   proxyAlign: (envId: string) => call<AlignProxyResult>('proxy_align', { envId }),
@@ -272,8 +273,8 @@ export const ipc = {
     call<ProxyDiscoveryResult>('proxy_discovery_scan', { input }),
   proxyDiscoveryCancel: (scanId: string) =>
     call<boolean>('proxy_discovery_cancel', { scanId }),
-  proxyDiscoveryCheck: (id: string) =>
-    call<ProxyCheckResult>('proxy_discovery_check', { id }),
+  proxyDiscoveryCheck: (id: string, target?: string) =>
+    call<ProxyCheckResult>('proxy_discovery_check', { id, target }),
   proxyDiscoveryAdd: (input: ProxyDiscoveryAddInput) =>
     call<ProxyImportResult>('proxy_discovery_add', { input }),
   onProxyDiscovery: (handler: (event: ProxyDiscoveryEvent) => void) =>

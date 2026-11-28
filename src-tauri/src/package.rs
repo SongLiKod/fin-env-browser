@@ -318,6 +318,7 @@ fn import_one(
                     weight: 1,
                     last_check_ok: None,
                     last_check_message: None,
+                    last_check_target: String::new(),
                     last_check_city: None,
                     fail_count: 0,
                     disabled_reason: if proxy.enabled {

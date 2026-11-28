@@ -1146,6 +1146,7 @@ pub fn create_proxy(state: &SharedState, input: ProxyInput, actor: &str) -> Resu
         weight: 1,
         last_check_ok: None,
         last_check_message: None,
+        last_check_target: String::new(),
         last_check_city: None,
         fail_count: 0,
         disabled_reason: if input.enabled.unwrap_or(true) {
@@ -1509,6 +1510,7 @@ pub fn import_proxies(
             weight: 1,
             last_check_ok: None,
             last_check_message: None,
+            last_check_target: String::new(),
             last_check_city: None,
             fail_count: 0,
             disabled_reason: if options.enabled.unwrap_or(true) {
@@ -1602,6 +1604,7 @@ pub fn start_proxy_batch_check(
         unique,
         input.concurrency.unwrap_or(8),
         actor.to_string(),
+        crate::models::normalize_proxy_check_target(input.target.as_deref()),
     )
 }
 
@@ -1919,7 +1922,9 @@ pub async fn check_environment_ip(
             } else {
                 Some(state.crypto.decrypt(&proxy.password_enc)?)
             };
-            let check = proxy_check::check_proxy(&state.db, &proxy, password.as_deref()).await?;
+            let check =
+                proxy_check::check_proxy(&state.db, &proxy, password.as_deref(), "google_youtube")
+                    .await?;
             let country_code = check
                 .country
                 .as_deref()
@@ -1994,14 +1999,19 @@ pub async fn check_environment_ip(
     Ok(info)
 }
 
-pub async fn check_proxy(state: &SharedState, id: &str, actor: &str) -> Result<ProxyCheckResult> {
+pub async fn check_proxy(
+    state: &SharedState,
+    id: &str,
+    actor: &str,
+    target: &str,
+) -> Result<ProxyCheckResult> {
     let proxy = state.db.get_proxy(id)?;
     let password = if proxy.password_enc.is_empty() {
         None
     } else {
         Some(state.crypto.decrypt(&proxy.password_enc)?)
     };
-    let result = proxy_check::check_proxy(&state.db, &proxy, password.as_deref()).await?;
+    let result = proxy_check::check_proxy(&state.db, &proxy, password.as_deref(), target).await?;
     Audit::global(
         &state.db,
         actor,
@@ -2050,7 +2060,7 @@ pub async fn align_proxy(
         .proxy_id
         .clone()
         .ok_or_else(|| AppError::bad_request("环境未绑定代理"))?;
-    let check = check_proxy(state, &proxy_id, actor).await?;
+    let check = check_proxy(state, &proxy_id, actor, "google_youtube").await?;
     let country = check
         .country
         .clone()

@@ -53,6 +53,7 @@ impl ProxyJobManager {
         proxies: Vec<Proxy>,
         concurrency: u32,
         actor: String,
+        target: String,
     ) -> Result<ProxyBatchCheckStart> {
         self.cleanup();
         let running = self
@@ -102,7 +103,7 @@ impl ProxyJobManager {
             .insert(job_id.clone(), job.clone());
         let concurrency = concurrency.clamp(1, 32) as usize;
         tauri::async_runtime::spawn(async move {
-            run_check_job(state, job, proxies, concurrency, actor).await;
+            run_check_job(state, job, proxies, concurrency, actor, target).await;
         });
         Ok(ProxyBatchCheckStart { job_id, total })
     }
@@ -178,6 +179,7 @@ async fn run_check_job(
     proxies: Vec<Proxy>,
     concurrency: usize,
     actor: String,
+    target: String,
 ) {
     let total = proxies.len() as u32;
     let mut pending = Vec::new();
@@ -186,13 +188,14 @@ async fn run_check_job(
 
     let mut stream = stream::iter(proxies.into_iter().map(|proxy| {
         let state = state.clone();
+        let target = target.clone();
         async move {
             let password = if proxy.password_enc.is_empty() {
                 None
             } else {
                 state.crypto.decrypt(&proxy.password_enc).ok()
             };
-            proxy_check::check_proxy_core(&proxy, password.as_deref()).await
+            proxy_check::check_proxy_core(&proxy, password.as_deref(), &target).await
         }
     }))
     .buffer_unordered(concurrency);

@@ -162,6 +162,7 @@ async fn scan_inner(
     let follow = input.follow_links.unwrap_or(true);
     let max_results = input.max_results.unwrap_or(200).clamp(1, 500);
     let per_source_limit = input.per_source_limit.unwrap_or(5000).clamp(100, 20000) as usize;
+    let check_target = crate::models::normalize_proxy_check_target(input.check_target.as_deref());
     let tasks = build_tasks(input);
     let task_count = tasks.len();
     let client = build_client()?;
@@ -306,6 +307,7 @@ async fn scan_inner(
             source_url: draft.source_url,
             duplicate: existing.contains_key(&endpoint),
             existing_id: existing.get(&endpoint).cloned(),
+            check_target: check_target.clone(),
             verified: false,
             latency_ms: None,
             exit_ip: None,
@@ -399,8 +401,9 @@ async fn scan_inner(
             let mut quick_stream = stream::iter(reachable)
                 .map(|candidate| {
                     let state = state.clone();
+                    let target = check_target.clone();
                     async move {
-                        if quick_google_reachable(&state, &candidate.id).await {
+                        if quick_target_reachable(&state, &candidate.id, &target).await {
                             Some(candidate)
                         } else {
                             None
@@ -469,8 +472,9 @@ async fn scan_inner(
                 let mut verify_stream = stream::iter(quick)
                     .map(|mut candidate| {
                         let state = state.clone();
+                        let target = check_target.clone();
                         async move {
-                            match check_candidate(&state, &candidate.id).await {
+                            match check_candidate(&state, &candidate.id, &target).await {
                                 Ok(result) => {
                                     candidate.verified = result.ok;
                                     candidate.latency_ms = result.latency_ms;
@@ -679,14 +683,18 @@ async fn tcp_reachable(host: &str, port: u16) -> bool {
 
 /// Check one scanned candidate without persisting it. Results are returned to
 /// the discovery dialog so users can see latency before adding nodes.
-pub async fn check_candidate(state: &SharedState, candidate_id: &str) -> Result<ProxyCheckResult> {
+pub async fn check_candidate(
+    state: &SharedState,
+    candidate_id: &str,
+    target: &str,
+) -> Result<ProxyCheckResult> {
     state.proxy_discovery.cleanup();
     let record = state
         .proxy_discovery
         .get(candidate_id)
         .ok_or_else(|| AppError::not_found("节点已过期，请重新扫描"))?;
     let (proxy, password) = record_proxy(&record);
-    Ok(check_proxy_core(&proxy, password.as_deref()).await)
+    Ok(check_proxy_core(&proxy, password.as_deref(), target).await)
 }
 
 fn record_proxy(record: &DiscoveredCandidate) -> (Proxy, Option<String>) {
@@ -705,7 +713,7 @@ fn record_proxy(record: &DiscoveredCandidate) -> (Proxy, Option<String>) {
     (proxy, password)
 }
 
-async fn quick_google_reachable(state: &SharedState, candidate_id: &str) -> bool {
+async fn quick_target_reachable(state: &SharedState, candidate_id: &str, target: &str) -> bool {
     let Some(record) = state.proxy_discovery.get(candidate_id) else {
         return false;
     };
@@ -726,12 +734,13 @@ async fn quick_google_reachable(state: &SharedState, candidate_id: &str) -> bool
     else {
         return false;
     };
+    let url = if target == "github" {
+        "https://github.com/robots.txt"
+    } else {
+        "https://www.google.com/generate_204"
+    };
     matches!(
-        timeout(
-            Duration::from_secs(5),
-            client.get("https://www.google.com/generate_204").send()
-        )
-        .await,
+        timeout(Duration::from_secs(5), client.get(url).send()).await,
         Ok(Ok(response))
             if response.status().is_success() || response.status().is_redirection()
     )
@@ -856,6 +865,7 @@ pub fn add(
             weight: 1,
             last_check_ok: None,
             last_check_message: None,
+            last_check_target: String::new(),
             last_check_city: None,
             fail_count: 0,
             disabled_reason: if enabled {

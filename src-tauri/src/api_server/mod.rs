@@ -1013,7 +1013,9 @@ async fn check_proxy(
     Path(id): Path<String>,
 ) -> Result<Json<crate::models::ProxyCheckResult>, AppError> {
     permit(&auth, Permission::ViewList)?;
-    Ok(Json(services::check_proxy(&state, &id, &auth.actor).await?))
+    Ok(Json(
+        services::check_proxy(&state, &id, &auth.actor, "google_youtube").await?,
+    ))
 }
 
 async fn page_proxies(
@@ -1247,7 +1249,7 @@ async fn check_proxy_discovery(
 ) -> Result<Json<crate::models::ProxyCheckResult>, AppError> {
     permit(&auth, Permission::ViewList)?;
     Ok(Json(
-        crate::proxy_discovery::check_candidate(&state, &id).await?,
+        crate::proxy_discovery::check_candidate(&state, &id, "google_youtube").await?,
     ))
 }
 

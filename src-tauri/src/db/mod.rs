@@ -221,6 +221,7 @@ mod tests {
             weight: 1,
             last_check_ok: None,
             last_check_message: None,
+            last_check_target: String::new(),
             last_check_city: None,
             fail_count: 0,
             disabled_reason: String::new(),
@@ -256,6 +257,7 @@ mod tests {
             city: None,
             message: "TCP 连接超时".into(),
             checked_at: now_iso(),
+            target: "google_youtube".into(),
         }])
         .unwrap();
         let checked = db.get_proxy(&proxy.id).unwrap();
@@ -453,6 +455,10 @@ impl Db {
             (
                 "011_proxy_pool",
                 include_str!("../../migrations/011_proxy_pool.sql"),
+            ),
+            (
+                "012_proxy_check_target",
+                include_str!("../../migrations/012_proxy_check_target.sql"),
             ),
         ];
         let current: i64 =
