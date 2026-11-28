@@ -1,6 +1,6 @@
 [package]
 name = "fin-env-browser"
-version = "4.3.9"
+version = "4.3.10"
 description = "FinEnv fingerprint environment manager"
 authors = ["FinEnv Team"]
 edition = "2021"

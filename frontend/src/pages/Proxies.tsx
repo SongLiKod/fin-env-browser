@@ -51,6 +51,20 @@ import { Tooltip } from '@/components/ui/tooltip';
 
 const PAGE_SIZE = 100;
 
+const DEFAULT_PUBLIC_PROXY_LISTS = [
+  'https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt',
+  'https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt',
+  'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt',
+  'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt',
+  'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt',
+  'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt',
+  'https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/http.txt',
+  'https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt',
+  'https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt',
+  'https://raw.githubusercontent.com/ALIILAPRO/Proxy/main/socks5.txt',
+  'https://raw.githubusercontent.com/zevtyardt/proxy-list/main/socks5.txt',
+].join('\n');
+
 type ProxyTab = 'list' | 'subscriptions';
 
 export function ProxiesPage() {
@@ -1167,6 +1181,13 @@ function ProxyDiscoveryDialog({
   const [protocol, setProtocol] = React.useState<'http' | 'https' | 'socks5'>('http');
   const [maxResults, setMaxResults] = React.useState('200');
   const [perSourceLimit, setPerSourceLimit] = React.useState('5000');
+  const [tcpTimeoutMs, setTcpTimeoutMs] = React.useState('5000');
+  const [quickTimeoutMs, setQuickTimeoutMs] = React.useState('8000');
+  const [publicLists, setPublicLists] = React.useState(DEFAULT_PUBLIC_PROXY_LISTS);
+  const [githubRepoLimit, setGithubRepoLimit] = React.useState('5');
+  const [githubLinkLimit, setGithubLinkLimit] = React.useState('3');
+  const [searchFollowLimit, setSearchFollowLimit] = React.useState('5');
+  const [friendLinkFollowLimit, setFriendLinkFollowLimit] = React.useState('8');
   const [discoveryTarget, setDiscoveryTarget] = React.useState<'google_youtube' | 'github'>('google_youtube');
   const [result, setResult] = React.useState<ProxyDiscoveryResult | null>(null);
   const [selected, setSelected] = React.useState<string[]>([]);
@@ -1283,6 +1304,13 @@ function ProxyDiscoveryDialog({
       if (value.discoveryTarget === 'google_youtube' || value.discoveryTarget === 'github') setDiscoveryTarget(value.discoveryTarget);
       if (typeof value.maxResults === 'string') setMaxResults(value.maxResults);
       if (typeof value.perSourceLimit === 'string') setPerSourceLimit(value.perSourceLimit);
+      if (typeof value.tcpTimeoutMs === 'string') setTcpTimeoutMs(value.tcpTimeoutMs);
+      if (typeof value.quickTimeoutMs === 'string') setQuickTimeoutMs(value.quickTimeoutMs);
+      if (typeof value.publicLists === 'string') setPublicLists(value.publicLists);
+      if (typeof value.githubRepoLimit === 'string') setGithubRepoLimit(value.githubRepoLimit);
+      if (typeof value.githubLinkLimit === 'string') setGithubLinkLimit(value.githubLinkLimit);
+      if (typeof value.searchFollowLimit === 'string') setSearchFollowLimit(value.searchFollowLimit);
+      if (typeof value.friendLinkFollowLimit === 'string') setFriendLinkFollowLimit(value.friendLinkFollowLimit);
       if (typeof value.includePublicLists === 'boolean') setIncludePublicLists(value.includePublicLists);
       if (typeof value.verify === 'boolean') setVerify(value.verify);
     } catch {
@@ -1294,7 +1322,7 @@ function ProxyDiscoveryDialog({
     try {
       window.localStorage.setItem(
         'finenv:proxy-discovery',
-        JSON.stringify({ searchQuery, engines, githubQuery, friendLinks, followLinks, protocol, maxResults, perSourceLimit, includePublicLists, verify, discoveryTarget }),
+        JSON.stringify({ searchQuery, engines, githubQuery, friendLinks, followLinks, protocol, maxResults, perSourceLimit, tcpTimeoutMs, quickTimeoutMs, publicLists, githubRepoLimit, githubLinkLimit, searchFollowLimit, friendLinkFollowLimit, includePublicLists, verify, discoveryTarget }),
       );
     } catch {
       // Ignore storage failures.
@@ -1316,6 +1344,16 @@ function ProxyDiscoveryDialog({
     defaultProtocol: protocol,
     maxResults: Number(maxResults) || 200,
     perSourceLimit: Math.min(20000, Math.max(100, Number(perSourceLimit) || 5000)),
+    tcpTimeoutMs: Math.min(30000, Math.max(1000, Number(tcpTimeoutMs) || 5000)),
+    quickTimeoutMs: Math.min(30000, Math.max(1000, Number(quickTimeoutMs) || 8000)),
+    publicLists: publicLists
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean),
+    githubRepoLimit: Math.min(20, Math.max(1, Number(githubRepoLimit) || 5)),
+    githubLinkLimit: Math.min(10, Math.max(0, Number(githubLinkLimit) || 0)),
+    searchFollowLimit: Math.min(20, Math.max(0, Number(searchFollowLimit) || 0)),
+    friendLinkFollowLimit: Math.min(20, Math.max(0, Number(friendLinkFollowLimit) || 0)),
     checkTarget: discoveryTarget,
     includePublicLists,
     verify,
@@ -1324,7 +1362,7 @@ function ProxyDiscoveryDialog({
   const scan = async () => {
     const input = buildInput();
     const hasSource =
-      includePublicLists ||
+      (includePublicLists && publicLists.trim().length > 0) ||
       ((input.engines?.length ?? 0) > 0 && (input.searchQueries?.length ?? 0) > 0) ||
       (input.githubQueries?.length ?? 0) > 0 ||
       (input.friendLinks?.length ?? 0) > 0;
@@ -1583,7 +1621,7 @@ function ProxyDiscoveryDialog({
             checked={includePublicLists}
             onCheckedChange={setIncludePublicLists}
             label="内置公开代理列表"
-            description="抓取 Proxifly / TheSpeedX 等公开列表；推荐开启，不依赖搜索关键词。"
+            description="使用下方可编辑的公开列表；默认包含 Proxifly、TheSpeedX、monosans、vakhov、hookzof。"
           />
           <Switch
             checked={verify}
@@ -1592,6 +1630,30 @@ function ProxyDiscoveryDialog({
             description="TCP 预筛后再实测 Google / YouTube；候选较多时首次扫描可能需要 1-3 分钟。"
           />
         </div>
+
+        {includePublicLists ? (
+          <div className="space-y-2 rounded-md border border-border bg-surface-secondary p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-medium text-content-main">公开代理列表 URL（系统内置，可修改）</p>
+              <button
+                type="button"
+                className="text-[11px] text-primary"
+                onClick={() => setPublicLists(DEFAULT_PUBLIC_PROXY_LISTS)}
+              >
+                恢复默认列表
+              </button>
+            </div>
+            <Textarea
+              className="min-h-[96px] font-mono text-[11px]"
+              value={publicLists}
+              onChange={(event) => setPublicLists(event.target.value)}
+              placeholder={'每行一个 http/https 列表地址'}
+            />
+            <p className="text-[10px] text-content-hint">
+              每行一个公开代理列表地址；删除某行即可不再抓取该来源。为空时仅使用搜索、GitHub 和友情链接来源。
+            </p>
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface-secondary p-3">
           <Field label="默认协议">
@@ -1653,6 +1715,65 @@ function ProxyDiscoveryDialog({
           <div className="pb-1.5">
             <Switch checked={enabled} onCheckedChange={setEnabled} label="添加后启用" />
           </div>
+        </div>
+
+        <div className="grid gap-3 rounded-md border border-border bg-surface-secondary p-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label="GitHub 仓库数" hint="默认 5，最多 20">
+            <Input
+              type="number"
+              min={1}
+              max={20}
+              value={githubRepoLimit}
+              onChange={(event) => setGithubRepoLimit(event.target.value)}
+            />
+          </Field>
+          <Field label="GitHub 跟进链接" hint="每个 README 最多几个链接">
+            <Input
+              type="number"
+              min={0}
+              max={10}
+              value={githubLinkLimit}
+              onChange={(event) => setGithubLinkLimit(event.target.value)}
+            />
+          </Field>
+          <Field label="搜索跟进页" hint="每个搜索结果最多几个页面">
+            <Input
+              type="number"
+              min={0}
+              max={20}
+              value={searchFollowLimit}
+              onChange={(event) => setSearchFollowLimit(event.target.value)}
+            />
+          </Field>
+          <Field label="友情链接跟进页" hint="每个友情链接最多几个页面">
+            <Input
+              type="number"
+              min={0}
+              max={20}
+              value={friendLinkFollowLimit}
+              onChange={(event) => setFriendLinkFollowLimit(event.target.value)}
+            />
+          </Field>
+          <Field label="TCP 预筛超时（ms）" hint="默认 5000，最低 1000">
+            <Input
+              type="number"
+              min={1000}
+              max={30000}
+              step={500}
+              value={tcpTimeoutMs}
+              onChange={(event) => setTcpTimeoutMs(event.target.value)}
+            />
+          </Field>
+          <Field label="快速探测超时（ms）" hint="Google / GitHub 快速探测，默认 8000">
+            <Input
+              type="number"
+              min={1000}
+              max={30000}
+              step={500}
+              value={quickTimeoutMs}
+              onChange={(event) => setQuickTimeoutMs(event.target.value)}
+            />
+          </Field>
         </div>
 
         {scanning || logs.length > 0 ? (

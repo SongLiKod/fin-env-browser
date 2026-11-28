@@ -916,6 +916,27 @@ pub struct ProxyDiscoveryInput {
     /// 每个来源最多抓取多少条候选，默认 5000。
     #[serde(default)]
     pub per_source_limit: Option<u32>,
+    /// TCP 预筛超时，毫秒，默认 5000。
+    #[serde(default)]
+    pub tcp_timeout_ms: Option<u32>,
+    /// 目标快速探测超时，毫秒，默认 8000。
+    #[serde(default)]
+    pub quick_timeout_ms: Option<u32>,
+    /// 用户可编辑的公开代理列表 URL；为空时使用系统默认列表。
+    #[serde(default)]
+    pub public_lists: Option<Vec<String>>,
+    /// GitHub 搜索结果最多读取多少个仓库，默认 5。
+    #[serde(default)]
+    pub github_repo_limit: Option<u32>,
+    /// 每个 GitHub README 最多跟进多少个链接，默认 3。
+    #[serde(default)]
+    pub github_link_limit: Option<u32>,
+    /// 每个搜索引擎结果最多跟进多少个页面，默认 5。
+    #[serde(default)]
+    pub search_follow_limit: Option<u32>,
+    /// 每个友情链接最多跟进多少个页面，默认 8。
+    #[serde(default)]
+    pub friend_link_follow_limit: Option<u32>,
     /// google_youtube | github
     #[serde(default)]
     pub check_target: Option<String>,

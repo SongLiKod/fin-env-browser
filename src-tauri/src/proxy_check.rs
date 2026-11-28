@@ -59,8 +59,8 @@ pub async fn check_proxy_core(
     let tcp_latency = connect_start.elapsed().as_millis() as u64;
 
     let proxy_url = match password.filter(|p| !p.is_empty()) {
-        Some(password) => build_proxy_url_with_auth(proxy, password),
-        None => build_proxy_url(proxy),
+        Some(password) => build_proxy_url_with_auth(proxy, password, &target),
+        None => build_proxy_url(proxy, &target),
     };
     let proxy_url = match proxy_url {
         Ok(url) => url,
@@ -384,11 +384,24 @@ async fn lookup_exit(client: &reqwest::Client) -> ExitLookup {
     }
 }
 
-fn build_proxy_url(proxy: &Proxy) -> Result<String> {
+fn check_socks_scheme(target: &str) -> &'static str {
+    // Google/YouTube DNS is commonly poisoned locally, so use remote DNS.
+    // GitHub is reachable with local DNS and some public SOCKS5 proxies do not
+    // implement remote hostname resolution, so use local DNS there.
+    if target == "github" {
+        "socks5"
+    } else {
+        "socks5h"
+    }
+}
+
+fn build_proxy_url(proxy: &Proxy, target: &str) -> Result<String> {
     let scheme = match proxy.protocol.as_str() {
         "http" => "http",
         "https" => "https",
-        "socks5" => "socks5",
+        // For the in-app checker (reqwest). Chromium's --proxy-server uses
+        // Proxy::url() and keeps socks5.
+        "socks5" => check_socks_scheme(target),
         other => return Err(AppError::bad_request(format!("不支持的代理协议: {other}"))),
     };
     let mut url = url::Url::parse(&format!("{scheme}://{}:{}", proxy.url_host(), proxy.port))
@@ -404,11 +417,11 @@ fn build_proxy_url(proxy: &Proxy) -> Result<String> {
 
 /// Same as `build_proxy_url` but with decrypted credentials embedded. Used by
 /// the connectivity checker only, never persisted.
-pub fn build_proxy_url_with_auth(proxy: &Proxy, password: &str) -> Result<String> {
+pub fn build_proxy_url_with_auth(proxy: &Proxy, password: &str, target: &str) -> Result<String> {
     let scheme = match proxy.protocol.as_str() {
         "http" => "http",
         "https" => "https",
-        "socks5" => "socks5",
+        "socks5" => check_socks_scheme(target),
         other => return Err(AppError::bad_request(format!("不支持的代理协议: {other}"))),
     };
     let mut url = url::Url::parse(&format!("{scheme}://{}:{}", proxy.url_host(), proxy.port))

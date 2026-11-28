@@ -34,6 +34,20 @@ const MAX_PAGE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_EXTRACT_PER_PAGE: usize = 20000;
 const STORE_TTL: Duration = Duration::from_secs(30 * 60);
 
+pub const DEFAULT_PUBLIC_PROXY_LISTS: &[&str] = &[
+    "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt",
+    "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+    "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/http.txt",
+    "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt",
+    "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
+    "https://raw.githubusercontent.com/ALIILAPRO/Proxy/main/socks5.txt",
+    "https://raw.githubusercontent.com/zevtyardt/proxy-list/main/socks5.txt",
+];
+
 #[derive(Debug, Clone)]
 pub struct DiscoveredCandidate {
     pub candidate: ProxyDiscoveryCandidate,
@@ -124,6 +138,17 @@ enum DiscoveryTask {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
+struct DiscoveryLimits {
+    per_source: usize,
+    search_follow: usize,
+    friend_follow: usize,
+    github_repos: usize,
+    github_links: usize,
+    tcp_timeout_ms: u64,
+    quick_timeout_ms: u64,
+}
+
 #[derive(Debug)]
 struct FoundProxy {
     parsed: proxy_import::ParsedProxy,
@@ -161,7 +186,15 @@ async fn scan_inner(
     let options = discovery_options(input);
     let follow = input.follow_links.unwrap_or(true);
     let max_results = input.max_results.unwrap_or(200).clamp(1, 500);
-    let per_source_limit = input.per_source_limit.unwrap_or(5000).clamp(100, 20000) as usize;
+    let limits = DiscoveryLimits {
+        per_source: input.per_source_limit.unwrap_or(5000).clamp(100, 20000) as usize,
+        search_follow: input.search_follow_limit.unwrap_or(5).clamp(0, 20) as usize,
+        friend_follow: input.friend_link_follow_limit.unwrap_or(8).clamp(0, 20) as usize,
+        github_repos: input.github_repo_limit.unwrap_or(5).clamp(1, 20) as usize,
+        github_links: input.github_link_limit.unwrap_or(3).clamp(0, 10) as usize,
+        tcp_timeout_ms: input.tcp_timeout_ms.unwrap_or(5000).clamp(1000, 30000) as u64,
+        quick_timeout_ms: input.quick_timeout_ms.unwrap_or(8000).clamp(1000, 30000) as u64,
+    };
     let check_target = crate::models::normalize_proxy_check_target(input.check_target.as_deref());
     let tasks = build_tasks(input);
     let task_count = tasks.len();
@@ -169,14 +202,17 @@ async fn scan_inner(
     emit_log(
         state,
         scan_id,
-        &format!("开始扫描：{task_count} 个来源，单来源上限 {per_source_limit} 条"),
+        &format!(
+            "开始扫描：{task_count} 个来源，单来源上限 {} 条",
+            limits.per_source
+        ),
     );
 
     let mut outcomes = stream::iter(tasks)
         .map(|task| {
             let client = client.clone();
             let options = options.clone();
-            async move { run_task(&client, task, &options, follow, per_source_limit).await }
+            async move { run_task(&client, task, &options, follow, &limits).await }
         })
         .buffer_unordered(6);
 
@@ -326,12 +362,14 @@ async fn scan_inner(
     let mut rejected = 0u32;
     if verify && !candidates.is_empty() {
         let total = candidates.len() as u32;
+        let tcp_timeout_ms = limits.tcp_timeout_ms;
+        let quick_timeout_ms = limits.quick_timeout_ms;
         emit_progress(state, scan_id, "tcp", 0, total, 0, 0, "正在做 TCP 预筛");
         let mut reachable = Vec::new();
         let mut checked_tcp = 0u32;
         let mut tcp_stream = stream::iter(candidates)
             .map(|candidate| async move {
-                if tcp_reachable(&candidate.host, candidate.port).await {
+                if tcp_reachable(&candidate.host, candidate.port, tcp_timeout_ms).await {
                     Some(candidate)
                 } else {
                     None
@@ -403,7 +441,9 @@ async fn scan_inner(
                     let state = state.clone();
                     let target = check_target.clone();
                     async move {
-                        if quick_target_reachable(&state, &candidate.id, &target).await {
+                        if quick_target_reachable(&state, &candidate.id, &target, quick_timeout_ms)
+                            .await
+                        {
                             Some(candidate)
                         } else {
                             None
@@ -670,10 +710,10 @@ fn emit_candidate(state: &SharedState, scan_id: Option<&str>, candidate: &ProxyD
     );
 }
 
-async fn tcp_reachable(host: &str, port: u16) -> bool {
+async fn tcp_reachable(host: &str, port: u16, timeout_ms: u64) -> bool {
     matches!(
         timeout(
-            Duration::from_millis(2500),
+            Duration::from_millis(timeout_ms),
             TcpStream::connect((host, port))
         )
         .await,
@@ -713,14 +753,21 @@ fn record_proxy(record: &DiscoveredCandidate) -> (Proxy, Option<String>) {
     (proxy, password)
 }
 
-async fn quick_target_reachable(state: &SharedState, candidate_id: &str, target: &str) -> bool {
+async fn quick_target_reachable(
+    state: &SharedState,
+    candidate_id: &str,
+    target: &str,
+    timeout_ms: u64,
+) -> bool {
     let Some(record) = state.proxy_discovery.get(candidate_id) else {
         return false;
     };
     let (proxy, password) = record_proxy(&record);
-    let Ok(proxy_url) =
-        crate::proxy_check::build_proxy_url_with_auth(&proxy, password.as_deref().unwrap_or(""))
-    else {
+    let Ok(proxy_url) = crate::proxy_check::build_proxy_url_with_auth(
+        &proxy,
+        password.as_deref().unwrap_or(""),
+        target,
+    ) else {
         return false;
     };
     let Ok(proxy) = reqwest::Proxy::all(&proxy_url) else {
@@ -728,7 +775,7 @@ async fn quick_target_reachable(state: &SharedState, candidate_id: &str, target:
     };
     let Ok(client) = reqwest::Client::builder()
         .proxy(proxy)
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_millis(timeout_ms))
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) FinEnv/1.0")
         .build()
     else {
@@ -740,7 +787,7 @@ async fn quick_target_reachable(state: &SharedState, candidate_id: &str, target:
         "https://www.google.com/generate_204"
     };
     matches!(
-        timeout(Duration::from_secs(5), client.get(url).send()).await,
+        timeout(Duration::from_millis(timeout_ms), client.get(url).send()).await,
         Ok(Ok(response))
             if response.status().is_success() || response.status().is_redirection()
     )
@@ -925,28 +972,30 @@ fn discovery_options(input: &ProxyDiscoveryInput) -> ProxyImportOptions {
 fn build_tasks(input: &ProxyDiscoveryInput) -> Vec<DiscoveryTask> {
     let mut tasks = Vec::new();
     if input.include_public_lists.unwrap_or(true) {
-        // 这些是公开维护的纯文本代理列表，比搜索引擎抓取更稳定；
-        // 扫描结束后仍会通过 Google / YouTube 实测过滤。
-        tasks.push(DiscoveryTask::Feed {
-            url: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt".into(),
-            label: "Proxifly HTTP".into(),
-            default_protocol: Some("http".into()),
+        // 公开列表由前端展示并可编辑；未传入时使用系统默认列表。
+        let lists = input.public_lists.clone().unwrap_or_else(|| {
+            DEFAULT_PUBLIC_PROXY_LISTS
+                .iter()
+                .map(|url| (*url).to_string())
+                .collect()
         });
-        tasks.push(DiscoveryTask::Feed {
-            url: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt".into(),
-            label: "Proxifly SOCKS5".into(),
-            default_protocol: Some("socks5".into()),
-        });
-        tasks.push(DiscoveryTask::Feed {
-            url: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt".into(),
-            label: "SpeedX HTTP".into(),
-            default_protocol: Some("http".into()),
-        });
-        tasks.push(DiscoveryTask::Feed {
-            url: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt".into(),
-            label: "SpeedX SOCKS5".into(),
-            default_protocol: Some("socks5".into()),
-        });
+        for url in lists {
+            let url = url.trim();
+            if url.is_empty() {
+                continue;
+            }
+            let Ok(parsed) = url::Url::parse(url) else {
+                continue;
+            };
+            if !matches!(parsed.scheme(), "http" | "https") {
+                continue;
+            }
+            tasks.push(DiscoveryTask::Feed {
+                url: url.to_string(),
+                label: feed_label(&parsed),
+                default_protocol: feed_protocol(&parsed),
+            });
+        }
     }
     let queries = input
         .search_queries
@@ -996,12 +1045,33 @@ fn build_tasks(input: &ProxyDiscoveryInput) -> Vec<DiscoveryTask> {
     tasks
 }
 
+fn feed_label(url: &url::Url) -> String {
+    let host = url.host_str().unwrap_or("public-list");
+    let file = url
+        .path_segments()
+        .and_then(|mut segments| segments.next_back())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("list");
+    format!("{host}/{file}")
+}
+
+fn feed_protocol(url: &url::Url) -> Option<String> {
+    let path = url.path().to_ascii_lowercase();
+    if path.contains("socks5") || url.host_str().is_some_and(|host| host.contains("hookzof")) {
+        Some("socks5".into())
+    } else if path.contains("http") || path.ends_with("proxy.txt") {
+        Some("http".into())
+    } else {
+        None
+    }
+}
+
 async fn run_task(
     client: &reqwest::Client,
     task: DiscoveryTask,
     options: &ProxyImportOptions,
     follow: bool,
-    per_source_limit: usize,
+    limits: &DiscoveryLimits,
 ) -> SourceOutcome {
     match task {
         DiscoveryTask::Search { engine, query } => {
@@ -1011,10 +1081,28 @@ async fn run_task(
                 "duckduckgo" => "DuckDuckGo",
                 _ => "Bing",
             };
-            run_page(client, &url, label, options, follow, 5, per_source_limit).await
+            run_page(
+                client,
+                &url,
+                label,
+                options,
+                follow,
+                limits.search_follow,
+                limits.per_source,
+            )
+            .await
         }
         DiscoveryTask::Github { query } => {
-            run_github(client, &query, options, follow, per_source_limit).await
+            run_github(
+                client,
+                &query,
+                options,
+                follow,
+                limits.github_repos,
+                limits.github_links,
+                limits.per_source,
+            )
+            .await
         }
         DiscoveryTask::Link { url } => {
             run_page(
@@ -1023,8 +1111,8 @@ async fn run_task(
                 "友情链接",
                 options,
                 follow,
-                8,
-                per_source_limit,
+                limits.friend_follow,
+                limits.per_source,
             )
             .await
         }
@@ -1037,7 +1125,7 @@ async fn run_task(
             if default_protocol.is_some() {
                 options.default_protocol = default_protocol;
             }
-            run_page(client, &url, &label, &options, false, 0, per_source_limit).await
+            run_page(client, &url, &label, &options, false, 0, limits.per_source).await
         }
     }
 }
@@ -1113,6 +1201,8 @@ async fn run_github(
     query: &str,
     options: &ProxyImportOptions,
     follow: bool,
+    repo_limit: usize,
+    link_limit: usize,
     per_source_limit: usize,
 ) -> SourceOutcome {
     let mut status = ProxyDiscoverySourceStatus {
@@ -1178,7 +1268,7 @@ async fn run_github(
     }
 
     let mut entries = Vec::new();
-    for item in items.iter().take(5) {
+    for item in items.iter().take(repo_limit) {
         let Some(full_name) = item.get("full_name").and_then(|value| value.as_str()) else {
             continue;
         };
@@ -1202,7 +1292,7 @@ async fn run_github(
         if follow && entries.len() < per_source_limit {
             let links = extract_links(&text, &raw)
                 .into_iter()
-                .take(3)
+                .take(link_limit)
                 .collect::<Vec<_>>();
             let fetched = fetch_pages(client, links).await;
             for (link, page) in fetched {

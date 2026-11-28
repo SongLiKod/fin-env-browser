@@ -694,6 +694,13 @@ export interface ProxyDiscoveryInput {
   defaultProtocol?: 'http' | 'https' | 'socks5';
   maxResults?: number;
   perSourceLimit?: number;
+  tcpTimeoutMs?: number;
+  quickTimeoutMs?: number;
+  publicLists?: string[];
+  githubRepoLimit?: number;
+  githubLinkLimit?: number;
+  searchFollowLimit?: number;
+  friendLinkFollowLimit?: number;
   checkTarget?: string;
   scanId?: string;
   includePublicLists?: boolean;
